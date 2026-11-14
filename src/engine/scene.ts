@@ -3,16 +3,15 @@
 // time (plus internal state advanced only through render() calls, see `stateful`).
 import type * as THREE from 'three';
 import type { AudioData, AudioSample } from './audio';
-import type { Lyrics } from './lyrics';
+import type { Words } from './words';
 import type { Compositor } from './gl';
 import type { PostParams } from './post';
 
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
   audio: AudioData;
-  /** The project's timed words (narration, lyrics, captions); `lyrics` is the same object. */
-  words: Lyrics;
-  lyrics: Lyrics;
+  /** The project's timed words (narration, sung lyrics, captions). */
+  words: Words;
   comp: Compositor;
   W: number;
   H: number;

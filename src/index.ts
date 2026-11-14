@@ -8,7 +8,7 @@ export * from './engine/stroke';
 export * from './engine/lines';
 export * from './engine/spark';
 export * from './engine/post';
-export * from './engine/lyrics';
+export * from './engine/words';
 export * from './engine/audio';
 export { GLSL_COMMON } from './engine/glsl/common';
 export type { Clip, Sources, VideoConfig } from './config';

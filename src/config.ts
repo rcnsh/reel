@@ -4,7 +4,7 @@
 // touches the engine lives inside `timeline()`.
 import type { SceneClass } from './engine/scene';
 import type { PostParams } from './engine/post';
-import type { Lyrics } from './engine/lyrics';
+import type { Words } from './engine/words';
 import type { AudioData } from './engine/audio';
 import type { BlendMode } from './engine/gl';
 
@@ -42,7 +42,7 @@ export interface Clip {
 
 /** What `timeline()` is given: the project's timed words and audio analysis (both empty when it has none). */
 export interface Sources {
-  words: Lyrics;
+  words: Words;
   audio: AudioData;
 }
 
@@ -54,7 +54,7 @@ export interface VideoConfig {
   /** Length in seconds. Default: the audio analysis's duration, else the end of the last clip. */
   duration?: number;
   /**
-   * Timed words (JSON, relative to the project folder; default 'data/lyrics.json' when that file exists) and
+   * Timed words (JSON, relative to the project folder; default 'data/words.json' when that file exists) and
    * audio analysis (default 'data/audio.json' when it exists). `false`: the video has none.
    */
   words?: string | false;

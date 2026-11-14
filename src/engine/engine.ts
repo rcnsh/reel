@@ -2,7 +2,7 @@
 // (with preroll for stateful scenes), composites tracks and transitions, HUD, post.
 import * as THREE from 'three';
 import { AudioData } from './audio';
-import { Lyrics } from './lyrics';
+import { Words } from './words';
 import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, makeRT, clearRT } from './gl';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
 import { Hud, type Caption } from './hud';
@@ -57,7 +57,7 @@ export class Engine {
   renderer: THREE.WebGLRenderer;
   ctx!: SceneCtx;
   audio!: AudioData;
-  lyrics!: Lyrics;
+  words!: Words;
   hud!: Hud;
   post!: Post;
   comp = new Compositor();
@@ -303,8 +303,8 @@ export class Engine {
 
   async init(only?: (e: TimelineEntry) => boolean) {
     const c = this.config;
-    [this.audio, this.lyrics] = await Promise.all([AudioData.load(c.audio), Lyrics.load(c.words), loadFonts(), loadStrokeFonts()]) as [AudioData, Lyrics, void, void];
-    this.timeline = c.timeline({ words: this.lyrics, audio: this.audio });
+    [this.audio, this.words] = await Promise.all([AudioData.load(c.audio), Words.load(c.words), loadFonts(), loadStrokeFonts()]) as [AudioData, Words, void, void];
+    this.timeline = c.timeline({ words: this.words, audio: this.audio });
     const ids = new Set<string>();
     for (const e of this.timeline) {
       if (ids.has(e.id)) throw new Error(`timeline: two clips are called '${e.id}'`);
@@ -319,7 +319,7 @@ export class Engine {
       this.trackRTs.push(t);
       for (const rt of [...t.rts, ...t.mix]) this.maskedRTs.set(rt, { margin: 0 });
     }
-    this.ctx = { renderer: this.renderer, audio: this.audio, lyrics: this.lyrics, words: this.lyrics, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map) };
+    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map) };
     this.post = new Post();
     const captions: Caption[] = this.timeline.filter((e) => e.caption).map((e) => {
       const d = e.caption!.delay ?? 0.3;

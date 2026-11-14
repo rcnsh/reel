@@ -9,7 +9,7 @@ export default class Written extends Scene {
   charTimes: [number, number][] = [];
 
   override init() {
-    const line = this.ctx.lyrics.get('pen writes');
+    const line = this.ctx.words.get('pen writes');
     this.st = strokeText(line.text, 'script', 88);
     // each character is written during its word; spaces take no time
     for (const w of line.words) {

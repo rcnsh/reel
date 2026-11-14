@@ -4,7 +4,7 @@
 // Whisper (faster-whisper, small.en, local) transcribes the recording with a time for every word. Those words are
 // matched against the script, so each script word gets the time it was actually said; words Whisper heard
 // differently (numbers, names) take their time from the matched words either side. Writes the same files as
-// tools/narration.ts: audio/narration.mp3, data/lyrics.json, data/audio.json. Plate breaks shorter than
+// tools/narration.ts: audio/narration.mp3, data/words.json, data/audio.json. Plate breaks shorter than
 // HOLD + CUT_LEAD get silence added, so every plate holds HOLD seconds (default 1.2, env HOLD) after its last
 // word. The first run keeps the scratch track as audio/narration.scratch.mp3.
 import { $ } from 'bun';
@@ -254,7 +254,7 @@ sections.forEach((s, i) => (s.end = i < sections.length - 1 ? sections[i + 1]!.s
 const bpm = 100, period = 60 / bpm;
 const beats: number[] = [];
 for (let b = 0; b * period < duration; b++) beats.push(r3(b * period));
-writeFileSync(path.join(ROOT, 'data/lyrics.json'), JSON.stringify({ lines, notes: `voice: ${path.basename(src)}; word times from faster-whisper small.en` }, null, 1));
+writeFileSync(path.join(ROOT, 'data/words.json'), JSON.stringify({ lines, notes: `voice: ${path.basename(src)}; word times from faster-whisper small.en` }, null, 1));
 writeFileSync(path.join(ROOT, 'data/audio.json'), JSON.stringify({
   duration: r3(duration), bpm, beat_period: period, time_signature: 4, beats, downbeats: beats.filter((_, i) => i % 4 === 0),
   sections, fps: 100, rms: [], low: [], mid: [], high: [], vocal: [], drums: [], bass: [], other: [], onsets: {},

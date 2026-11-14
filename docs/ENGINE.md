@@ -18,7 +18,7 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 
 ## Data
 
-- `words` (`ctx.words`, also `ctx.lyrics`; `src/engine/lyrics.ts`; empty in a project without `data/lyrics.json`): `lines[]` with `text,start,end,words[]`, each word `{w,start,end}` (word-level, aligned to the vocal). Find lines by content, never hard-code times: `const l = this.ctx.lyrics.get('sudden drop')` → `l.words[3].start`. Helpers: `Lyrics.wordProgress(word, t)` (0..1 sung progress), `Lyrics.lineCharProgress(line, t)` (chars sung so far — for per-glyph wipes), `lyrics.findWords('word')`.
+- `words` (`ctx.words`; `src/engine/words.ts`; empty in a project without `data/words.json`): `lines[]` with `text,start,end,words[]`, each word `{w,start,end}` (word-level, aligned to the vocal). Find lines by content, never hard-code times: `const l = this.ctx.words.get('sudden drop')` → `l.words[3].start`. Helpers: `Words.wordProgress(word, t)` (0..1 sung progress), `Words.lineCharProgress(line, t)` (chars sung so far — for per-glyph wipes), `words.findWords('word')`.
 - `audio` (`src/engine/audio.ts`; a silent 100 BPM grid in a project without `data/audio.json`): `beats[]`, `downbeats[]`, `sections[]`, `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `beatBefore(t)` (the beat at or before t: a cut that never lands after a word), `nearestDownbeat(t)`, `events('kick'|'snare'|'hat'|'vocal', t0, t1)`, `env(name, t)` for `rms|low|mid|high|vocal|drums|bass|other` (0..1), `hit(kind, t, halfLife)` decaying pulses.
 - Every `Frame` already carries `f.a` = `{rms,low,mid,high,vocal,drums,bass,other,kick,snare,hat,vonset}` and `f.beat,f.bar,f.beatPhase,f.barPhase`.
 
@@ -35,7 +35,7 @@ export default class MyScene extends Scene {
   text = new Layer2D();
   async init() { /* build geometry, precompute text outlines, etc. */ }
   render(f: Frame, out: THREE.WebGLRenderTarget) {
-    const { renderer, comp, lyrics } = this.ctx;
+    const { renderer, comp, words } = this.ctx;
     this.bg.u.t!.value = f.t;
     this.bg.render(renderer, out);            // fullscreen shader → out (overwrites)
     const c = this.text.ctx; this.text.clear(); /* draw with Canvas2D */
@@ -67,7 +67,7 @@ Rules:
 ## Typography
 
 - Proportional text gets the font's kerning: whole strings through Canvas2D get it for free; glyph-by-glyph drawing must use `layout()` / `glyphX()`. Adjacent runs in different fonts or sizes have no kerning between them: set that gap by eye.
-- Lyrics come with typographic punctuation (`don’t`, `’cause`, `“Just`): `Word.w` and `Line.text` go through `smart()`; `lyrics.get()` matches straight or curly quotes. Hardcoded display strings use ’ “ ” … – — × − too. Mono text (IBM Plex Mono) is the UI/terminal voice and keeps typewriter quotes (`plain()` for a lyric shown as typed input).
+- Timed words come with typographic punctuation (`don’t`, `’cause`, `“Just`): `Word.w` and `Line.text` go through `smart()`; `words.get()` matches straight or curly quotes. Hardcoded display strings use ’ “ ” … – — × − too. Mono text (IBM Plex Mono) is the UI/terminal voice and keeps typewriter quotes (`plain()` for a lyric shown as typed input).
 - No outlined or haloed type.
 - `util.ts`: `clamp, lerp, remap, smoothstep, ease.*, prog(x,a,b,ease), keys(t, [[t,v,ease],...]), springStep, pulse, mulberry32, hash, noise1/2/3, fbm1/2, polylineLengths, pointAtLength, window01`.
 - `hud.ts`: the global HUD: crop marks (`post.frame`) and captions from clips (`Clip.caption`), both off until a scene asks (`post.hud`).

@@ -1,4 +1,4 @@
-// Word-timed lyrics (data/lyrics.json) with queries for karaoke rendering.
+// Timed words (data/words.json: narration, sung lyrics or captions, in lines) with queries for rendering text in step with them.
 import { smart } from './type';
 import { fetchJSON } from './audio';
 
@@ -8,7 +8,7 @@ export interface Word {
   end: number;
   conf?: number;
   syl?: [number, number][];
-  /** filled in by Lyrics: */
+  /** filled in by Words: */
   line: number;
   index: number; // index within line
   gi: number; // global word index
@@ -21,7 +21,7 @@ export interface Line {
   words: Word[];
 }
 
-export class Lyrics {
+export class Words {
   lines: Line[];
   words: Word[];
   constructor(j: { lines: Omit<Line, 'words'> & { words: Omit<Word, 'line' | 'index' | 'gi'>[] }[] | any[] }) {
@@ -37,13 +37,13 @@ export class Lyrics {
     this.words.forEach((w, i) => (w.gi = i));
   }
 
-  /** `src`: the JSON's path in the project, false for none; by default data/lyrics.json if the project has one. */
-  static async load(src?: string | false): Promise<Lyrics> {
-    if (src === false) return new Lyrics({ lines: [] });
-    const j = await fetchJSON(src ?? 'data/lyrics.json');
-    if (j) return new Lyrics(j as { lines: any[] });
+  /** `src`: the JSON's path in the project, false for none; by default data/words.json if the project has one. */
+  static async load(src?: string | false): Promise<Words> {
+    if (src === false) return new Words({ lines: [] });
+    const j = await fetchJSON(src ?? 'data/words.json');
+    if (j) return new Words(j as { lines: any[] });
     if (src) throw new Error(`timed words not found: ${src}`);
-    return new Lyrics({ lines: [] });
+    return new Words({ lines: [] });
   }
 
   /** The line being sung at t (or null in gaps). */
@@ -110,7 +110,7 @@ export class Lyrics {
   static lineCharProgress(l: Line, t: number): number {
     let chars = 0;
     for (const w of l.words) {
-      const p = Lyrics.wordProgress(w, t);
+      const p = Words.wordProgress(w, t);
       chars += p * w.w.length;
       if (p < 1) break;
       chars += 1; // the space

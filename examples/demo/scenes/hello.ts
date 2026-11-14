@@ -1,6 +1,6 @@
 // Demo plate: a shader background (paper with engraved hatching) and the line set in type as it is spoken.
 import type * as THREE from 'three';
-import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, rgba, Lyrics, ease, prog } from 'reel';
+import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, rgba, Words, ease, prog } from 'reel';
 
 export default class Hello extends Scene {
   bg = new FSPass(/* glsl */ `
@@ -14,14 +14,14 @@ export default class Hello extends Scene {
   text = new Layer2D();
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
-    const { renderer, comp, lyrics } = this.ctx;
+    const { renderer, comp, words } = this.ctx;
     this.bg.u.t!.value = f.t;
     this.bg.render(renderer, out);
 
     const c = this.text.ctx;
     this.text.clear();
-    const line = lyrics.get('function of time');
-    const shown = line.text.slice(0, Math.ceil(Lyrics.lineCharProgress(line, f.t)));
+    const line = words.get('function of time');
+    const shown = line.text.slice(0, Math.ceil(Words.lineCharProgress(line, f.t)));
     const rise = prog(f.lt, 0, 0.8, ease.outExpo);
     c.font = font(F.archivo(87.5, 900), 96);
     c.textAlign = 'center';

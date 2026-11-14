@@ -31,7 +31,7 @@ export default defineVideo({
 `examples/layers` is that kind of project: silent, vertical, two tracks. `examples/demo` is a narrated one, made like this:
 
 1. Write `narration.txt`: plates, each a `# name` header followed by its lines.
-2. Time it. Either a scratch track from macOS `say` (`reel narrate`), or a real recording aligned with Whisper (`reel align <recording>`). Both write `audio/narration.mp3`, `data/lyrics.json` (every word with its time) and `data/audio.json` (one section per plate).
+2. Time it. Either a scratch track from macOS `say` (`reel narrate`), or a real recording aligned with Whisper (`reel align <recording>`). Both write `audio/narration.mp3`, `data/words.json` (every word with its time) and `data/audio.json` (one section per plate).
 3. Write a scene per plate, `scenes/<plate>.ts`. The config's `clipsFromSections` shows each plate with the scene of the same name and skips plates without one. Find words by their text (`ctx.words.get('…')`), never by hard-coded times, so re-timing the voice moves everything with it.
 4. Preview, check stills, render, mix.
 
@@ -39,7 +39,7 @@ export default defineVideo({
 
 `reel analyze <song>` analyses a song into `data/audio.json`: a constant-tempo beat grid, downbeats, 100 fps loudness envelopes (mix bands plus harmonic/percussive proxies for drums, bass, other and vocal), kick, snare, hat and (proxy) vocal onsets, and sections. That is what the engine's music helpers read (`f.beat`, `f.bar`, `f.a.kick`, `audio.env`, `audio.hit`, `audio.beatBefore`, `audio.nearestDownbeat`), so scenes can pulse on the kick and cuts can land on the beat. Sections come from `--sections sections.json` (`[{"name": "intro", "bar": 0}, …]`, named after your scenes), or structural segmentation (`part1`, `part2`, …). The song becomes the track the preview plays and the export muxes. For a narrated video with a music bed, `--keep-sections --offset <s>` keeps the narration's timing and adds the bed's beats from where it starts. Run `reel analyze --help` for the flags.
 
-Lyrics for a sung track still go through `reel align` (Whisper word times), which suits clear vocals; it is not a forced aligner.
+Words for a sung track still go through `reel align` (Whisper word times), which suits clear vocals; it is not a forced aligner.
 
 ## Layout
 

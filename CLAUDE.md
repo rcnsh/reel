@@ -18,7 +18,7 @@ Where to read before acting:
 ## How the pieces connect
 
 ```
-<project>/narration.txt ──reel narrate (say) or reel align (Whisper)──▶ audio/narration.mp3, data/lyrics.json (words + times)
+<project>/narration.txt ──reel narrate (say) or reel align (Whisper)──▶ audio/narration.mp3, data/words.json (words + times)
 song ──reel analyze──▶ audio/<song>  +  data/audio.json  (beats, envelopes, onsets, sections, track)
 
 <project>/reel.config.ts ─▶ format (size, fps) + timeline(): clips on tracks, each naming a scene module
@@ -31,10 +31,10 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 ```
 
 - The config is the edit. `size` and `fps` are read by the CLI outside the browser (so a config's top level is plain data: scenes are lazy imports, engine calls live inside `timeline()`), and reach the page as `__REEL_FORMAT__`.
-- Audio and words are optional. Without `data/audio.json` and `data/lyrics.json` a project is silent, its sources are empty and its length is `duration` or the end of its last clip.
+- Audio and words are optional. Without `data/audio.json` and `data/words.json` a project is silent, its sources are empty and its length is `duration` or the end of its last clip.
 - `data/audio.json` `track` names the sound the preview plays and the export muxes (default `audio/narration.mp3`). Without `--keep-sections`, `reel analyze` points it at the song.
 - Scenes import the engine as `reel` (`src/index.ts`) and configs import `reel/config` (`src/config.ts`): aliases in the dev server and `tsconfig.json`.
-- An example's generated files are committed so it renders from a clone: `audio/narration.mp3`, `data/lyrics.json`, `data/audio.json`, `data/cues.json`. Regenerate them with their tool rather than editing them by hand.
+- An example's generated files are committed so it renders from a clone: `audio/narration.mp3`, `data/words.json`, `data/audio.json`, `data/cues.json`. Regenerate them with their tool rather than editing them by hand.
 
 ## Rules
 
