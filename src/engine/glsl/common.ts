@@ -1,11 +1,11 @@
-import { LIN } from '../palette';
+import { LIN, TONE, glslName } from '../palette';
 import { SCALE } from '../format';
 
 const v3 = (c: [number, number, number]) => `vec3(${c.map((x) => x.toFixed(5)).join(',')})`;
 
 /**
  * Shared GLSL (ES 3.0) prepended to every FSPass. Also importable into custom three.js
- * ShaderMaterials. Palette colours are LINEAR RGB.
+ * ShaderMaterials. Palette colours are LINEAR RGB, from the project's theme.
  */
 export const GLSL_COMMON = /* glsl */ `
 #define PI 3.14159265359
@@ -15,17 +15,8 @@ export const GLSL_COMMON = /* glsl */ `
 // meant to be N logical px: grain/dither cells, hatch spacing, pixel-snapped patterns).
 const float PX_SCALE = ${SCALE.toFixed(1)};
 #define FRAG_PX (gl_FragCoord.xy / PX_SCALE)
-const vec3 C_INK = ${v3(LIN.ink)};
-const vec3 C_INK2 = ${v3(LIN.ink2)};
-const vec3 C_GRAPHITE = ${v3(LIN.graphite)};
-const vec3 C_ASH = ${v3(LIN.ash)};
-const vec3 C_BONE = ${v3(LIN.bone)};
-const vec3 C_SIGNAL = ${v3(LIN.signal)};
-const vec3 C_EMBER = ${v3(LIN.ember)};
-const vec3 C_BLOOD = ${v3(LIN.blood)};
-const vec3 C_ACID = ${v3(LIN.acid)};
-const vec3 C_PAPER = ${v3(LIN.paper)};
-const vec3 C_RULE = ${v3(LIN.rule)};
+// the theme's palette (linear RGB): C_BG, C_FG, C_ACCENT, C_ACCENT_HI, C_ACCENT_LO and the theme's own keys
+${Object.entries(LIN).map(([k, c]) => `const vec3 ${glslName(k)} = ${v3(c)};`).join('\n')}
 
 /** Rotated-grid supersample offset k (0..3) within one pixel, in pixels. See SS_TAP (gl.ts). */
 vec2 rgss(int k) { return k == 0 ? vec2(0.125, -0.375) : k == 1 ? vec2(0.375, 0.125) : k == 2 ? vec2(-0.125, 0.375) : vec2(-0.375, -0.125); }
@@ -157,12 +148,12 @@ float engrave(vec2 uv, float darkness, float freq, float angle) {
 // ---- colour ----
 vec3 toSRGB(vec3 c) { return mix(12.92 * c, 1.055 * pow(max(c, 0.0), vec3(1.0 / 2.4)) - 0.055, step(0.0031308, c)); }
 vec3 toLinear(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
-/** Signal-orange heat ramp: 0 = ink, 0.5 = signal, 1 = white-hot. */
+/** Heat ramp in the accent: 0 = the theme's dark colour, 0.5 = accent, 1 = white-hot. */
 vec3 heat(float x) {
   x = sat(x);
-  vec3 c = mix(C_INK, C_BLOOD, smoothstep(0.0, 0.3, x));
-  c = mix(c, C_SIGNAL, smoothstep(0.25, 0.55, x));
-  c = mix(c, C_EMBER, smoothstep(0.55, 0.8, x));
+  vec3 c = mix(${glslName(TONE.dark)}, C_ACCENT_LO, smoothstep(0.0, 0.3, x));
+  c = mix(c, C_ACCENT, smoothstep(0.25, 0.55, x));
+  c = mix(c, C_ACCENT_HI, smoothstep(0.55, 0.8, x));
   return mix(c, vec3(1.0, 0.93, 0.85), smoothstep(0.8, 1.0, x));
 }
 `;

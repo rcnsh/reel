@@ -1,4 +1,4 @@
-// Demo plate: a shader background (paper with engraved hatching) and the line set in type as it is spoken.
+// Demo plate: a shader background (the theme's bg with engraved hatching in its fg) and the line set in type as it is spoken.
 import type * as THREE from 'three';
 import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, rgba, Words, ease, prog } from 'reel';
 
@@ -8,7 +8,7 @@ export default class Hello extends Scene {
     void main() {
       vec2 p = FRAG_PX / 1080.0; // (a fixed unit, so the texture keeps its size at any frame size)
       float shade = 0.18 + 0.12 * snoise(vec3(p * 2.0, t * 0.1));
-      vec3 col = mix(C_PAPER, C_INK, hatch(p.x * 90.0 + p.y * 40.0, shade) * 0.35);
+      vec3 col = mix(C_BG, C_FG, hatch(p.x * 90.0 + p.y * 40.0, shade) * 0.35);
       fragColor = vec4(col, 1.0);
     }`, { t: { value: 0 } });
   text = new Layer2D();
@@ -25,7 +25,7 @@ export default class Hello extends Scene {
     const rise = prog(f.lt, 0, 0.8, ease.outExpo);
     c.font = font(F.archivo(87.5, 900), 96);
     c.textAlign = 'center';
-    c.fillStyle = rgba('ink', rise);
+    c.fillStyle = rgba('fg', rise);
     c.fillText(shown, W / 2, H / 2 + (1 - rise) * 40);
     comp.draw(renderer, this.text.upload(), out);
   }

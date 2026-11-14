@@ -11,4 +11,6 @@ export * from './engine/post';
 export * from './engine/words';
 export * from './engine/audio';
 export { GLSL_COMMON } from './engine/glsl/common';
+export { themes, extendTheme } from './themes';
+export type { Theme, ThemeName, HudParams } from './themes';
 export type { Clip, Sources, VideoConfig } from './config';

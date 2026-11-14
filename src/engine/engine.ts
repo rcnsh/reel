@@ -1,11 +1,11 @@
 // The engine: owns the renderer, loads the scenes of the timeline's clips, renders any time deterministically
-// (with preroll for stateful scenes), composites tracks and transitions, HUD, post.
+// (with preroll for stateful scenes), composites tracks and transitions, post.
 import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Words } from './words';
 import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, makeRT, clearRT } from './gl';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
-import { Hud, type Caption } from './hud';
+import { THEME } from './palette';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene';
 import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
@@ -13,6 +13,9 @@ import type { Clip, VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
 export type TimelineEntry = Clip;
+
+/** The id of the clip that shows the theme's overlay. */
+export const OVERLAY_ID = 'overlay';
 
 /** A track's targets: three for its scenes, two for transitions (a third overlapping clip reads one mix and writes the other). */
 interface TrackRTs { rts: THREE.WebGLRenderTarget[]; mix: THREE.WebGLRenderTarget[] }
@@ -58,7 +61,6 @@ export class Engine {
   ctx!: SceneCtx;
   audio!: AudioData;
   words!: Words;
-  hud!: Hud;
   post!: Post;
   comp = new Compositor();
   loaded = new Map<string, Loaded>();
@@ -313,6 +315,13 @@ export class Engine {
     }
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
+    // the theme's overlay: the HUD scene over the whole video, on a track above every clip
+    let overlay: TimelineEntry | null = null;
+    if (THEME.overlay) {
+      if (ids.has(OVERLAY_ID)) throw new Error(`timeline: '${OVERLAY_ID}' is the theme overlay's clip; call yours something else`);
+      overlay = { id: OVERLAY_ID, scene: () => import('../scenes/hud'), start: 0, end: this._duration, track: Math.max(0, ...this.timeline.map((e) => e.track ?? 0)) + 1, params: { ...THEME.overlay } };
+      this.timeline.push(overlay);
+    }
     const tracks = new Set(this.timeline.map((e) => e.track ?? 0)).size;
     for (let i = 0; i < Math.max(1, tracks); i++) {
       const t: TrackRTs = { rts: [makeRT(), makeRT(), makeRT()], mix: [makeRT(), makeRT()] };
@@ -321,12 +330,8 @@ export class Engine {
     }
     this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map) };
     this.post = new Post();
-    const captions: Caption[] = this.timeline.filter((e) => e.caption).map((e) => {
-      const d = e.caption!.delay ?? 0.3;
-      return { start: e.start + d, end: e.start + d + (e.caption!.dur ?? 4.5), fig: e.caption!.fig, text: e.caption!.text };
-    });
-    this.hud = new Hud(captions);
-    const entries = only ? this.timeline.filter(only) : this.timeline;
+    // (the overlay is part of the look: loaded with any --only)
+    const entries = only ? this.timeline.filter((e) => e === overlay || only(e)) : this.timeline;
     await Promise.all(entries.map((e) => this.loadEntry(e)));
   }
 
@@ -369,7 +374,7 @@ export class Engine {
   }
 
   /**
-   * Render song time t. `dt` is the nominal frame step (1/fps). A non-sequential t counts as a
+   * Render time t. `dt` is the nominal frame step (1/fps). A non-sequential t counts as a
    * seek: stateful scenes are reset and fast-forwarded.
    *
    * Motion blur (offline export; the preview uses 1 sample): `samples` > 1 renders that many sub-frames
@@ -406,7 +411,7 @@ export class Engine {
       // shaders that supersample share their 4 taps across the sub-frames when every set holds a multiple
       // of 4 (rotated by k/4 so a tap doesn't always land in the same part of the shutter)
       const cycle = adaptive || samples % 4 === 0;
-      // post parameters (shake, flash, zoom, fades, the HUD's paper mode) are read at one point of the shutter,
+      // post parameters (shake, flash, zoom, fades) are read at one point of the shutter,
       // 1/8 of it after t: where the video was tuned (4 sub-frames, the third) and a point every adaptive set
       // includes. (A flash that starts between t and there shows at its peak on this frame, not one frame on.)
       const POST_U = 0.125;
@@ -414,7 +419,7 @@ export class Engine {
       // sub-frame k at shutter offset u (-0.5..0.5), summed into `into`; `step` = the sub-frame spacing
       const sub = (k: number, u: number, into: THREE.WebGLRenderTarget, step: number) => {
         SS_TAP.value = cycle ? (k + (k >> 2)) % 4 : -1;
-        // (clamped at 0: before the song no scene is active, and frame 0 would come out half black)
+        // (clamped at 0: before the video no scene is active, and frame 0 would come out half black)
         const ts = Math.max(0, t + dt * shutter * u);
         let res: ReturnType<Engine['composite']>;
         if (!this.masking) res = this.composite(ts, step, seeked && k === 0);
@@ -517,8 +522,7 @@ export class Engine {
       outTex = this.avgRT.texture;
     }
     this.lastSamples = n;
-    const hudTex = this.hud.draw(t, { opacity: post.hud, frame: post.frame, paper: post.paper });
-    this.post.render(r, outTex, hudTex, this.finalRT, post, t);
+    this.post.render(r, outTex, this.finalRT, post, t);
     this.lastPost = post;
     if (toScreen) {
       this.blit.u.src!.value = this.finalRT.texture;

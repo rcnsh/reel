@@ -62,7 +62,7 @@ export class Words {
   linesIn(t0: number, t1: number): Line[] {
     return this.lines.filter((l) => l.end > t0 && l.start < t1);
   }
-  /** Lines whose text includes `s` (case-insensitive, straight or curly quotes). Handy for finding a lyric by content. */
+  /** Lines whose text includes `s` (case-insensitive, straight or curly quotes). Handy for finding a line by content. */
   find(s: string): Line[] {
     const q = fold(s);
     return this.lines.filter((l) => fold(l.text).includes(q));
@@ -70,7 +70,7 @@ export class Words {
   /** First line containing `s`; throws if missing (fail loudly while authoring). */
   get(s: string, nth = 0): Line {
     const l = this.find(s)[nth];
-    if (!l) throw new Error(`lyric not found: ${s}`);
+    if (!l) throw new Error(`no line of the words contains '${s}'`);
     return l;
   }
   wordAt(t: number): Word | null {

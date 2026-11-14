@@ -23,17 +23,18 @@ song ──reel analyze──▶ audio/<song>  +  data/audio.json  (beats, envel
 
 <project>/reel.config.ts ─▶ format (size, fps) + timeline(): clips on tracks, each naming a scene module
 cli/server.ts: Vite serving index.html + src/main.ts, with the project mapped in (@project, its files at the site root)
-Engine.init ─▶ load the clips' scenes ─▶ each frame: scenes render HDR into targets ─▶ transitions per track
-            ─▶ tracks stacked ─▶ HUD ─▶ post
+Engine.init ─▶ load the clips' scenes (+ the theme's overlay clip) ─▶ each frame: scenes render HDR into targets
+            ─▶ transitions per track ─▶ tracks stacked ─▶ post (defaults from the theme)
 src/main.ts: preview player (reel dev) or export API window.__reel (?export=1)
 cli/reel.ts drives window.__reel: info | still | sheet | video | events | perf | gpu
 reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cue sounds under the video
 ```
 
-- The config is the edit. `size` and `fps` are read by the CLI outside the browser (so a config's top level is plain data: scenes are lazy imports, engine calls live inside `timeline()`), and reach the page as `__REEL_FORMAT__`.
+- The config is the edit. `size`, `fps` and `theme` are read by the CLI outside the browser (so a config's top level is plain data: scenes are lazy imports, engine calls live inside `timeline()`), and reach the page as the compile-time constants `__REEL_FORMAT__` and `__REEL_THEME__` (the theme resolved by `src/themes.ts`). Being constants, they are in place before any module runs, which is what lets `glsl/common.ts` bake the palette into shader strings at import time.
+- The engine has no look of its own. The theme (`print`, `film`, `neutral` (the default) or an object) gives the palette, the post defaults and an optional overlay, which the engine places as a clip called `overlay` on a track above every other. The HUD (crop marks, captions) is an ordinary scene, `src/scenes/hud.ts` (`reel/scenes/hud`).
 - Audio and words are optional. Without `data/audio.json` and `data/words.json` a project is silent, its sources are empty and its length is `duration` or the end of its last clip.
 - `data/audio.json` `track` names the sound the preview plays and the export muxes (default `audio/narration.mp3`). Without `--keep-sections`, `reel analyze` points it at the song.
-- Scenes import the engine as `reel` (`src/index.ts`) and configs import `reel/config` (`src/config.ts`): aliases in the dev server and `tsconfig.json`.
+- Scenes import the engine as `reel` (`src/index.ts`), configs import `reel/config` (`src/config.ts`), and both can name the engine's scenes as `reel/scenes/<name>` (`src/scenes/`): aliases in the dev server and `tsconfig.json`.
 - An example's generated files are committed so it renders from a clone: `audio/narration.mp3`, `data/words.json`, `data/audio.json`, `data/cues.json`. Regenerate them with their tool rather than editing them by hand.
 
 ## Rules
@@ -41,8 +42,8 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 - **Deterministic.** A scene's output depends on `f.t` only. Randomness comes from `hash`/`mulberry32` with fixed seeds; per-frame jitter uses `frameIdx(t)`, which holds across a frame's shutter, and a frame step is `1 / FPS`, never `1 / 60`. `--samples auto` renders sub-frames out of order and in any number, so nothing may count `render()` calls. Simulation state means `stateful = true`, and the engine then refuses adaptive sampling (render such a video with a fixed `--samples N`).
 - **Anchored to words.** Scenes find timing by text: `ctx.words.get('some words')` (throws when the line is missing, so a script edit fails loudly) and its word times. Times typed as numbers break the moment the voice is re-timed.
 - **Logical pixels.** Scenes lay out in logical px, `W`×`H` (the `--size`, default 1920×1080), at every output scale; `PW`/`PH`, `gl_FragCoord`, `fwidth` and canvas backing sizes are physical. GLSL uses `FRAG_PX`, `PX_SCALE` and `pxLine` (`docs/ENGINE.md`, "Output scale").
-- **Linear colour.** Render targets are HalfFloat linear HDR. Colours come from `src/engine/palette.ts`: `LIN.<key>` for GL, `C_<KEY>` in GLSL, `rgba('<key>', a)` for Canvas2D.
-- **Project-neutral engine.** `src/engine/` holds only what any video could use. A video's own colours, story helpers, data and motifs live in its project (shared helpers as `scenes/_<name>.ts`, which `clipsFromSections` skips because no section is named `_…`).
+- **Linear colour, from the theme.** Render targets are HalfFloat linear HDR. Colours come from the theme's palette (`src/engine/palette.ts`): `LIN.<key>` for GL, `C_<KEY>` in GLSL, `rgba('<key>', a)` for Canvas2D. Scenes meant to follow any theme use the keys every palette has: `bg`, `fg`, `accent`, `accentHi`, `accentLo`. The engine's own colours (flash, invert, heat ramp, spark, HUD) come from those keys too, never from a theme's extra keys.
+- **Project-neutral engine.** `src/engine/` holds only what any video could use, and no look: colours and grades belong to themes (`src/themes.ts`). A video's own colours, story helpers, data and motifs live in its project (shared helpers as `scenes/_<name>.ts`, which `clipsFromSections` skips because no section is named `_…`).
 - **Upper tracks are transparent.** A scene on track 0 fully overwrites its target; a scene on a higher track clears it to transparent (`clearRT(renderer, out, [0, 0, 0], 0)`) and draws premultiplied over that, so the tracks below show through.
 - **Sound by cue.** A scene that wants a sound calls `cue(kind, t)` in `init()`; `mix.json` maps kinds to files in `audio/`. Scenes never play audio.
 - **Licences travel with the code.** `LICENSE` (upstream MIT, Giacomo Magnanini) covers the engine; `public/fonts/OFL-*.txt` and the stroke fonts' file headers cover the fonts. Keep them, and keep the upstream credit in `README.md` and `docs/ENGINE.md`.
@@ -69,8 +70,9 @@ Run all that apply before reporting work done:
 
 1. `bun run typecheck`: one tsconfig over `src/`, `cli/`, `tools/` and `examples/`.
 2. Stills of every clip you touched, looked at with the Read tool: `reel still --project <p> --t <times> --only <clip>`. `reel sheet --cuts` checks every cut at once.
-3. Export path changes: both examples end to end. `reel video --project examples/demo --samples auto --preset veryfast --out <raw.mp4>`, then `reel events`, then `reel mix <raw.mp4> <out.mp4>`; and `reel video --project examples/layers --samples auto --preset veryfast` (tracks, a crossfade, no audio, vertical, 30 fps).
-4. Python tool changes: run the tool on real input. For `analyze.py`, a synthetic track with a known tempo and first downbeat shows whether the grid and bar phase are right; a lead-in, a break and a non-integer tempo are the cases that have broken it before.
+3. Theme or post changes: the print theme must still render the demo byte for byte as before. Stills before and after (`reel still --project examples/demo --t 0.4,2.5,5,7.3`) compared with a pixel diff.
+4. Export path changes: both examples end to end. `reel video --project examples/demo --samples auto --preset veryfast --out <raw.mp4>`, then `reel events`, then `reel mix <raw.mp4> <out.mp4>`; and `reel video --project examples/layers --samples auto --preset veryfast` (tracks, a crossfade, the film theme's overlay, no audio, vertical, 30 fps).
+5. Python tool changes: run the tool on real input. For `analyze.py`, a synthetic track with a known tempo and first downbeat shows whether the grid and bar phase are right; a lead-in, a break and a non-integer tempo are the cases that have broken it before.
 
 No test suite exists yet; these renders are the tests.
 

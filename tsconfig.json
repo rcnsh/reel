@@ -27,6 +27,9 @@
       "reel/config": [
         "./src/config.ts"
       ],
+      "reel/scenes/*": [
+        "./src/scenes/*"
+      ],
       "@project/*": [
         "./examples/demo/*"
       ]

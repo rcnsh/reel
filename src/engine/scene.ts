@@ -1,4 +1,4 @@
-// Scene API. A scene owns a time window of the song and renders HDR linear colour
+// Scene API. A scene owns a time window of the video and renders HDR linear colour
 // into the render target it is given. Everything must be a deterministic function of
 // time (plus internal state advanced only through render() calls, see `stateful`).
 import type * as THREE from 'three';
@@ -15,10 +15,10 @@ export interface SceneCtx {
   comp: Compositor;
   W: number;
   H: number;
-  /** Timeline entry id and its free-form params (lets one scene module serve several entries). */
+  /** The clip's id and its free-form params (lets one scene module serve several clips). */
   id: string;
   params: Record<string, unknown>;
-  /** Entry window (song seconds). */
+  /** The clip's window (seconds). */
   start: number;
   end: number;
   /**
@@ -30,7 +30,7 @@ export interface SceneCtx {
 }
 
 export interface Frame {
-  /** Song time (s). */
+  /** Time in the video (s). */
   t: number;
   /** Time since the previous rendered frame (1/fps on export; 0 after a seek). */
   dt: number;

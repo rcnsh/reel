@@ -7,6 +7,10 @@ import type { PostParams } from './engine/post';
 import type { Words } from './engine/words';
 import type { AudioData } from './engine/audio';
 import type { BlendMode } from './engine/gl';
+import type { Theme, ThemeName } from './themes';
+
+export { themes, extendTheme, resolveTheme } from './themes';
+export type { Theme, ThemeName, HudParams, ResolvedTheme } from './themes';
 
 /** A scene placed on the timeline. */
 export interface Clip {
@@ -34,8 +38,6 @@ export interface Clip {
   post?: Partial<PostParams>;
   /** Free-form values handed to the scene as ctx.params (one scene module can serve several clips). */
   params?: Record<string, unknown>;
-  /** Caption shown bottom-right at the start of the clip (drawn by the HUD). */
-  caption?: { fig: string; text: string; dur?: number; delay?: number };
   /** Cap on adaptive motion-blur sub-frames while the clip is on screen (for noise that converges slowly). */
   maxSamples?: number;
 }
@@ -51,6 +53,11 @@ export interface VideoConfig {
   size?: [number, number];
   /** Output frames per second (default 60). */
   fps?: number;
+  /**
+   * The look: 'print', 'film', 'neutral' (the default) or a theme object (`extendTheme('print', { palette: { accent: '#0a7' } })`).
+   * It sets the palette scenes colour with, the default post-processing and an overlay over every clip.
+   */
+  theme?: ThemeName | Theme;
   /** Length in seconds. Default: the audio analysis's duration, else the end of the last clip. */
   duration?: number;
   /**

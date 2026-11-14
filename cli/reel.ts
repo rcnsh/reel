@@ -38,6 +38,7 @@ Flags for every rendering command
   --shutter 0.5        the share of the frame time the sub-frames span
   --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project)
   --size WxH, --fps N  override the project's frame size and rate
+  --theme <name>       render with a built-in theme (print, film, neutral) instead of the project's
   --headed             show the browser
   --json               machine-readable output
 
@@ -82,7 +83,7 @@ try {
   parsed = parseArgs({
     args: argv.slice(1), strict: true, allowPositionals: false,
     options: {
-      project: str, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str, shutter: str, scale: str, size: str, fps: str,
+      project: str, theme: str, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str, shutter: str, scale: str, size: str, fps: str,
       headed: bool, json: bool, help: bool, t: str, out: str, from: str, to: str, n: str, cols: str, times: str, cuts: bool,
       crf: str, preset: str, x264: str, noaudio: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, port: str,
     },
@@ -117,13 +118,14 @@ const report: { ok: boolean; errors: string[]; logs: string[]; [k: string]: unkn
 const say = (s: string) => { if (!V.json) console.log(s); };
 
 if (mode === 'dev') {
-  const srv = await startServer(PROJECT, { port: num('port', 5173), hmr: true });
-  console.log(`${srv.url}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
+  let srv;
+  try { srv = await startServer(PROJECT, { port: num('port', 5173), hmr: true, theme: A.theme }); } catch (e) { fail((e as Error).message); }
+  console.log(`${srv!.url}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
   await new Promise(() => {});
 }
 
 let srv!: Awaited<ReturnType<typeof startServer>>;
-try { srv = await startServer(PROJECT); } catch (e) { fail((e as Error).message); }
+try { srv = await startServer(PROJECT, { theme: A.theme }); } catch (e) { fail((e as Error).message); }
 let LW = srv.format.w, LH = srv.format.h;
 if (A.size) {
   [LW, LH] = A.size.split('x').map(Number) as [number, number];
@@ -401,8 +403,8 @@ try {
         say(String(report.gpu));
       } else if (mode === 'info') {
         const ev = await P();
-        Object.assign(report, { project: PROJECT, size: [LW, LH], fps: FPS, scale: SCALE, ...ev });
-        say(`${PROJECT}\n${LW}x${LH} at ${FPS} fps, ${ev.duration.toFixed(3)} s, ${ev.track ?? 'no audio track'}`);
+        Object.assign(report, { project: PROJECT, size: [LW, LH], fps: FPS, scale: SCALE, theme: srv.theme.name, ...ev });
+        say(`${PROJECT}\n${LW}x${LH} at ${FPS} fps, ${ev.duration.toFixed(3)} s, ${ev.track ?? 'no audio track'}, theme ${srv.theme.name}`);
         for (const e of ev.timeline) say(`  ${e.id.padEnd(16)} ${e.start.toFixed(3).padStart(9)} to ${e.end.toFixed(3).padStart(9)}  track ${e.track}`);
         say(`${ev.cues.length} sound cues`);
       } else if (mode === 'still') {

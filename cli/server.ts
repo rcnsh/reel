@@ -1,10 +1,12 @@
 // The dev server a project is rendered through: Vite serving the engine's page (index.html, src/main.ts) with the
 // project folder mapped in. The project's config is `@project/reel.config`, its scenes import the engine as
-// `reel`, and its files (audio/, data/, assets/ ...) are served from the site root.
+// `reel` (and its scenes as `reel/scenes/<name>`), and its files (audio/, data/, assets/ ...) are served from the
+// site root. The config's format and theme reach the page as compile-time constants (__REEL_FORMAT__, __REEL_THEME__).
 import { createServer, type ViteDevServer } from 'vite';
 import { existsSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf, type VideoConfig } from '../src/config';
+import { resolveTheme, type ResolvedTheme } from '../src/themes';
 
 export const ENGINE = path.resolve(import.meta.dir, '..');
 
@@ -29,7 +31,7 @@ export function projectDir(dir: string) {
 export async function loadConfig(project: string): Promise<VideoConfig> {
   const src = await Bun.file(path.join(project, 'reel.config.ts')).text();
   const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(src)
-    .replace(/(from\s*|import\s*\(\s*)(["'])reel(\/config)?\2/g, (_, pre: string, q: string, sub?: string) => `${pre}${q}${path.join(ENGINE, sub ? 'src/config.ts' : 'src/index.ts')}${q}`);
+    .replace(/(from\s*|import\s*\(\s*)(["'])reel(\/config|\/scenes\/[\w-]+)?\2/g, (_, pre: string, q: string, sub?: string) => `${pre}${q}${path.join(ENGINE, sub === '/config' ? 'src/config.ts' : sub ? `src${sub}.ts` : 'src/index.ts')}${q}`);
   // (beside the config, so its relative imports resolve; removed once loaded)
   const file = path.join(project, `.reel.config.${Bun.hash(js).toString(36)}.mjs`);
   writeFileSync(file, js);
@@ -41,20 +43,23 @@ export async function loadConfig(project: string): Promise<VideoConfig> {
 
 /**
  * Start the server for `project`. `hmr: false` for renders: a file saved mid-render must not reload the page.
- * `port: 0` picks a free port.
+ * `port: 0` picks a free port. `theme` names a built-in theme to use instead of the config's.
  */
-export async function startServer(project: string, opts: { port?: number; hmr?: boolean } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; stop: () => Promise<void> }> {
-  const format = formatOf(await loadConfig(project));
+export async function startServer(project: string, opts: { port?: number; hmr?: boolean; theme?: string } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
+  const config = await loadConfig(project);
+  const format = formatOf(config);
+  const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
   const server = await createServer({
     configFile: false,
     root: ENGINE,
     publicDir: path.join(ENGINE, 'public'),
     logLevel: 'error',
     clearScreen: false,
-    define: { __REEL_FORMAT__: JSON.stringify(format) },
+    define: { __REEL_FORMAT__: JSON.stringify(format), __REEL_THEME__: JSON.stringify(theme) },
     resolve: {
       alias: [
         { find: /^reel\/config$/, replacement: path.join(ENGINE, 'src/config.ts') },
+        { find: /^reel\/scenes\/([\w-]+)$/, replacement: path.join(ENGINE, 'src/scenes/$1.ts') },
         { find: /^reel$/, replacement: path.join(ENGINE, 'src/index.ts') },
         { find: /^@project\//, replacement: project + '/' },
       ],
@@ -92,5 +97,5 @@ export async function startServer(project: string, opts: { port?: number; hmr?: 
   await server.listen();
   const addr = server.httpServer!.address();
   const port = typeof addr === 'object' && addr ? addr.port : opts.port;
-  return { url: `http://localhost:${port}`, server, format, stop: () => server.close() };
+  return { url: `http://localhost:${port}`, server, format, theme, stop: () => server.close() };
 }

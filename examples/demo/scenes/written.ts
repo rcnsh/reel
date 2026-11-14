@@ -22,12 +22,12 @@ export default class Written extends Scene {
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
     const { renderer, comp } = this.ctx;
-    clearRT(renderer, out, LIN.paper);
+    clearRT(renderer, out, LIN.bg);
     const c = this.layer.ctx;
     this.layer.clear();
     c.save();
     c.translate((W - this.st.width) / 2, H / 2 + this.st.capHeight / 2);
-    c.strokeStyle = rgba('ink');
+    c.strokeStyle = rgba('fg');
     c.lineWidth = 3;
     c.lineCap = c.lineJoin = 'round';
     const head = drawStrokeText(c, this.st, writtenLength(this.st, this.charTimes, f.t));

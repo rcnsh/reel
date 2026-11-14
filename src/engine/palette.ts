@@ -1,32 +1,39 @@
+// The palette: the project's theme's named colours (src/themes.ts). The CLI resolves the theme from the
+// project's config and the dev server hands it to the page as __REEL_THEME__, a compile-time constant, so it
+// is in place before any module runs: GLSL gets every key as a C_<KEY> constant (glsl/common.ts) baked into
+// shader strings at import time. Every theme has `bg`, `fg`, `accent`, `accentHi` and `accentLo`; the rest
+// are the theme's own.
+import { resolveTheme, type ResolvedTheme } from '../themes';
+export { glslName } from '../themes';
 import { hexToLinear } from './util';
 
-// The palette. The engine uses these keys (HUD in ink/bone, the heat ramp ink -> blood -> signal -> ember)
-// and GLSL gets each as a C_<KEY> constant (glsl/common.ts). A project changes the values here; its own
-// extra colours belong in its scenes.
-export const HEX = {
-  ink: '#16161A', // darkest: type and line work on paper, backgrounds on screen
-  ink2: '#1C1C21', // a step up from ink
-  graphite: '#6B6760', // secondary text, gridlines
-  ash: '#9C978F', // muted text on dark
-  bone: '#EEE9DF', // lightest: type on dark
-  paper: '#EEE9DF', // paper background
-  rule: '#C9C2B4', // hairlines and rules on paper
-  signal: '#C8301E', // the accent
-  ember: '#E0563F', // a lighter accent (top of the heat ramp)
-  blood: '#8E1F12', // a darker accent
-  acid: '#C8301E', // a second accent
-} as const;
+declare const __REEL_THEME__: ResolvedTheme | undefined;
 
-export type PaletteKey = keyof typeof HEX;
+/** The project's theme, resolved (without a dev server, e.g. under bun: `neutral`). */
+export const THEME: ResolvedTheme = typeof __REEL_THEME__ === 'undefined' || !__REEL_THEME__ ? resolveTheme('neutral') : __REEL_THEME__;
 
-/** Linear RGB triplets for GL uniforms. */
-export const LIN: Record<PaletteKey, [number, number, number]> = Object.fromEntries(
-  Object.entries(HEX).map(([k, v]) => [k, hexToLinear(v)]),
-) as Record<PaletteKey, [number, number, number]>;
+/** A palette key: `bg`, `fg`, `accent`, `accentHi`, `accentLo`, or one the theme adds. */
+export type PaletteKey = string;
 
-/** CSS rgba() for Canvas2D. */
-export function rgba(key: PaletteKey | string, a = 1): string {
-  const hex = (HEX as Record<string, string>)[key] ?? key;
+/** '#RRGGBB' per key. */
+export const HEX: Readonly<Record<PaletteKey, string>> = THEME.palette;
+
+const missing = (key: string) => new Error(`palette: the ${THEME.name} theme has no '${key}' (it has ${Object.keys(HEX).join(', ')})`);
+
+/** Linear RGB triplets for GL uniforms (a key the theme lacks throws). */
+export const LIN: Readonly<Record<PaletteKey, [number, number, number]>> = new Proxy(
+  Object.fromEntries(Object.entries(HEX).map(([k, v]) => [k, hexToLinear(v)])) as Record<PaletteKey, [number, number, number]>,
+  { get: (o, k) => (typeof k !== 'string' || k in o || k === 'then' || k === 'toJSON' ? (o as any)[k] : (() => { throw missing(k); })()) },
+);
+
+/** CSS rgba() for Canvas2D: a palette key, or a '#rrggbb' colour. */
+export function rgba(key: PaletteKey, a = 1): string {
+  const hex = HEX[key] ?? (key.startsWith('#') ? key : undefined);
+  if (!hex) throw missing(key);
   const n = parseInt(hex.replace('#', ''), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
 }
+
+const luma = (c: [number, number, number]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];
+/** Which of `bg` and `fg` is the light colour and which the dark one (the flash, the HUD and the heat ramp use them). */
+export const TONE: { light: 'bg' | 'fg'; dark: 'bg' | 'fg' } = luma(LIN.bg!) >= luma(LIN.fg!) ? { light: 'bg', dark: 'fg' } : { light: 'fg', dark: 'bg' };

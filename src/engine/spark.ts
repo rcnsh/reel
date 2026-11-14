@@ -1,5 +1,5 @@
 // The spark: a point of light with a white-hot core, a glow and sputtering particles, for a pen or fuse head
-// that moves along a path. Coloured from the palette's signal and ember. Deterministic in t, so it is safe
+// that moves along a path. Coloured from the theme's accent and accentHi. Deterministic in t, so it is safe
 // under motion-blur sampling. From upstream's scenes/_motifs.ts.
 import { LineBatch } from './lines';
 import { LIN, rgba } from './palette';
@@ -39,21 +39,21 @@ export function sparkParticles(lb: LineBatch, t: number, headAt: (t: number) => 
     const k = 1 - age / lf;
     const heat = k * k;
     const col: [number, number, number] = [
-      (LIN.signal[0] + (1 - LIN.signal[0]) * heat) * 2.2 * I,
-      (LIN.signal[1] + (0.8 - LIN.signal[1]) * heat) * 2.2 * I,
-      (LIN.signal[2] + (0.5 - LIN.signal[2]) * heat) * 2.2 * I,
+      (LIN.accent![0] + (1 - LIN.accent![0]) * heat) * 2.2 * I,
+      (LIN.accent![1] + (0.8 - LIN.accent![1]) * heat) * 2.2 * I,
+      (LIN.accent![2] + (0.5 - LIN.accent![2]) * heat) * 2.2 * I,
     ];
     lb.seg2(x0, y0, x, y, (o.width ?? 1.6) * (0.5 + k * 0.7), col, Math.min(1, k * 1.4));
   }
 }
 
-/** The spark head: a white-hot core and an orange halo (draw after the line it drags). 2D LineBatch. */
+/** The spark head: a white-hot core and a halo in the accent (draw after the line it drags). 2D LineBatch. */
 export function sparkHead(lb: LineBatch, x: number, y: number, t: number, scale = 1, intensity = 1) {
   const flick = 0.85 + 0.15 * Math.sin(t * 91.7) * Math.sin(t * 57.3);
   const I = intensity * flick;
   // halo: a few concentric short segments (dots) with decreasing intensity
-  lb.seg2(x, y, x + 0.01, y, 26 * scale, [LIN.signal[0] * 0.5 * I, LIN.signal[1] * 0.5 * I, LIN.signal[2] * 0.5 * I], 0.35);
-  lb.seg2(x, y, x + 0.01, y, 12 * scale, [LIN.ember[0] * 2.5 * I, LIN.ember[1] * 2.5 * I, LIN.ember[2] * 2.5 * I], 0.8);
+  lb.seg2(x, y, x + 0.01, y, 26 * scale, [LIN.accent![0] * 0.5 * I, LIN.accent![1] * 0.5 * I, LIN.accent![2] * 0.5 * I], 0.35);
+  lb.seg2(x, y, x + 0.01, y, 12 * scale, [LIN.accentHi![0] * 2.5 * I, LIN.accentHi![1] * 2.5 * I, LIN.accentHi![2] * 2.5 * I], 0.8);
   lb.seg2(x, y, x + 0.01, y, 5 * scale, [6 * I, 5 * I, 4 * I], 1);
   // four tiny rays
   for (let i = 0; i < 4; i++) {
@@ -68,8 +68,8 @@ export function sparkHead2D(c: CanvasRenderingContext2D, x: number, y: number, t
   const g = c.createRadialGradient(x, y, 0, x, y, 22 * scale);
   g.addColorStop(0, 'rgba(255,250,240,1)');
   g.addColorStop(0.18, 'rgba(255,170,90,0.95)');
-  g.addColorStop(0.45, rgba('signal', 0.45));
-  g.addColorStop(1, rgba('signal', 0));
+  g.addColorStop(0.45, rgba('accent', 0.45));
+  g.addColorStop(1, rgba('accent', 0));
   c.fillStyle = g;
   c.beginPath(); c.arc(x, y, 22 * scale, 0, TAU); c.fill();
 }

@@ -13,7 +13,7 @@ Fonts in `public/fonts/`:
 
 ## How a video is made
 
-A video is a project: a folder with a `reel.config.ts`, a `scenes/` folder and whatever audio and data it uses. The config sets the frame size and frame rate and returns the timeline, a list of clips: each names a scene module, a time window and a track. Tracks stack, so a caption or a title can sit over whatever runs below; clips that overlap on one track crossfade.
+A video is a project: a folder with a `reel.config.ts`, a `scenes/` folder and whatever audio and data it uses. The config sets the frame size, frame rate and theme and returns the timeline, a list of clips: each names a scene module, a time window and a track. Tracks stack, so a caption or a title can sit over whatever runs below; clips that overlap on one track crossfade.
 
 ```ts
 import { defineVideo } from 'reel/config';
@@ -21,6 +21,7 @@ import { defineVideo } from 'reel/config';
 export default defineVideo({
   size: [1080, 1920],
   fps: 30,
+  theme: 'film',
   timeline: () => [
     { id: 'wash', scene: () => import('./scenes/wash'), start: 0, end: 6 },
     { id: 'title', scene: () => import('./scenes/title'), start: 0.5, end: 5.5, track: 1 },
@@ -28,7 +29,9 @@ export default defineVideo({
 });
 ```
 
-`examples/layers` is that kind of project: silent, vertical, two tracks. `examples/demo` is a narrated one, made like this:
+The theme is the look, and the engine itself has none: `print` (ink on paper, faint grain), `film` (a dark grade with bloom, halation, heavy grain and crop marks) or `neutral` (clean greys and one accent, the default), or a theme of your own. It supplies the palette scenes colour with (`bg`, `fg`, `accent` and its own named colours), the default post-processing, and optionally an overlay drawn over every clip. `docs/ENGINE.md` has the details.
+
+`examples/layers` is that kind of project: silent, vertical, two tracks, the film theme. `examples/demo` is a narrated one in the print theme, made like this:
 
 1. Write `narration.txt`: plates, each a `# name` header followed by its lines.
 2. Time it. Either a scratch track from macOS `say` (`reel narrate`), or a real recording aligned with Whisper (`reel align <recording>`). Both write `audio/narration.mp3`, `data/words.json` (every word with its time) and `data/audio.json` (one section per plate).
@@ -43,7 +46,8 @@ Words for a sung track still go through `reel align` (Whisper word times), which
 
 ## Layout
 
-- `src/engine/`: the engine: renderer, adaptive sampling, tracks and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing with `print` and `film` looks (`post.ts`), HUD, type and single-stroke fonts, GPU lines, the spark (`spark.ts`), palette, shared GLSL. `src/index.ts` is what scenes import as `reel`; `src/config.ts` is `reel/config`.
+- `src/engine/`: the engine: renderer, adaptive sampling, tracks and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing (`post.ts`), type and single-stroke fonts, GPU lines, the spark (`spark.ts`), the palette from the theme (`palette.ts`), shared GLSL. `src/index.ts` is what scenes import as `reel`; `src/config.ts` is `reel/config`.
+- `src/themes.ts`: the themes (`print`, `film`, `neutral`), `extendTheme` and the checks a theme goes through. `src/scenes/`: scenes any project can place, imported as `reel/scenes/<name>`: `hud` (crop marks and captions).
 - `src/main.ts`, `index.html`: the page a project runs in: the preview player and the export API (`window.__reel`).
 - `cli/reel.ts`: the `reel` command. `cli/server.ts`: the dev server that maps a project into the page.
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
@@ -68,4 +72,4 @@ reel events                                    # data/cues.json for the mix
 reel mix out/raw.mp4 out/final.mp4
 ```
 
-`--only a,b` loads only those clips, `--scale 2` renders 4K, `--from/--to` render part of the video, `--json` prints one JSON object. Unknown flags are errors, and a command exits 1 if any scene threw. `reel --help` lists every command and flag; `bun run typecheck` checks the engine, the CLI and the examples.
+`--only a,b` loads only those clips, `--theme film` tries another built-in theme, `--scale 2` renders 4K, `--from/--to` render part of the video, `--json` prints one JSON object. Unknown flags are errors, and a command exits 1 if any scene threw. `reel --help` lists every command and flag; `bun run typecheck` checks the engine, the CLI and the examples.
