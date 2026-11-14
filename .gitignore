@@ -10,6 +10,9 @@ audio/.align/
 audio/.work/
 audio/narration.scratch.mp3
 
+# local working notes
+plan.md
+
 .DS_Store
 *.tsbuildinfo
 .env*
