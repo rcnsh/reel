@@ -74,3 +74,20 @@ export function describeDiff(s: DiffStats) {
   if (!s.changed) return `identical (${s.width}x${s.height})`;
   return `${s.changed} of ${s.width * s.height} px changed (${(s.fraction * 100).toFixed(3)}%), max ${s.max}, mean ${s.mean.toFixed(3)} levels, in ${s.box![2]}x${s.box![3]} at ${s.box![0]},${s.box![1]}`;
 }
+
+/** A copy at most `max` px on its long side (area-averaged; never enlarged). */
+export function downscale(img: Img, max: number): Img {
+  const k = Math.max(img.width, img.height) / max;
+  if (k <= 1) return img;
+  const w = Math.max(1, Math.round(img.width / k)), h = Math.max(1, Math.round(img.height / k));
+  const out = new Uint8Array(w * h * 4);
+  for (let y = 0; y < h; y++) for (let x = 0; x < w; x++) {
+    const x0 = Math.floor((x * img.width) / w), x1 = Math.max(x0 + 1, Math.floor(((x + 1) * img.width) / w));
+    const y0 = Math.floor((y * img.height) / h), y1 = Math.max(y0 + 1, Math.floor(((y + 1) * img.height) / h));
+    const s = [0, 0, 0, 0];
+    for (let yy = y0; yy < y1; yy++) for (let xx = x0; xx < x1; xx++) { const o = (yy * img.width + xx) * 4; for (let c = 0; c < 4; c++) s[c]! += img.data[o + c]!; }
+    const n = (x1 - x0) * (y1 - y0), o = (y * w + x) * 4;
+    for (let c = 0; c < 4; c++) out[o + c] = Math.round(s[c]! / n);
+  }
+  return { width: w, height: h, data: out };
+}

@@ -14,9 +14,11 @@
     "typescript": "^7.0.2"
   },
   "dependencies": {
+    "@modelcontextprotocol/sdk": "1.32.2",
     "opentype.js": "^2.0.0",
     "pngjs": "7.0.0",
-    "three": "^0.186.0"
+    "three": "^0.186.0",
+    "zod": "4.6.7"
   },
   "scripts": {
     "dev": "bun cli/reel.ts dev --project examples/demo",

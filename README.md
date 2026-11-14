@@ -46,13 +46,39 @@ The theme is the look, and the engine itself has none: `print` (ink on paper, fa
 
 Words for a sung track still go through `reel align` (Whisper word times), which suits clear vocals; it is not a forced aligner.
 
+## For agents: the MCP server
+
+`reel mcp` is a local stdio MCP server over the same warm renderer, for rendering and inspection (an agent authors a video by editing its files): `project_info`, `render_still`, `contact_sheet`, `motion_strip`, `check_video`, `diff_images`, `video_start` / `video_status` / `video_cancel`, and the project tools `narrate`, `align_recording`, `analyze_song` and `mix_audio`. Every tool takes the `project` folder. Image tools return MCP image blocks, at most 1280 px on the long side unless `full_size` is set and a few per call, plus the paths of the full-size files on disk.
+
+Register it with Claude Code (the server needs `CHROME_PATH` when Google Chrome is not installed):
+
+```sh
+claude mcp add reel -e CHROME_PATH="$CHROME_PATH" -- bun <path to reel>/cli/reel.ts mcp
+```
+
+or, for a client configured with JSON:
+
+```json
+{
+  "mcpServers": {
+    "reel": {
+      "command": "bun",
+      "args": ["<path to reel>/cli/reel.ts", "mcp"],
+      "env": { "CHROME_PATH": "<path to the Chrome binary>" }
+    }
+  }
+}
+```
+
+`tests/mcp.test.ts` drives it with the official MCP client over stdio.
+
 ## Layout
 
 - `src/engine/`: the engine: renderer, adaptive sampling, tracks and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing (`post.ts`), type and single-stroke fonts, GPU lines, the spark (`spark.ts`), the palette from the theme (`palette.ts`), shared GLSL. `src/index.ts` is what scenes import as `reel`; `src/config.ts` is `reel/config`.
 - `src/check.ts`: what `reel check` samples, measures and finds (pure functions, shared by the page and the CLI); `src/engine/report.ts`: the boxes scenes report.
 - `src/themes.ts`: the themes (`print`, `film`, `neutral`), `extendTheme` and the checks a theme goes through. `src/scenes/`: scenes any project can place, imported as `reel/scenes/<name>`: `hud` (crop marks and captions).
 - `src/main.ts`, `index.html`: the page a project runs in: the preview player and the export API (`window.__reel`).
-- `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
+- `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export; `cli/diff.ts` and `cli/png.ts`: image comparison; `cli/mcp.ts`: the MCP server. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
 - `docs/ENGINE.md`: the scene author's guide: the Scene API, rules for determinism and sampling, the toolbox, 4K.

@@ -44,6 +44,8 @@ Working on a project
                              [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
   daemon status              the warm renderers running, per project
   daemon stop                stop the project's warm renderer          [--all: every project's]
+  mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
+                             it with Claude Code and other clients)
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
   narrate                    time narration.txt with a scratch voice (macOS say)
   align <recording|folder>   time narration.txt to a voice recording
@@ -91,6 +93,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
+  mcp: { render: false, opts: { help: bool } },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };
 
