@@ -18,7 +18,7 @@
   },
   "scripts": {
     "dev": "vite --port 5173",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json",
+    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.tools.json",
     "render": "bun scripts/render.ts"
   }
 }
