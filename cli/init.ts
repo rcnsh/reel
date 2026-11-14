@@ -10,6 +10,9 @@ import { ENGINE } from './server';
 
 export interface InitOptions { size: [number, number]; fps: number; theme: string; narrated: boolean }
 
+/** A path as one shell word (package.json scripts run through a shell, and the engine's path may hold spaces). */
+const sh = (p: string) => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`);
+
 /** Files a folder may already hold and still count as empty. */
 const IGNORABLE = new Set(['.git', '.DS_Store']);
 
@@ -22,6 +25,7 @@ export function initOptions(o: { size?: string; fps?: string; theme?: string; na
     size = [Number(m[1]), Number(m[2])];
   }
   const fps = o.fps === undefined ? 60 : Number(o.fps);
+  if (!Number.isFinite(fps)) throw new Error(`--fps ${o.fps}: expected a number`);
   formatOf({ size, fps, timeline: () => [] });
   const theme = o.theme ?? 'neutral';
   if (!isThemeName(theme)) throw new Error(`--theme ${theme}: expected ${Object.keys(themes).join(', ')}`);
@@ -37,7 +41,7 @@ export function initProject(dir: string, o: InitOptions): string[] {
   }
   const name = path.basename(root);
   const title = name.replace(/[-_]+/g, ' ').replace(/^./, (c) => c.toUpperCase());
-  const reel = `bun ${path.join(ENGINE, 'cli/reel.ts')}`;
+  const reel = `bun ${sh(path.join(ENGINE, 'cli/reel.ts'))}`;
   const files: Record<string, string> = {
     'reel.config.ts': o.narrated ? narratedConfig(o) : silentConfig(o, title),
     'scenes/intro.ts': o.narrated ? narratedScene() : silentScene(),
@@ -46,7 +50,7 @@ export function initProject(dir: string, o: InitOptions): string[] {
       name: name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-._]+/, '') || 'video',
       private: true,
       type: 'module',
-      scripts: { reel: reel, dev: `${reel} dev`, typecheck: `${path.join(ENGINE, 'node_modules/.bin/tsc')} --noEmit -p .` },
+      scripts: { reel: reel, dev: `${reel} dev`, typecheck: `${sh(path.join(ENGINE, 'node_modules/.bin/tsc'))} --noEmit -p .` },
     }, null, 2) + '\n',
     '.gitignore': ['# renders, stills and contact sheets', 'out/', '', '# working files of reel narrate, reel align and the config loader', 'audio/.align/', 'audio/.work/', 'audio/narration.scratch.mp3', '.reel.config.*.mjs', '', 'node_modules/', '.DS_Store', ''].join('\n'),
     'CLAUDE.md': claudeMd(title, o),
