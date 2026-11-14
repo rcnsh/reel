@@ -357,10 +357,12 @@ export class HtmlLayer {
     }
     renderer.state.bindTexture(gl.TEXTURE_2D, this.glTex);
     // premultiplied, so filtering between a glyph and the transparent pixels beside it never darkens its edge
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
-    gl.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
+    // (through three's state cache: set behind its back, a later texture upload, such as a Layer2D canvas with
+    // flipY, would skip setting it again and come out upside down)
+    const st = renderer.state as unknown as { pixelStorei(name: number, value: number | boolean): void };
+    st.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, true);
+    st.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     gl.texElementSubImage2D(gl.TEXTURE_2D, 0, 0, 0, this.el);
-    gl.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);
     this.uploaded = true;
   }
 
