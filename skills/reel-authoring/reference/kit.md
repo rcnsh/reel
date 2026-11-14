@@ -81,6 +81,8 @@ photo = new ImageBox({ src: 'assets/ridge.jpg', alt: 'ridge', box: { x: W * 0.5,
 
 `src` (a path in the project), `fit` (`cover`, the default, fills and crops; `contain` shows all of it), `radius`, `kenBurns` (`true` for a slow push in, or a move from one framing to another across the window: `zoom` 1 is fitted, `x` and `y` pan from -1 to 1 across the room the zoom leaves), `alt`. Drawn in GL from the source file, so the pan is smooth and motion blurred; it loads before the first frame, and a file that does not load is an error, unless `assets.json` declares it as a generated asset not made yet: then a labelled placeholder of its declared size stands in (and `reel check` reports it). Default motion: a fade.
 
+Formats: PNG, JPEG, WebP, AVIF, GIF (its first frame) and SVG. An image with a colour profile (Display P3 from a phone, Adobe RGB) is converted to sRGB, so its colours match the file in any viewer. A 16-bit PNG keeps its 16 bits (a dark gradient or a sky stays smooth under the theme's grade). An SVG is rasterised at the size it is shown times `--scale` and the furthest Ken Burns zoom, so it is sharp at 4K; give it a `viewBox`.
+
 ## Charts and numbers
 
 Charts grow as their `progress` runs from 0 to 1: by default over 1.4 s from the start of their window, eased; give `progress: (f) => …` to drive it yourself.

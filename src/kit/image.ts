@@ -1,9 +1,10 @@
 // An image in a box, drawn in GL from the source file: cover or contain, rounded corners, and a Ken Burns pan and
 // zoom that is a pure function of time (evaluated per sub-frame, so it is smooth and motion blurred).
 import * as THREE from 'three';
-import { FSPass, H } from '../engine/gl';
+import { FSPass, H, SCALE } from '../engine/gl';
 import { assetPlaceholder, declaredAsset } from '../engine/assets';
 import { awaitBeforeFirstFrame } from '../engine/html';
+import { decodePng16, pngDepth } from '../engine/png16';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
@@ -51,6 +52,29 @@ function imagePass() {
   return pass;
 }
 
+/** An SVG's size in its own units: width and height when absolute, else its viewBox, else 300 x 150 as in HTML. */
+export function svgSize(text: string): [number, number] {
+  const tag = /<svg\b[^>]*>/i.exec(text)?.[0] ?? '';
+  const attr = (n: string) => new RegExp(`\\s${n}\\s*=\\s*["']([^"']*)["']`, 'i').exec(tag)?.[1];
+  const abs = (v?: string) => (v && /^\s*[\d.]+\s*(px)?\s*$/.test(v) ? parseFloat(v) : NaN);
+  const vb = attr('viewBox')?.trim().split(/[\s,]+/).map(Number);
+  let w = abs(attr('width')), h = abs(attr('height'));
+  const vw = vb?.length === 4 ? vb[2]! : NaN, vh = vb?.length === 4 ? vb[3]! : NaN;
+  if (!(w > 0) && !(h > 0)) { w = vw; h = vh; }
+  else if (!(w > 0)) w = (h * vw) / vh;
+  else if (!(h > 0)) h = (w * vh) / vw;
+  return w > 0 && h > 0 ? [w, h] : [300, 150];
+}
+
+/** Linear floats as half-float bits for a HalfFloatType texture. */
+function halfFloats(f: Float32Array): Uint16Array {
+  const F16 = (globalThis as { Float16Array?: new (a: Float32Array) => { buffer: ArrayBuffer } }).Float16Array;
+  if (F16) return new Uint16Array(new F16(f).buffer);
+  const o = new Uint16Array(f.length);
+  for (let i = 0; i < f.length; i++) o[i] = THREE.DataUtils.toHalfFloat(f[i]!);
+  return o;
+}
+
 /**
  * An image fitted to a box. Make it in a scene's field; it loads before the first frame. Draw it with
  * `image.draw(renderer, out, f)`.
@@ -66,27 +90,68 @@ export class ImageBox {
   constructor(o: ImageBoxOptions) {
     this.o = o;
     this.box = o.box ?? safeBox();
-    const img = new Image();
-    img.src = o.src;
-    const use = (src: HTMLImageElement | HTMLCanvasElement, w: number, h: number) => {
-      const t = new THREE.Texture(src);
-      t.colorSpace = THREE.SRGBColorSpace;
-      t.flipY = false;
-      t.generateMipmaps = true;
-      t.minFilter = THREE.LinearMipmapLinearFilter;
-      t.magFilter = THREE.LinearFilter;
-      t.anisotropy = 8;
-      t.needsUpdate = true;
-      this.tex = t;
-      this.size = [w, h];
-    };
-    awaitBeforeFirstFrame(img.decode().then(() => use(img, img.naturalWidth, img.naturalHeight), async () => {
+    awaitBeforeFirstFrame(this.load().catch(async (e: unknown) => {
       const a = await declaredAsset(o.src);
-      if (!a) throw new Error(`image '${o.src}' did not load (a path in the project, served from its folder)`);
+      if (!a) throw new Error(`image '${o.src}' did not load (a path in the project, served from its folder): ${e instanceof Error ? e.message : e}`);
       this.missing = a.id;
       const c = assetPlaceholder(a);
-      use(c, c.width, c.height);
+      this.use(new THREE.Texture(c), c.width, c.height);
     }));
+  }
+
+  private use(t: THREE.Texture, w: number, h: number) {
+    t.flipY = false;
+    t.generateMipmaps = true;
+    t.minFilter = THREE.LinearMipmapLinearFilter;
+    t.magFilter = THREE.LinearFilter;
+    t.anisotropy = 8;
+    t.needsUpdate = true;
+    this.tex = t;
+    this.size = [w, h];
+  }
+
+  /**
+   * Decode the file in the colours it was made in: through an ImageBitmap, which converts an image with a colour
+   * profile (Display P3, Adobe RGB) to sRGB (an <img> uploaded to GL keeps its numbers and shows them as sRGB); a
+   * 16-bit PNG by reel's own decoder into a half-float texture (the browser keeps 8 bits); an SVG rasterised at the
+   * size it is shown, times the output scale and the furthest zoom.
+   */
+  private async load() {
+    const res = await fetch(this.o.src);
+    if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
+    const bytes = new Uint8Array(await res.arrayBuffer());
+    const type = res.headers.get('content-type') ?? '';
+    if (pngDepth(bytes) === 16) {
+      const p = await decodePng16(bytes);
+      if (p) {
+        const t = new THREE.DataTexture(halfFloats(p.data), p.width, p.height, THREE.RGBAFormat, THREE.HalfFloatType);
+        t.colorSpace = THREE.LinearSRGBColorSpace;
+        this.use(t, p.width, p.height);
+        return;
+      }
+    }
+    if (type.includes('svg') || /\.svg$/i.test(this.o.src)) { await this.loadSvg(new TextDecoder().decode(bytes)); return; }
+    const bm = await createImageBitmap(new Blob([bytes], { type }), { colorSpaceConversion: 'default', premultiplyAlpha: 'none', imageOrientation: 'from-image' });
+    const t = new THREE.Texture(bm as unknown as HTMLImageElement);
+    t.colorSpace = THREE.SRGBColorSpace;
+    this.use(t, bm.width, bm.height);
+  }
+
+  private async loadSvg(text: string) {
+    const [iw, ih] = svgSize(text);
+    const img = new Image();
+    const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
+    try { img.src = url; await img.decode(); } finally { URL.revokeObjectURL(url); }
+    // the image's size on screen at its furthest zoom, in physical px
+    const b = this.box, kb = this.o.kenBurns, zoom = Math.max(1, ...(kb === true ? [1.12] : kb ? [kb.from?.zoom ?? 1, kb.to?.zoom ?? 1] : [1]));
+    const s = (this.o.fit === 'contain' ? Math.min(b.w / iw, b.h / ih) : Math.max(b.w / iw, b.h / ih)) * zoom * SCALE;
+    const k = Math.min(s, 8192 / Math.max(iw, ih));
+    const c = document.createElement('canvas');
+    c.width = Math.max(1, Math.ceil(iw * k)); c.height = Math.max(1, Math.ceil(ih * k));
+    c.getContext('2d')!.drawImage(img, 0, 0, c.width, c.height);
+    const t = new THREE.Texture(c);
+    t.colorSpace = THREE.SRGBColorSpace;
+    this.use(t, iw, ih);
   }
 
   /** The framing at clip time lt: the Ken Burns move across the component's window, eased. */
