@@ -12,7 +12,7 @@ import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
 import { TransitionPass, transitionOf, transitionWeights } from './transitions';
-import type { Clip, VideoConfig } from '../config';
+import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
 export type TimelineEntry = Clip;
@@ -130,6 +130,12 @@ export class Engine {
   }
 
   timeline: TimelineEntry[] = [];
+  /** The config's sounds on the timeline (scenes add theirs with sound(); see sounds()). */
+  private configSounds: SoundClip[] = [];
+  /** Every sound on the timeline: the config's, then those scenes put there with sound() in init(), by start time. */
+  sounds(): SoundClip[] {
+    return [...this.configSounds, ...((globalThis as { __reelSounds?: SoundClip[] }).__reelSounds ?? [])].sort((a, b) => a.at - b.at);
+  }
   /**
    * Collect what scenes report drawing (report(), reportText()) during the next render() into lastBoxes: for
    * `reel check`. With several sub-frames, the boxes are those of the sub-frame nearest the frame's time.
@@ -390,6 +396,7 @@ export class Engine {
     const c = this.config;
     [this.audio, this.words] = await Promise.all([AudioData.load(c.audio), Words.load(c.words), loadFonts(), loadStrokeFonts()]) as [AudioData, Words, void, void];
     this.timeline = c.timeline({ words: this.words, audio: this.audio });
+    this.configSounds = typeof c.sounds === 'function' ? c.sounds({ words: this.words, audio: this.audio }) : c.sounds ?? [];
     const ids = new Set<string>();
     for (const e of this.timeline) {
       if (ids.has(e.id)) throw new Error(`timeline: two clips are called '${e.id}'`);
@@ -424,6 +431,18 @@ export class Engine {
     const mods = await Promise.all(entries.map((e): Promise<Imported> => e.scene().then((m) => ({ m }), (err: unknown) => ({ err }))));
     for (const [i, e] of entries.entries()) await this.loadEntry(e, mods[i]!);
     for (const [id, msg] of await htmlLayers.settle()) this.fail(id, msg);
+    await this.checkSounds();
+  }
+
+  /** Sounds on the timeline must name a file of the project or a bundled sound: one that is missing is a load error. */
+  private async checkSounds() {
+    for (const s of this.sounds()) {
+      const bad = !(typeof s.file === 'string' && s.file) ? 'has no file' : !Number.isFinite(s.at) || s.at < 0 ? `starts at ${s.at}` : s.speed !== undefined && !(s.speed >= 0.5 && s.speed <= 4) ? `has speed ${s.speed} (0.5 to 4)` : '';
+      if (bad) { this.loadErrors.push(`[sounds] the sound ${JSON.stringify(s.file)} ${bad}`); continue; }
+      if (BUNDLED_SOUNDS.includes(s.file.replace(/\.wav$/, ''))) continue;
+      const r = await fetch(s.file, { method: 'HEAD', cache: 'no-store' }).catch(() => null);
+      if (!r?.ok) this.loadErrors.push(`[sounds] the sound '${s.file}' at ${s.at} s is not in the project (a path from its folder, such as audio/door.wav, or a bundled sound: ${BUNDLED_SOUNDS.join(', ')})`);
+    }
   }
 
   private fail(id: string, msg: string) {

@@ -20,8 +20,10 @@
 // kind (data/cues.json, from `reel events`, holds the times scenes asked for); cues closer than minGap s share one.
 // entryCues: extra cues of that kind at the start of the listed clips. loudness: the target (false: none, and a
 // limiter at -0.4 dBFS instead). --from is the timeline time the video starts at (the render's --from).
+// Sounds on the timeline (the config's `sounds` and a scene's sound(), also in data/cues.json) are laid as they say:
+// from their file's `from`, at their `at`, for their `duration`, looped, at their speed, gain and fades.
 import { $ } from 'bun';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { durationOf, measure } from './audio-io';
@@ -67,10 +69,12 @@ export interface MixOptions {
 export function bundledDir() { return path.join(import.meta.dir, '..', 'sounds'); }
 export function bundledSounds() { return readdirSync(bundledDir()).filter((f) => f.endsWith('.wav')).map((f) => f.slice(0, -4)); }
 
-/** A sound file named in mix.json: the project's audio/ folder, else one of the engine's bundled sounds by name. */
+/**
+ * A sound file named in mix.json or by a sound on the timeline: a path in the project, else in its audio/ folder,
+ * else one of the engine's bundled sounds by name.
+ */
 export function soundFile(root: string, file: string) {
-  const f = path.join(root, 'audio', file);
-  if (existsSync(f)) return f;
+  for (const f of [path.join(root, file), path.join(root, 'audio', file)]) if (path.resolve(f).startsWith(root + path.sep) && existsSync(f) && statSync(f).isFile()) return f;
   const name = file.replace(/^reel:/, '').replace(/\.wav$/, '');
   if (bundledSounds().includes(name)) return path.join(bundledDir(), `${name}.wav`);
   throw new Error(`mix.json names ${file}, which is not in ${path.join(root, 'audio')} nor one of the bundled sounds (${bundledSounds().join(', ')})`);
@@ -102,7 +106,16 @@ export async function mixVideo(o: MixOptions) {
   for (const c of ev.cues) if (!cfg.cues?.[c.kind] && bundled.includes(c.kind)) cfg.cues = { ...cfg.cues, [c.kind]: { file: c.kind, db: -6 } };
   const dur = await durationOf(input);
   const track = projectTrack(root);
-  const g = buildMix(cfg, ev, dur, from, track, (f) => soundFile(root, f));
+  // the timeline's sounds: each file must hold sound, and its length is needed where a sound plays to its end
+  const lengths = new Map<string, number>();
+  for (const s of ev.sounds ?? []) {
+    const f = soundFile(root, s.file);
+    if (lengths.has(f)) continue;
+    const r = await $`ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 ${f}`.quiet().nothrow();
+    if (r.exitCode !== 0 || !r.stdout.toString().trim()) throw new Error(`the sound '${s.file}' (at ${s.at} s) has no audio stream`);
+    lengths.set(f, await durationOf(f));
+  }
+  const g = buildMix(cfg, ev, dur, from, track, (f) => soundFile(root, f), (f) => lengths.get(f) ?? Infinity);
   const ins = ['-i', input, ...g.inputs];
   // (one thread through the filters: amix and the sidechain then see their inputs' frames in the same order every
   // run, so the same project mixes to the same samples)

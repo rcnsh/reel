@@ -153,6 +153,8 @@ function setupExport() {
     clipsAt,
     /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
+    /** Sounds on the timeline: the config's `sounds` and those scenes placed with sound(), by start time. */
+    get sounds() { return engine.sounds(); },
     /** Render a single frame at t (seeks as needed). Returns the sub-frames used. */
     still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.renderFrame(t, 1 / FPS, true, samples, shutter); },
     /**

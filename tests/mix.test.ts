@@ -4,6 +4,7 @@ import { existsSync, mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { bundledSounds, soundFile } from '../tools/mix';
+import { BUNDLED_SOUNDS } from '../src/config';
 import { loudnessTarget, loudnormFilter, parseLoudnorm, STREAMING } from '../tools/loudness';
 
 const ev: Events = { duration: 10, timeline: [{ id: 'a', start: 0, end: 4 }, { id: 'b', start: 4, end: 10 }], cues: [{ kind: 'tick', t: 1 }, { kind: 'tick', t: 1.05 }, { kind: 'tick', t: 5 }, { kind: 'boom', t: 2 }] };
@@ -70,4 +71,37 @@ test('mix.json can name a bundled cue sound; a project file of that name wins', 
   expect(soundFile(root, 'reel:pop')).toEndWith('sounds/pop.wav');
   expect(() => soundFile(root, 'nope.wav')).toThrow('nor one of the bundled sounds');
   expect(existsSync(soundFile(root, 'tick.wav'))).toBe(true);
+});
+
+test('sounds on the timeline: trimmed to the render, faded at their own ends, at their rate, delayed to their start', () => {
+  const sounds = [
+    { file: 'door.wav', at: 2, db: -3, fadeOut: 0.5 },                       // to the end of its 1.5 s file
+    { file: 'rain.flac', at: 3, duration: 20, loop: true, fadeIn: 1 },       // runs past the render's end
+    { file: 'clip.mp4', at: 1, from: 4, speed: 2, duration: 2 },             // from 4 s into a video's sound, twice as fast
+    { file: 'late.wav', at: 30 },                                            // after the render: not laid
+  ];
+  const len = (f: string) => (f.endsWith('door.wav') ? 1.5 : 60);
+  const g = buildMix({}, { ...ev, cues: [], sounds }, 6, 1.5, null, snd, len);
+  expect(g.inputs).toEqual(['-i', '/p/audio/door.wav', '-stream_loop', '-1', '-i', '/p/audio/rain.flac', '-i', '/p/audio/clip.mp4']);
+  const parts = g.filter.split(';');
+  // the door: 2 s on the timeline is 0.5 s into the render; its own fade out at its end
+  expect(parts[0]).toBe(`[1:a]${FMT},atrim=start=0.000000,asetpts=PTS-STARTPTS,atrim=0:1.500000,asetpts=PTS-STARTPTS,volume=-3dB,afade=t=in:d=0.020,afade=t=out:st=1.000:d=0.500,adelay=500:all=1,asetnsamples=n=1024:p=0[s0]`);
+  // rain is cut by the render's end (no fade out there), 4.5 s long from 1.5 s in
+  expect(parts[1]).toContain('atrim=0:4.500000');
+  expect(parts[1]).toContain('afade=t=in:d=1.000');
+  expect(parts[1]).not.toContain('afade=t=out');
+  // the clip started before the render: 0.5 s of it are gone, which is 1 s of its file at speed 2
+  expect(parts[2]).toContain('atrim=start=5.000000,asetpts=PTS-STARTPTS,atempo=2,atrim=0:1.500000');
+  expect(parts[2]).toContain('adelay=0:all=1');
+  expect(g.counts).toEqual(['3 sounds on the timeline']);
+});
+
+test('a sound names a file of the project, of its audio folder, or a bundled sound', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'reel-snd-'));
+  expect([...bundledSounds()].sort()).toEqual([...BUNDLED_SOUNDS].sort());
+  return Bun.write(path.join(root, 'clips/a.mp4'), 'x').then(() => {
+    expect(soundFile(root, 'clips/a.mp4')).toBe(path.join(root, 'clips/a.mp4'));
+    expect(soundFile(root, 'whoosh')).toMatch(/sounds\/whoosh\.wav$/);
+    expect(() => soundFile(root, '../../etc/passwd')).toThrow();
+  });
 });

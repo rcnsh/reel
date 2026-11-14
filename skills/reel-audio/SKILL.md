@@ -86,6 +86,9 @@ A scene asks for a sound with `cue(kind, t)` in `init()` (times from words or be
 - Files are the project's (`audio/`), or the bundled cue sounds by name: `tick`, `click`, `pop`, `whoosh`,
   `swell`, `impact`. A cue kind named after a bundled sound needs no entry (it plays at -6 dB).
 - Music runs from clip `from` to clip `to`, looped, ducked under the track. `entryCues` add a cue at clip starts.
+- Sounds placed on the timeline go in the config, not `mix.json`: `sounds: [{ file: 'audio/door.wav', at: 4.2, db: -3 }]`
+  (or `(src) => […]` with times from words or beats; fields `from`, `duration`, `loop`, `speed`, `fadeIn`, `fadeOut`),
+  or `sound({ … })` from a scene's `init()`. They are laid as they are, not ducked.
 - `loudness` defaults to -14 LUFS integrated, -1 dBTP (two-pass EBU R128, a linear gain where the peak allows);
   `false` turns it off.
 - **`reel video --samples auto --mix`** renders and mixes into the finished file and prints its LUFS and true peak.

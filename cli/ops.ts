@@ -22,11 +22,11 @@ export interface Req {
 export interface Result { ok: boolean; errors: string[]; logs: string[]; warnings: string[]; usage?: boolean; [k: string]: unknown }
 
 export interface ClipInfo { id: string; start: number; end: number; track: number; exempt?: import('../src/engine/report').CheckRule[] | true }
-export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; track: string | null; theme: string; W: number; H: number; fps: number; scale: number }
+export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[]; track: string | null; theme: string; W: number; H: number; fps: number; scale: number }
 
 export const meta = (h: PageHandle): Promise<PageMeta> => h.page.evaluate(() => {
   const R = (window as any).__reel;
-  return { duration: R.duration, timeline: R.timeline, cues: R.cues, track: R.track, theme: R.theme, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
+  return { duration: R.duration, timeline: R.timeline, cues: R.cues, sounds: R.sounds, track: R.track, theme: R.theme, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
 });
 
 /** `dir/base.png`, or `dir/base-2.png`, `-3` … when that is taken: stills and sheets never overwrite each other. */
@@ -61,7 +61,7 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
   async info(h, ctx) {
     const m = await meta(h);
     const tracks = [...new Set(m.timeline.map((c) => c.track))].sort((a, b) => a - b);
-    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues };
+    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues, sounds: m.sounds };
   },
 
   async still(h, ctx) {
@@ -166,13 +166,13 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
   },
 
   async events(h, ctx) {
-    // sound-mix cues: the timeline (clip starts) and every cue() a scene recorded
-    const { duration, timeline, cues } = await meta(h);
+    // sound-mix cues: the timeline (clip starts), every cue() a scene recorded and the sounds on the timeline
+    const { duration, timeline, cues, sounds } = await meta(h);
     const out = ctx.req.args.out ?? path.join(ctx.req.project, 'data/cues.json');
     mkdirSync(path.dirname(out), { recursive: true });
-    writeFileSync(out, JSON.stringify({ duration, timeline, cues }, null, 1));
+    writeFileSync(out, JSON.stringify({ duration, timeline, cues, sounds }, null, 1));
     ctx.wrote(out);
-    return { file: out, clips: timeline.length, cues: cues.length };
+    return { file: out, clips: timeline.length, cues: cues.length, sounds: sounds.length };
   },
 
   async perf(h, ctx) {

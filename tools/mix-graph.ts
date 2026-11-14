@@ -1,5 +1,6 @@
 // The sound mix's ffmpeg inputs and filter graph (tools/mix.ts): pure, so it is unit-tested.
 import path from 'node:path';
+import type { SoundClip } from '../src/config';
 
 export interface Music { file: string; from?: string; to?: string; db?: number; fadeIn?: number; fadeOut?: number }
 export interface CueSound { file: string; db?: number; minGap?: number }
@@ -13,7 +14,7 @@ export interface MixConfig {
   voiceDb?: number;
 }
 
-export interface Events { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[] }
+export interface Events { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds?: SoundClip[] }
 
 /** The working sample rate and layout of the mix. */
 const FMT = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo';
@@ -23,9 +24,11 @@ const FMT = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo'
  * null for a silent video) for a video of `dur` seconds starting at timeline time `from`. Input 0 is the video (its
  * picture is copied; its own sound, an encode of the same track, is not used), so `inputs` are the ffmpeg arguments
  * after it. The graph ends in [mixed], `dur` seconds of 48 kHz stereo before loudness normalisation. `sound(file)`
- * resolves a file named in mix.json. `counts`: cues laid per kind; `warnings`: cue kinds with no sound.
+ * resolves a file named in mix.json or by a sound on the timeline; `length(file)` is a resolved file's length in
+ * seconds (for timeline sounds that play to the end of their file). `counts`: cues laid per kind, and the timeline's
+ * sounds; `warnings`: cue kinds with no sound.
  */
-export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, voice: string | null, sound: (file: string) => string) {
+export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, voice: string | null, sound: (file: string) => string, length: (file: string) => number = () => Infinity) {
   const T0 = from, T1 = from + dur;
   const warnings: string[] = [];
   const entryStart = (id: string) => {
@@ -102,6 +105,27 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     parts.push(`[${id}]`);
     n++;
   }
+  // sounds on the timeline (the config's `sounds`, a scene's sound()): each trimmed to the render's window, faded at
+  // its own ends, at its rate, delayed to its start
+  let laid = 0;
+  for (const s of ev.sounds ?? []) {
+    const file = sound(s.file), speed = s.speed ?? 1;
+    const play = s.duration ?? (s.loop ? ev.duration - s.at : (length(file) - (s.from ?? 0)) / speed);
+    const a = s.at, b = a + play, ws = Math.max(a, T0), we = Math.min(b, T1), L = we - ws;
+    if (!(L > 0.01)) continue;
+    const skip = (s.from ?? 0) + (ws - a) * speed;
+    if (s.loop) inputs.push('-stream_loop', '-1');
+    inputs.push('-i', file);
+    const fi = ws === a ? Math.min(s.fadeIn ?? 0.02, L / 2) : 0, fo = we === b ? Math.min(s.fadeOut ?? 0.02, L / 2) : 0;
+    const tempo: string[] = [];
+    for (let k = speed; Math.abs(k - 1) > 1e-6;) { const x = Math.min(2, Math.max(0.5, k)); tempo.push(`atempo=${x}`); k /= x; }
+    let c = `[${n}:a]${FMT},atrim=start=${skip.toFixed(6)},asetpts=PTS-STARTPTS${tempo.map((x) => `,${x}`).join('')},atrim=0:${L.toFixed(6)},asetpts=PTS-STARTPTS,volume=${s.db ?? 0}dB`;
+    if (fi) c += `,afade=t=in:d=${fi.toFixed(3)}`;
+    if (fo) c += `,afade=t=out:st=${(L - fo).toFixed(3)}:d=${fo.toFixed(3)}`;
+    c += `,adelay=${Math.round((ws - T0) * 1000)}:all=1,asetnsamples=n=1024:p=0[s${laid}]`;
+    f.push(c); parts.push(`[s${laid}]`); n++; laid++;
+  }
+  if (ev.sounds?.length) counts.push(`${laid} sound${laid === 1 ? '' : 's'} on the timeline`);
   // everything summed, padded or cut to the video's length
   const end = `apad,atrim=0:${dur.toFixed(6)},asetpts=PTS-STARTPTS[mixed]`;
   if (!parts.length) f.push(`anullsrc=r=48000:cl=stereo,${end}`);

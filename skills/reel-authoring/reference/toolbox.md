@@ -42,7 +42,7 @@ Single-stroke plotter and engraving fonts that can be *written*: `script`, `hscr
 
 ## Animation (`util.ts`)
 
-`clamp`, `lerp`, `invLerp`, `remap(x, a, b, c, d)`, `smoothstep`, `smootherstep`, `fract`, `mod`, `TAU`; `ease.*` (`linear`, `in/out/inOut` × `Quad Cubic Quart Expo`, `outQuint`, `outBack`, `inBack`, `outElastic`); `prog(x, a, b, ease)`: clamped eased progress of x through [a, b]; `window01(t, a, b, fadeIn, fadeOut)`: 0, ramp up, hold, ramp down; `keys(t, [[t0, v0], [t1, v1, ease], …])`: keyframes (the ease on a key shapes the segment ending there); `springStep(t, freq, damping)`; `pulse(t, t0, halfLife)`; `mulberry32(seed)`, `hash(...numbers)`, `noise1/2/3`, `fbm1/2`; `frameIdx(t)`; `polylineLengths`, `pointAtLength`; `hexToLinear`; `cue(kind, t)`.
+`clamp`, `lerp`, `invLerp`, `remap(x, a, b, c, d)`, `smoothstep`, `smootherstep`, `fract`, `mod`, `TAU`; `ease.*` (`linear`, `in/out/inOut` × `Quad Cubic Quart Expo`, `outQuint`, `outBack`, `inBack`, `outElastic`); `prog(x, a, b, ease)`: clamped eased progress of x through [a, b]; `window01(t, a, b, fadeIn, fadeOut)`: 0, ramp up, hold, ramp down; `keys(t, [[t0, v0], [t1, v1, ease], …])`: keyframes (the ease on a key shapes the segment ending there); `springStep(t, freq, damping)`; `pulse(t, t0, halfLife)`; `mulberry32(seed)`, `hash(...numbers)`, `noise1/2/3`, `fbm1/2`; `frameIdx(t)`; `polylineLengths`, `pointAtLength`; `hexToLinear`; `cue(kind, t)`; `sound({ file, at, … })` (a sound on the timeline for the mix).
 
 ## The spark (`spark.ts`)
 

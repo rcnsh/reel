@@ -55,6 +55,34 @@ export interface Clip {
   check?: { exempt?: CheckRule[] | true };
 }
 
+/** The cue sounds the engine ships in sounds/ (tools/make_sounds.ts), which a sound may name instead of a file. */
+export const BUNDLED_SOUNDS = ['tick', 'click', 'pop', 'whoosh', 'swell', 'impact'];
+
+/**
+ * A sound placed on the timeline: the mix lays it under the video (no scene needs to ask for it).
+ */
+export interface SoundClip {
+  /**
+   * The sound: a file in the project (a path from its folder: `audio/door.wav`, or a video whose sound to use), or
+   * one of the engine's bundled cue sounds by name (`whoosh`, `impact` …).
+   */
+  file: string;
+  /** When it starts on the timeline (seconds). */
+  at: number;
+  /** Seconds into the file it starts from (default 0). */
+  from?: number;
+  /** Seconds it plays (default: to the end of the file, or with `loop` to the end of the video). */
+  duration?: number;
+  /** Repeat the file to fill `duration`. */
+  loop?: boolean;
+  /** Playback rate, its pitch kept (default 1; 0.5 to 4). */
+  speed?: number;
+  /** Gain in dB (default 0), and fades in and out in seconds (default 0.02: no click). */
+  db?: number;
+  fadeIn?: number;
+  fadeOut?: number;
+}
+
 /** What `timeline()` is given: the project's timed words and audio analysis (both empty when it has none). */
 export interface Sources {
   words: Words;
@@ -104,6 +132,11 @@ export interface VideoConfig {
   narration?: NarrationSettings;
   /** The edit: every clip of the video. Called once the sources are loaded. */
   timeline(src: Sources): Clip[];
+  /**
+   * Sounds on the timeline that the mix lays in (`reel mix`, `reel video --mix`), as data or a function of the
+   * sources (times from words or beats): `[{ file: 'audio/rain.flac', at: 2, duration: 8, loop: true, db: -12, fadeIn: 1 }]`.
+   */
+  sounds?: SoundClip[] | ((src: Sources) => SoundClip[]);
 }
 
 export function defineVideo(c: VideoConfig): VideoConfig {

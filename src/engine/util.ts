@@ -1,6 +1,7 @@
 // Small math / animation helpers shared by every scene. Everything must be a
 // pure function of time (or seeded), so frames render identically on export.
 import { FPS } from './format';
+import type { SoundClip } from '../config';
 
 export const clamp = (x: number, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -180,4 +181,13 @@ export function hexToLinear(hex: string): [number, number, number] {
 export function cue(kind: string, t: number) {
   const g = globalThis as { __reelCues?: { kind: string; t: number }[] };
   (g.__reelCues ??= []).push({ kind, t });
+}
+
+/**
+ * Put a sound on the timeline for the mix, from a scene's init(): a file of the project from `at` seconds of video
+ * time. Like the config's `sounds`; `reel events` writes both to data/cues.json.
+ */
+export function sound(s: SoundClip) {
+  const g = globalThis as { __reelSounds?: SoundClip[] };
+  (g.__reelSounds ??= []).push({ ...s });
 }

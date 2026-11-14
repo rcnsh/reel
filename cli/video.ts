@@ -29,7 +29,7 @@ export interface VideoOpts {
   onProgress?: (p: { frames: number; total: number; fps: number; eta: number }) => void;
 }
 
-export interface VideoResult { file: string; frames: number; seconds: number; workers: number; subFrames: Record<string, number>; spoolPeak: number; errors: string[]; logs: string[]; events: { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[] } }
+export interface VideoResult { file: string; frames: number; seconds: number; workers: number; subFrames: Record<string, number>; spoolPeak: number; errors: string[]; logs: string[]; events: { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[] } }
 
 /**
  * Render [from, to) into one encoder. `workers` headless Chromes (each its own GPU process) take chunks of
@@ -49,7 +49,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   };
   // (the duration and the track come from the project's data, the same in every page)
   const first = await browserOf();
-  const m: { duration: number; track: string | null; stateful: boolean; timeline: VideoResult['events']['timeline']; cues: VideoResult['events']['cues'] } = await first.page.evaluate(() => { const P = (window as any).__reel; return { duration: P.duration, track: P.track, stateful: P.stateful, timeline: P.timeline, cues: P.cues }; });
+  const m: { duration: number; track: string | null; stateful: boolean; timeline: VideoResult['events']['timeline']; cues: VideoResult['events']['cues']; sounds: VideoResult['events']['sounds'] } = await first.page.evaluate(() => { const P = (window as any).__reel; return { duration: P.duration, track: P.track, stateful: P.stateful, timeline: P.timeline, cues: P.cues, sounds: P.sounds }; });
   await first.browser.close();
   const from = o.from ?? 0, to = o.to ?? m.duration;
   if (!(to > from)) throw new Error(`--from ${from} --to ${to}: nothing to render`);
@@ -216,5 +216,5 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     rmSync(spoolDir, { recursive: true, force: true });
     for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, onSignal);
   }
-  return { file: o.out, frames: written, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers, subFrames: used, spoolPeak, errors: [...sceneErrors], logs, events: { duration: m.duration, timeline: m.timeline, cues: m.cues } };
+  return { file: o.out, frames: written, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers, subFrames: used, spoolPeak, errors: [...sceneErrors], logs, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
 }

@@ -308,12 +308,12 @@ finish(res, (x) => {
     const tl = x.timeline as { id: string; start: number; end: number; track: number }[], [w, h] = x.size as number[];
     say(`${PROJECT}\n${w}x${h} at ${x.fps} fps, ${(x.duration as number).toFixed(3)} s, ${x.track ?? 'no audio track'}, theme ${x.theme}`);
     for (const e of tl) say(`  ${e.id.padEnd(16)} ${e.start.toFixed(3).padStart(9)} to ${e.end.toFixed(3).padStart(9)}  track ${e.track}`);
-    say(`${(x.cues as unknown[]).length} sound cues`);
+    say(`${(x.cues as unknown[]).length} sound cues, ${(x.sounds as unknown[]).length} sounds on the timeline`);
   } else if (mode === 'still') {
     for (const f of x.frames as { t: number; file: string; subFrames: number }[]) say(typeof req.samples === 'number' ? f.file : `${f.file}  (${f.subFrames} sub-frames)`);
   } else if (mode === 'sheet' || mode === 'strip') say(String(x.file));
   else if (mode === 'check') printCheck(x);
-  else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues`);
+  else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues, ${x.sounds} sounds on the timeline`);
   else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
   else if (mode === 'gpu') say(String(x.gpu));
 });
