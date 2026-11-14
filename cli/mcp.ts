@@ -236,9 +236,9 @@ export async function serveMcp() {
 
   server.registerTool('align_recording', {
     title: 'Align a recording',
-    description: "Time narration.txt to a real voice recording (one take, or a folder of per-plate files named after the plates) with Whisper word times: replaces audio/narration.mp3, data/words.json and data/audio.json. The first run downloads a model (minutes).",
-    inputSchema: { project, recording: z.string().describe('The recording file or folder.') },
-  }, (a) => guard(() => tool('align', a.project, [path.resolve(a.recording)])));
+    description: "Time narration.txt to a real voice recording (one take, or a folder of per-plate files named after the plates): the script's words are force-aligned to it (Qwen3-ForcedAligner on Apple Silicon), or with method 'whisper' transcribed and matched, for a reading that departs from the script. Replaces audio/narration.flac, data/words.json and data/audio.json. The first run downloads a model (minutes).",
+    inputSchema: { project, recording: z.string().describe('The recording file or folder.'), method: z.enum(['qwen', 'whisper']).optional(), lead: z.number().min(0).optional(), hold: z.number().min(0).optional(), tail: z.number().min(0).optional() },
+  }, (a) => guard(() => tool('align', a.project, [path.resolve(a.recording), ...(['method', 'lead', 'hold', 'tail'] as const).flatMap((k) => (a[k] !== undefined ? [`--${k}`, String(a[k])] : []))])));
 
   server.registerTool('analyze_song', {
     title: 'Analyze a song',

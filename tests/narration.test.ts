@@ -6,6 +6,7 @@ import { mkdtempSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { snapToPauses, timeScript } from '../tools/align-words';
+import { joinFigures } from '../tools/align';
 import { assemble } from '../tools/narration-files';
 import { narrationAudioJSON, parseScript, plateText, plateWords, timing } from '../tools/script';
 import { plateKey, resolveSettings } from '../tools/settings';
@@ -77,6 +78,10 @@ describe('words', () => {
     expect(out[2]!.end).toBe(0.9); // the end of a word before the trailing silence
     const o2 = snapToPauses([{ w: 'x', start: 0.1, end: 0.6 }, { w: 'y', start: 0.5, end: 0.8 }], db);
     expect(o2[0]!.end).toBeLessThanOrEqual(o2[1]!.start);
+  });
+
+  test('Whisper figures are joined', () => {
+    expect(joinFigures([{ w: '152', s: 1, e: 1.2 }, { w: ',000', s: 1.2, e: 1.5 }, { w: 'people', s: 1.6, e: 2 }])).toEqual([{ w: '152,000', start: 1, end: 1.5 }, { w: 'people', start: 1.6, end: 2 }]);
   });
 });
 

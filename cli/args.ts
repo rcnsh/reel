@@ -58,7 +58,8 @@ Working on a project
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
   narrate                    voice narration.txt (Kokoro by default; say, elevenlabs, fish) and time
                              every word; caches each plate      (flags: reel narrate --help)
-  align <recording|folder>   time narration.txt to a voice recording
+  align <recording|folder>   time narration.txt to a voice recording (forced alignment; --method
+                             whisper for a reading that departs from it)  (flags: reel align --help)
   analyze <song> [...]       beats, envelopes and sections of a song (flags: reel analyze --help)
   mix <in.mp4> <out.mp4>     lay music and cue sounds under a render             [--from 0]
 

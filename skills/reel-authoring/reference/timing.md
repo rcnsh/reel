@@ -5,9 +5,9 @@
 `narration.txt` holds plates: a `# name` header and its lines. Time it:
 
 - `reel narrate`: a voice from the script: Kokoro (local, the default), `say` (macOS scratch), or ElevenLabs / Fish Audio (hosted, with their key). Word times come from the voice's own timestamps or a forced aligner. Plates are cached: only the ones whose text changed are voiced again.
-- `reel align <recording>`: a real recording (one take, or a folder of per-plate files named after the plates), word times from Whisper matched to the script. `LEAD`, `HOLD` and `TAIL` in the environment set the silence before the first word, after each plate and after the last word.
+- `reel align <recording>`: a real recording (one take, or a folder of per-plate files named after the plates). The script's words are force-aligned to it (Qwen3-ForcedAligner, about 15 ms from where words really start); `--method whisper` transcribes and matches instead, for a reading that departs from the script.
 
-Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a silent 100 BPM grid, one section per plate). With `clipsFromSections` in the config, each plate shows the scene of the same name; a plate without a scene is skipped, so a video is built one plate at a time.
+Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a silent 100 BPM grid, one section per plate), with `--lead`, `--hold` and `--tail` seconds of silence before the first word, between plates and after the last word (or `narration: { lead, hold, tail }` in the config). With `clipsFromSections` in the config, each plate shows the scene of the same name; a plate without a scene is skipped, so a video is built one plate at a time.
 
 ## Words (`this.ctx.words`, `src.words`)
 
@@ -27,7 +27,7 @@ Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a si
 
 ## Music
 
-`reel analyze <song> --sections sections.json` (`[{ "name": "intro", "bar": 0 }, …]`, named after your scenes) analyses a song: a constant-tempo beat grid, downbeats, 100 fps envelopes, kick, snare and hat onsets (reliable on produced music), vocal onsets and `vocal`/`bass` envelopes (rough: a harmonic/percussive split, not separated stems), and sections (from the file, or segmented as `part1`, `part2` …). The song becomes the track. For a narrated video with a music bed, time the narration first, then `reel analyze <bed> --keep-sections --offset <s>` adds the bed's beats from where it enters. `reel analyze --help` lists the flags. Sung words still come from `reel align` (Whisper word times, not forced alignment).
+`reel analyze <song> --sections sections.json` (`[{ "name": "intro", "bar": 0 }, …]`, named after your scenes) analyses a song: a constant-tempo beat grid, downbeats, 100 fps envelopes, kick, snare and hat onsets (reliable on produced music), vocal onsets and `vocal`/`bass` envelopes (rough: a harmonic/percussive split, not separated stems), and sections (from the file, or segmented as `part1`, `part2` …). The song becomes the track. For a narrated video with a music bed, time the narration first, then `reel analyze <bed> --keep-sections --offset <s>` adds the bed's beats from where it enters. `reel analyze --help` lists the flags. Sung words come from `reel align <vocal> --method whisper`.
 
 To cut on the beat, snap clip starts in `timeline(src)`: `src.audio.beatBefore(src.words.get('first words').words[0].start)`, or `src.audio.nearestDownbeat(t)` at the end of a line. To pulse on the kick: `f.a.kick` (or `audio.hit('kick', t, 0.12)`).
 

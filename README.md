@@ -50,7 +50,7 @@ The theme is the look, and the engine itself has none: `print` (ink on paper, fa
 
 `reel analyze <song>` analyses a song into `data/audio.json`: a constant-tempo beat grid, downbeats, 100 fps loudness envelopes (mix bands plus harmonic/percussive proxies for drums, bass, other and vocal), kick, snare, hat and (proxy) vocal onsets, and sections. That is what the engine's music helpers read (`f.beat`, `f.bar`, `f.a.kick`, `audio.env`, `audio.hit`, `audio.beatBefore`, `audio.nearestDownbeat`), so scenes can pulse on the kick and cuts can land on the beat. Sections come from `--sections sections.json` (`[{"name": "intro", "bar": 0}, …]`, named after your scenes), or structural segmentation (`part1`, `part2`, …). The song becomes the track the preview plays and the export muxes. For a narrated video with a music bed, `--keep-sections --offset <s>` keeps the narration's timing and adds the bed's beats from where it starts. Run `reel analyze --help` for the flags.
 
-Words for a sung track still go through `reel align` (Whisper word times), which suits clear vocals; it is not a forced aligner.
+Words for a sung track come from `reel align <vocal> --method whisper` (Whisper's word times matched to the lyrics), which suits clear vocals; the default forced aligner is made for speech.
 
 ## For agents: the MCP server
 

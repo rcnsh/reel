@@ -1,235 +1,141 @@
-// Re-times the video to a real voice recording.
-//   bun tools/align.ts <recording>      one take reading narration.txt top to bottom (any format ffmpeg reads)
-//   bun tools/align.ts <folder>         one file per plate, named after its header: open.m4a, setup.m4a, ...
-// Whisper (faster-whisper, small.en, local) transcribes the recording with a time for every word. Those words are
-// matched against the script, so each script word gets the time it was actually said; words Whisper heard
-// differently (numbers, names) take their time from the matched words either side. Writes the same files as
-// tools/narration.ts: audio/narration.mp3, data/words.json, data/audio.json. Plate breaks shorter than
-// HOLD + CUT_LEAD get silence added, so every plate holds HOLD seconds (default 1.2, env HOLD) after its last
-// word. The first run keeps the scratch track as audio/narration.scratch.mp3.
+// `reel align <recording | folder>`: re-time the video to a real voice. The script is known, so its words are
+// force-aligned to the audio (Qwen3-ForcedAligner on MLX) rather than transcribed; `--method whisper` transcribes
+// with Whisper and matches the words heard to the script instead, for a reading that departs from it. Writes the
+// same files as `reel narrate`: audio/narration.flac, data/words.json, data/audio.json.
 import { $ } from 'bun';
-import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { alignWords, type ScriptWord } from './align-words';
+import { parseArgs } from 'node:util';
+import { forcedAlign, refine } from './aligner';
+import { decode, levels, normalize, SR, trimSilence, writeAudio } from './audio-io';
+import { report, writeNarration, type PlateAudio } from './narration-files';
+import { parseScript, plateWords, type Plate, type TimedWord } from './script';
+import { DEFAULTS, resolveSettings } from './settings';
+import { loadConfig } from '../cli/server';
 
-// the project folder: the one `reel` was pointed at, else the current folder
-const ROOT = path.resolve(process.env.REEL_PROJECT ?? '.');
-const PLATE_GAP = 0.85, TAIL = Number(process.env.TAIL ?? 1.6), CUT_LEAD = 0.25; // TAIL: silence after the last word (room for the credits)
-const tmp = path.join(ROOT, 'audio/.align');
-mkdirSync(tmp, { recursive: true });
+export const ALIGN_HELP = `reel align <recording | folder> [flags]: time narration.txt to a voice recording
 
-const src = process.argv[2];
-if (!src || !existsSync(src)) throw new Error('usage: bun tools/align.ts <recording | folder of per-plate files>');
+<recording> is one take reading narration.txt top to bottom (any format ffmpeg reads); <folder> holds one file
+per plate, named after its header (intro.m4a, setup.wav, …). The take is cleaned (high-pass, -16 LUFS), its
+words timed, and the plates laid out with the pauses below. Writes audio/narration.flac, data/words.json and
+data/audio.json, like reel narrate.
 
-const plates: { name: string; lines: string[] }[] = [];
-for (const raw of readFileSync(path.join(ROOT, 'narration.txt'), 'utf8').split('\n')) {
-  const l = raw.trim();
-  if (!l) continue;
-  if (l.startsWith('#')) plates.push({ name: l.slice(1).trim(), lines: [] });
-  else plates.at(-1)!.lines.push(l);
+  --method qwen|whisper   qwen (default): force-align the script's words (Qwen3-ForcedAligner through MLX,
+                          Apple Silicon; the model, about 1.2 GB, is fetched on first use). whisper: transcribe
+                          (faster-whisper small.en) and match the words heard to the script, for a reading
+                          that departs from it; less precise
+  --lead ${DEFAULTS.lead}              seconds before the first word
+  --hold ${DEFAULTS.hold}             seconds at least between plates (silence is added at a quiet point)
+  --tail ${DEFAULTS.tail}              seconds after the last word
+  --language English      the script's language (qwen)
+  --project <folder>      the project (default: the current folder)
+
+Settings also come from \`narration\` in reel.config.ts.`;
+
+const CLEAN = 'highpass=f=70';
+const LOUDNESS = { integrated: -16, truePeak: -1.5 };
+
+if (import.meta.main) {
+  let a;
+  try {
+    a = parseArgs({ args: process.argv.slice(2), strict: true, allowPositionals: true, options: { method: { type: 'string' }, lead: { type: 'string' }, hold: { type: 'string' }, tail: { type: 'string' }, language: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+  } catch (e) { console.error(`reel align: ${(e as Error).message} (reel align --help)`); process.exit(2); }
+  if (a.values.help) { console.log(ALIGN_HELP); process.exit(0); }
+  if (a.positionals.length !== 1) { console.error('reel align: expected one recording or folder (reel align --help)'); process.exit(2); }
+  const method = a.values.method ?? 'qwen';
+  if (method !== 'qwen' && method !== 'whisper') { console.error(`reel align: --method ${method}: expected qwen or whisper`); process.exit(2); }
+  try {
+    console.log(await align(path.resolve(process.env.REEL_PROJECT ?? '.'), path.resolve(a.positionals[0]!), method, a.values));
+  } catch (e) { console.error(`reel align: ${(e as Error).message}`); process.exit(1); }
 }
 
-// 1. one clean 48 kHz mono take: high-pass, loudness-normalised, silence trimmed at both ends
-const TRIM = 'silenceremove=start_periods=1:start_threshold=-45dB,areverse,silenceremove=start_periods=1:start_threshold=-45dB,areverse';
-const clean = (i: string, o: string) => $`ffmpeg -loglevel error -y -i ${i} -af highpass=f=70,${{ raw: TRIM }},apad=pad_dur=0.3 -ar 48000 -ac 1 ${o}`;
-const full = path.join(tmp, 'full.wav');
-if (statSync(src).isDirectory()) {
-  const files = readdirSync(src);
-  const list: string[] = [];
-  const gap = path.join(tmp, 'gap.wav');
-  await $`ffmpeg -loglevel error -y -f lavfi -i anullsrc=r=48000:cl=mono -t ${PLATE_GAP} ${gap}`;
-  for (const [i, p] of plates.entries()) {
-    const f = files.find((x) => path.parse(x).name === p.name);
-    if (!f) throw new Error(`no recording for plate "${p.name}" in ${src}`);
-    const o = path.join(tmp, `p${i}.wav`);
-    await clean(path.join(src, f), o);
-    list.push(`file '${o}'`, `file '${gap}'`);
+export async function align(root: string, src: string, method: 'qwen' | 'whisper', flags: Record<string, string | boolean | undefined>) {
+  if (!existsSync(src)) throw new Error(`${src}: no such file or folder`);
+  const scriptFile = path.join(root, 'narration.txt');
+  if (!existsSync(scriptFile)) throw new Error(`${scriptFile} is missing`);
+  const plates = parseScript(readFileSync(scriptFile, 'utf8'), scriptFile);
+  const s = resolveSettings((await loadConfig(root)).narration, flags);
+  const work = path.join(root, 'audio/.align');
+  rmSync(work, { recursive: true, force: true });
+  mkdirSync(work, { recursive: true });
+  // a recording, high-passed, at -16 LUFS, without the silence at its ends
+  const load = async (f: string, k: string) => {
+    const o = path.join(work, `${k}.f32.wav`);
+    await $`ffmpeg -nostdin -loglevel error -y -i ${f} -af ${CLEAN} -ac 1 -ar ${SR} -c:a pcm_f32le ${o}`;
+    return trimSilence(await normalize(await decode(o), LOUDNESS, path.join(work, k)), SR, -45, 0.05).pcm;
+  };
+
+  let parts: PlateAudio[];
+  if (statSync(src).isDirectory()) {
+    const files = readdirSync(src);
+    const pcms = await Promise.all(plates.map(async (p, k) => {
+      const f = files.find((x) => path.parse(x).name === p.name);
+      if (!f) throw new Error(`no recording for plate '${p.name}' in ${src} (files are named after the plates: ${p.name}.wav, …)`);
+      return load(path.join(src, f), `p${k}`);
+    }));
+    const timed = await timeWords(pcms.map((pcm, k) => ({ pcm, words: plateWords(plates[k]!) })), method, work, s.language);
+    parts = pcms.map((pcm, k) => ({ pcm, words: timed[k]! }));
+  } else {
+    const pcm = await load(src, 'take');
+    const all = plates.flatMap((p) => plateWords(p));
+    const [words] = await timeWords([{ pcm, words: all }], method, work, s.language);
+    parts = splitPlates(plates, pcm, words!);
   }
-  writeFileSync(path.join(tmp, 'list.txt'), list.join('\n'));
-  await $`ffmpeg -loglevel error -y -f concat -safe 0 -i ${path.join(tmp, 'list.txt')} ${path.join(tmp, 'joined.wav')}`;
-  await $`ffmpeg -loglevel error -y -i ${path.join(tmp, 'joined.wav')} -af loudnorm=I=-16:TP=-1.5:LRA=11 -ar 48000 ${full}`;
-} else {
-  await clean(src, path.join(tmp, 'joined.wav'));
-  await $`ffmpeg -loglevel error -y -i ${path.join(tmp, 'joined.wav')} -af loudnorm=I=-16:TP=-1.5:LRA=11 -ar 48000 ${full}`;
-}
-// silence before the first word (env LEAD, default 0.6 s; 5 s leaves room for the title card)
-const LEAD = Number(process.env.LEAD ?? 0.6);
-const final = path.join(tmp, 'final.wav');
-await $`ffmpeg -loglevel error -y -i ${full} -af adelay=${LEAD * 1000},apad=pad_dur=${TAIL} ${final}`;
-let duration = Number((await $`ffprobe -v error -show_entries format=duration -of csv=p=0 ${final}`.text()).trim());
-
-// 2. Whisper word timestamps, transcribed in chunks (tools/whisper_words.py; the script supplies a vocabulary prompt)
-const w16 = path.join(tmp, 'w16.wav'), wjson = path.join(tmp, 'words.json');
-await $`ffmpeg -loglevel error -y -i ${final} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
-const script = plates.flatMap((p) => p.lines).join(' ');
-await $`uv run -q --with faster-whisper --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${w16} ${wjson} ${script}`;
-const heard: { w: string; s: number; e: number }[] = [];
-// Whisper splits figures into "152" ",000" and "2" ".06": join them back into one word
-for (const h of JSON.parse(readFileSync(wjson, 'utf8')) as typeof heard) {
-  const prev = heard.at(-1);
-  if (prev && /^[,.]\d/.test(h.w) && /\d$/.test(prev.w)) { prev.w += h.w; prev.e = h.e; }
-  else heard.push(h);
+  rmSync(work, { recursive: true, force: true });
+  const how = method === 'qwen' ? 'Qwen3-ForcedAligner' : 'faster-whisper small.en matched to the script';
+  const r = await writeNarration(root, plates, parts, s, `recording ${path.basename(src)}; word times from ${how}, snapped to pauses`);
+  return report(r);
 }
 
-// Whisper tends to start the first word after a pause too early; move such starts to where sound begins
-const sil: { s: number; e: number }[] = [];
-const sd = await $`ffmpeg -hide_banner -i ${w16} -af silencedetect=n=-40dB:d=0.25 -f null -`.nothrow().quiet();
-let open = 0;
-for (const m of sd.stderr.toString().matchAll(/silence_(start|end): ([\d.]+)/g)) {
-  if (m[1] === 'start') open = Number(m[2]);
-  else sil.push({ s: open, e: Number(m[2]) });
-}
-for (const h of heard) {
-  const z = sil.find((q) => h.s >= q.s - 0.05 && h.s < q.e && q.e < h.e);
-  if (z) h.s = z.e;
-}
-
-// 3. match script words to heard words (tools/align-words.ts)
-const sw: ScriptWord[] = [];
-const lineMeta: { plate: string; text: string }[] = [];
-for (const p of plates) for (const text of p.lines) {
-  for (const w of text.split(/\s+/)) sw.push({ w, line: lineMeta.length });
-  lineMeta.push({ plate: p.name, text });
-}
-const n = sw.length;
-const matched = alignWords(sw, heard, LEAD, duration - TAIL);
-
-// every line is said after a pause: snap its first word to the end of that pause and its last word to the
-// start of the next one (fixes lines that open or close on a number Whisper wrote differently)
-for (let li = 0; li < lineMeta.length; li++) {
-  const ws = sw.filter((x) => x.line === li);
-  const first = ws[0]!, last = ws.at(-1)!;
-  const prevEnd = li > 0 ? sw.filter((x) => x.line === li - 1).at(-1)!.e! : 0;
-  const before = sil.filter((q) => q.e > prevEnd - 0.3 && q.e < first.e! - 0.05).at(-1);
-  if (before) first.s = before.e;
-  const nextStart = li < lineMeta.length - 1 ? sw.find((x) => x.line === li + 1)!.s! : duration;
-  const after = sil.find((q) => q.s > last.s! + 0.05 && q.s < nextStart + 0.3);
-  if (after) last.e = after.s;
+/** Times of each passage's script words: force-aligned, or transcribed with Whisper and matched. */
+async function timeWords(passages: { pcm: Float32Array; words: { w: string }[] }[], method: 'qwen' | 'whisper', work: string, language: string): Promise<TimedWord[][]> {
+  if (method === 'qwen') return forcedAlign(passages, path.join(work, 'fa'), language);
+  return Promise.all(passages.map(async (p, i) => {
+    const w48 = path.join(work, `wh${i}.f32.wav`), w16 = path.join(work, `wh${i}.wav`), out = path.join(work, `wh${i}.json`);
+    await writeAudio(p.pcm, w48);
+    await $`ffmpeg -nostdin -loglevel error -y -i ${w48} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
+    const script = p.words.map((x) => x.w).join(' ');
+    const r = await $`uv run -q --with faster-whisper==1.2.1 --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${w16} ${out} ${script}`.nothrow();
+    if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.toString().slice(-1500)}`);
+    return refine(p.words, joinFigures(JSON.parse(readFileSync(out, 'utf8'))), p.pcm);
+  }));
 }
 
-// every plate holds at least HOLD seconds after its last word: add silence at plate breaks that are shorter
-const HOLD = Number(process.env.HOLD ?? 1.2);
-// Where in a gap to splice the silence in: the first 20 ms window within 3 dB of the gap's quietest, so the cut
-// falls just after the previous word dies away and never inside a breath or a word (a cut there sounds like a
-// cough). Each splice also gets short fades.
-const SR = 48000, FADE = 0.01;
-const pcm = new Float32Array(await $`ffmpeg -loglevel error -i ${final} -f f32le -ac 1 -ar ${SR} -`.arrayBuffer());
-// The TTS take is gated: between some sentences it drops to digital silence mid-breath, and the hard edge sounds
-// like a cough (worse once sped up). Fade the EDGE seconds of sound either side of every gated silence.
-{
-  const EDGE = 0.03, E = Math.round(EDGE * SR), MIN = Math.round(0.1 * SR), Z = 2 / 32768;
-  const ramp = (k: number) => 0.5 - 0.5 * Math.cos((Math.PI * k) / E); // 0 → 1 over E samples
-  let i = 0, edges = 0;
-  while (i < pcm.length) {
-    if (Math.abs(pcm[i]!) >= Z) { i++; continue; }
-    let j = i;
-    while (j < pcm.length && Math.abs(pcm[j]!) < Z) j++;
-    if (j - i >= MIN) {
-      for (let k = 0; k < E && i - 1 - k >= 0; k++) pcm[i - 1 - k]! *= ramp(k);
-      for (let k = 0; k < E && j + k < pcm.length; k++) pcm[j + k]! *= ramp(k);
-      edges++;
+/** Whisper splits figures ("152" ",000", "2" ".06"): join them back into one word. */
+export function joinFigures(heard: { w: string; s: number; e: number }[]): TimedWord[] {
+  const out: TimedWord[] = [];
+  for (const h of heard) {
+    const prev = out.at(-1);
+    if (prev && /^[,.]\d/.test(h.w) && /\d$/.test(prev.w)) { prev.w += h.w; prev.end = h.e; }
+    else out.push({ w: h.w, start: h.s, end: h.e });
+  }
+  return out;
+}
+
+/**
+ * One take cut into plates: each cut at the quietest 20 ms in the gap between one plate's last word and the
+ * next one's first, so it never falls in a breath or a word; each part's words re-timed from its start.
+ */
+function splitPlates(plates: Plate[], pcm: Float32Array, words: TimedWord[]): PlateAudio[] {
+  const db = levels(pcm, SR, 0.005);
+  const counts = plates.map((p) => plateWords(p).length);
+  const cuts = [0];
+  let i = 0;
+  for (let k = 0; k + 1 < plates.length; k++) {
+    i += counts[k]!;
+    const a = words[i - 1]!.end, b = words[i]!.start;
+    let best = a, lo = Infinity;
+    for (let t = a; t + 0.02 <= b; t += 0.005) {
+      const f = Math.round(t / 0.005), v = Math.max(db[f] ?? -120, db[f + 1] ?? -120, db[f + 2] ?? -120, db[f + 3] ?? -120);
+      if (v < lo - 0.5) { lo = v; best = t + 0.01; }
     }
-    i = j;
+    cuts.push(Math.round(best * SR));
   }
-  console.log(`smoothed ${edges} gated silences`);
+  cuts.push(pcm.length);
+  let w0 = 0;
+  return plates.map((_, k) => {
+    const t0 = cuts[k]! / SR, ws = words.slice(w0, w0 + counts[k]!).map((w) => ({ w: w.w, start: w.start - t0, end: w.end - t0 }));
+    w0 += counts[k]!;
+    return { pcm: pcm.slice(cuts[k]!, cuts[k + 1]!), words: ws };
+  });
 }
-// ElevenLabs v3 reads a bare [clear] tag as "clear your throat": a short noise burst, a gap, then the line. Find
-// that shape at the start of a line's first word (a gap of 60 ms or more, 28 dB under the burst, starting
-// 0.12-0.45 s in) and mute the burst. Word times stay as they are, so the picture does not move.
-{
-  const H = Math.round(0.005 * SR), GAP = 12, FROM = 24, TO = 90; // frames of 5 ms
-  const lv = (s: number) => { let e = 0; for (let k = s; k < s + H; k++) e += pcm[k]! ** 2; return 10 * Math.log10(e / H + 1e-18); };
-  for (let li = 0; li < lineMeta.length; li++) {
-    const w = sw.find((x) => x.line === li)!;
-    const s0 = Math.round(w.s! * SR), n = Math.floor(((Math.min(w.e!, w.s! + 0.7) - w.s!) * SR) / H);
-    if (n < FROM + GAP) continue;
-    const v = Array.from({ length: n }, (_, i) => lv(s0 + i * H));
-    const peak = Math.max(...v.slice(0, TO));
-    let g = -1;
-    for (let i = FROM; i < Math.min(n - GAP, TO); i++) if (v.slice(i, i + GAP).every((x) => x < peak - 28)) { g = i; break; }
-    if (g < 0) continue;
-    // mute through the gap to where the word itself starts (the burst's quiet tail is still audible), then a
-    // 10 ms fade-in onto the word
-    let j = g;
-    while (j < n && v[j]! < peak - 28) j++;
-    const end = s0 + j * H - Math.round(0.01 * SR), F = Math.round(0.01 * SR);
-    pcm.fill(0, Math.max(0, s0 - Math.round(0.02 * SR)), end);
-    for (let k = 0; k < F; k++) pcm[end + k]! *= k / F;
-    console.log(`muted a throat-clear (${(j * 0.005).toFixed(2)} s) before line ${li + 1} at ${w.s!.toFixed(2)} s: ${lineMeta[li]!.text.slice(0, 40)}`);
-  }
-}
-const smooth = path.join(tmp, 'smooth.wav');
-await Bun.write(path.join(tmp, 'smooth.f32'), pcm);
-await $`ffmpeg -loglevel error -y -f f32le -ar ${SR} -ac 1 -i ${path.join(tmp, 'smooth.f32')} -c:a pcm_s16le ${smooth}`;
-const quietCut = (t0: number, t1: number) => {
-  const W = 960, step = 240, s0 = Math.round(t0 * SR), s1 = Math.round(t1 * SR) - W;
-  const win: [number, number][] = [];
-  for (let s = s0; s <= s1; s += step) {
-    let e = 0;
-    for (let k = s; k < s + W; k++) e += pcm[k]! * pcm[k]!;
-    win.push([s, e]);
-  }
-  if (!win.length) return (t0 + t1) / 2;
-  const min = Math.min(...win.map((w) => w[1]));
-  return (win.find((w) => w[1] <= min * 2 + 1e-12)![0] + W / 2) / SR;
-};
-const breaks: { at: number; add: number }[] = [];
-for (let pi = 1; pi < plates.length; pi++) {
-  const prev = sw.filter((x) => lineMeta[x.line]!.plate === plates[pi - 1]!.name).at(-1)!;
-  const next = sw.find((x) => lineMeta[x.line]!.plate === plates[pi]!.name)!;
-  const gap = next.s! - prev.e!;
-  if (gap < HOLD + CUT_LEAD) breaks.push({ at: quietCut(prev.e!, next.s!), add: HOLD + CUT_LEAD - gap });
-}
-for (const x of sw) {
-  const shift = breaks.filter((b) => b.at < x.s!).reduce((a, b) => a + b.add, 0);
-  x.s! += shift; x.e! += shift;
-}
-const segs: string[] = [];
-let from = 0;
-breaks.forEach((b, i) => {
-  const fin = i > 0 ? `,afade=t=in:d=${FADE}` : '';
-  const fout = `,afade=t=out:st=${(b.at - from - FADE).toFixed(4)}:d=${FADE}`;
-  segs.push(`[0]atrim=${from}:${b.at},asetpts=PTS-STARTPTS${fin}${fout}[a${i}]`, `aevalsrc=0:d=${b.add.toFixed(3)}:s=48000[z${i}]`);
-  from = b.at;
-});
-segs.push(`[0]atrim=start=${from},asetpts=PTS-STARTPTS${breaks.length ? `,afade=t=in:d=${FADE}` : ''}[a${breaks.length}]`);
-const order = breaks.map((_, i) => `[a${i}][z${i}]`).join('') + `[a${breaks.length}]`;
-const held = path.join(tmp, 'held.wav');
-await $`ffmpeg -loglevel error -y -i ${smooth} -filter_complex ${segs.join(';') + ';' + order + `concat=n=${breaks.length * 2 + 1}:v=0:a=1`} ${held}`;
-duration = Number((await $`ffprobe -v error -show_entries format=duration -of csv=p=0 ${held}`.text()).trim());
-const scratch = path.join(ROOT, 'audio/narration.scratch.mp3');
-if (!existsSync(scratch)) copyFileSync(path.join(ROOT, 'audio/narration.mp3'), scratch);
-await $`ffmpeg -loglevel error -y -i ${held} -c:a libmp3lame -b:a 192k ${path.join(ROOT, 'audio/narration.mp3')}`;
-
-// 4. lines, sections (each plate cuts in just before its first word), and the same files narration.ts writes
-const r3 = (x: number) => +x.toFixed(3);
-const lines = lineMeta.map((lm, i) => {
-  const ws = sw.filter((x) => x.line === i);
-  return { i, plate: lm.plate, text: lm.text, start: r3(ws[0]!.s!), end: r3(ws.at(-1)!.e!), words: ws.map((x) => ({ w: x.w, start: r3(x.s!), end: r3(x.e!) })) };
-});
-const sections = plates.map((p, pi) => {
-  const first = lines.find((l) => l.plate === p.name)!;
-  const prevEnd = pi > 0 ? lines.filter((l) => l.plate === plates[pi - 1]!.name).at(-1)!.end : 0;
-  return { name: p.name, start: pi === 0 ? 0 : r3(Math.max(prevEnd + 0.05, first.start - CUT_LEAD)), end: 0 };
-});
-sections.forEach((s, i) => (s.end = i < sections.length - 1 ? sections[i + 1]!.start : r3(duration)));
-
-const bpm = 100, period = 60 / bpm;
-const beats: number[] = [];
-for (let b = 0; b * period < duration; b++) beats.push(r3(b * period));
-mkdirSync(path.join(ROOT, 'data'), { recursive: true });
-writeFileSync(path.join(ROOT, 'data/words.json'), JSON.stringify({ lines, notes: `voice: ${path.basename(src)}; word times from faster-whisper small.en` }, null, 1));
-writeFileSync(path.join(ROOT, 'data/audio.json'), JSON.stringify({
-  duration: r3(duration), bpm, beat_period: period, time_signature: 4, beats, downbeats: beats.filter((_, i) => i % 4 === 0),
-  sections, fps: 100, rms: [], low: [], mid: [], high: [], vocal: [], drums: [], bass: [], other: [], onsets: {},
-  notes: 'synthetic: silent beat grid for the engine helpers; sections = plates',
-}, null, 1));
-
-// 5. report: lines where Whisper heard something different from the script are worth a listen
-console.log(`duration ${duration.toFixed(1)} s, ${lines.length} lines, ${matched.filter(Boolean).length}/${n} words matched`);
-for (const s of sections) console.log(`${s.name.padEnd(8)} ${s.start.toFixed(1).padStart(6)} → ${s.end.toFixed(1).padStart(6)}  (${(s.end - s.start).toFixed(1)} s)`);
-lineMeta.forEach((lm, i) => {
-  const idx = sw.map((x, k) => [x, k] as const).filter(([x]) => x.line === i).map(([, k]) => k);
-  const miss = idx.filter((k) => !matched[k]).map((k) => sw[k]!.w);
-  if (miss.length / idx.length > 0.3) console.log(`check line ${i} (${lm.plate}): not heard as written: ${miss.join(' ')}`);
-});
