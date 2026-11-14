@@ -2,9 +2,10 @@
 // a texture compositor and Canvas2D layers uploaded as textures.
 import * as THREE from 'three';
 import { GLSL_COMMON } from './glsl/common';
-import { W, H, FPS, SCALE } from './format';
+import { W, H, FPS, SCALE, ALPHA } from './format';
+import { LIN } from './palette';
 
-export { W, H, FPS, SCALE };
+export { W, H, FPS, SCALE, ALPHA };
 /** Physical (output) size: the logical frame times SCALE (1920x1080 at `?scale=2` → 3840x2160). */
 export const PW = W * SCALE;
 export const PH = H * SCALE;
@@ -219,12 +220,22 @@ export class Layer2D {
   upload() { this.texture.needsUpdate = true; return this.texture; }
 }
 
-/** Clear a render target to a linear colour. */
+/**
+ * Clear a render target to a linear colour. In a transparent render (ALPHA) an opaque clear to the theme's `bg` is
+ * a clear to transparent: the background is what a transparent video leaves out.
+ */
 export function clearRT(renderer: THREE.WebGLRenderer, rt: THREE.WebGLRenderTarget | null, rgb: [number, number, number] = [0, 0, 0], a = 1) {
+  if (ALPHA && a === 1 && isBg(rgb)) { rgb = [0, 0, 0]; a = 0; }
   const prev = renderer.getClearColor(new THREE.Color()).clone();
   const prevA = renderer.getClearAlpha();
   renderer.setRenderTarget(rt);
   renderer.setClearColor(new THREE.Color().setRGB(rgb[0], rgb[1], rgb[2], THREE.LinearSRGBColorSpace), a);
   renderer.clear(true, true, true);
   renderer.setClearColor(prev, prevA);
+}
+
+/** Whether a linear colour is the theme's background (what a transparent render leaves out). */
+export function isBg(rgb: ArrayLike<number>) {
+  const bg = LIN.bg;
+  return Math.abs(rgb[0]! - bg[0]) < 1e-6 && Math.abs(rgb[1]! - bg[1]) < 1e-6 && Math.abs(rgb[2]! - bg[2]) < 1e-6;
 }

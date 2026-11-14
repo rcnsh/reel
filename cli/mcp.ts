@@ -70,6 +70,7 @@ function startVideo(a: Record<string, any>): Job {
   const flag = (k: string, v: unknown) => { if (v !== undefined && v !== false) args.push(`--${k}`, ...(v === true ? [] : [Array.isArray(v) ? v.join(',') : String(v)])); };
   flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme);
   flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); flag('mix', a.mix); flag('subtitles', a.subtitles);
+  flag('format', a.format); flag('chroma', a.chroma); flag('depth', a.depth); flag('alpha', a.alpha); flag('opaque', a.opaque); flag('quality', a.quality); flag('max-fps', a.max_fps); flag('max-size', a.max_size);
   const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
   const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: 'running', progress: null, started: Date.now(), output: '', proc };
   jobs.set(job.id, job);
@@ -189,12 +190,17 @@ export async function serveMcp() {
 
   server.registerTool('video_start', {
     title: 'Start a video render',
-    description: 'Start exporting the video (or a range) to an MP4 in the background (x264, with the project\'s audio track) and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. Use samples \'auto\' for the final motion blur, preset \'veryfast\' for a quick draft. Default output: out/video.mp4 in the project.',
+    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/<format>/frame_NNNNNN.<ext> for sequences).",
     inputSchema: {
-      ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output .mp4 path.'),
-      preset: z.enum(['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow']).optional().describe('x264 preset (default slow).'),
-      crf: z.number().min(0).max(51).optional().describe('x264 quality (default 16; lower is better).'), noaudio: z.boolean().optional().describe('Leave the audio track out.'),
-      mix: z.boolean().optional().describe('The finished file: render, then mix the track, music and cues at the loudness target.'), subtitles: z.boolean().optional().describe('Like mix, with the timed words as a soft subtitle track.'),
+      ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output path (its extension picks the format when `format` is not given; for sequences, the frames are named after it with the frame number).'),
+      format: z.enum(['h264', 'hevc', 'prores', 'prores4444', 'webm', 'gif', 'webp', 'png', 'png16', 'jpeg', 'exr']).optional().describe('Output format (default from the out extension, else h264).'),
+      preset: z.enum(['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow']).optional().describe('x264/x265 preset (default slow for h264, medium for hevc).'),
+      crf: z.number().min(0).max(63).optional().describe('Quality for h264 (default 16), hevc (18) and webm (24); lower is better.'),
+      chroma: z.enum(['420', '444']).optional().describe('h264 chroma subsampling (default 420).'), depth: z.union([z.literal(8), z.literal(10)]).optional().describe('h264 bits per channel (default 8).'),
+      alpha: z.boolean().optional().describe('A transparent background for webp, png, png16 and exr (prores4444 and webm have it unless opaque).'), opaque: z.boolean().optional().describe('prores4444 or webm without alpha.'),
+      quality: z.number().int().min(1).max(100).optional().describe('jpeg and webp quality.'), max_fps: z.number().positive().optional().describe('gif/webp: the highest frame rate (default 25 / 30).'), max_size: z.number().int().min(16).optional().describe('gif/webp: the longest side in px (default 640 / 1080).'),
+      noaudio: z.boolean().optional().describe('Leave the audio track out.'),
+      mix: z.boolean().optional().describe('The finished file: render, then mix the track, music and cues at the loudness target (mp4, mov, webm).'), subtitles: z.boolean().optional().describe('Like mix, with the timed words as a soft subtitle track.'),
     },
   }, (a) => guard(async () => {
     reqOf('still', a, {}); // (the flags checked here, before a process is started)

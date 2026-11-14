@@ -4,6 +4,9 @@ import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Words } from './words';
 import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT } from './gl';
+import { ALPHA, BITS } from './format';
+import { PIXELS, type Pixels } from './pixels';
+export { PIXELS, type Pixels };
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
 import { THEME } from './palette';
 import { LOADING, type Frame, type Scene, type SceneClass, type SceneCtx, type PostOverrides } from './scene';
@@ -110,7 +113,10 @@ export class Engine {
   lastErrors: number[] = [];
   /** Share of the last frame's extra sub-frames (beyond the first set) actually shaded (1 = every tile). */
   lastShaded = 1;
-  private finalRT = new THREE.WebGLRenderTarget(PW, PH, { type: THREE.UnsignedByteType, depthBuffer: false });
+  // (a float target when the output keeps more than 8 bits: the final pass's dither is then at that depth)
+  private finalRT = new THREE.WebGLRenderTarget(PW, PH, { type: BITS > 8 ? THREE.FloatType : THREE.UnsignedByteType, depthBuffer: false });
+  /** The last frame before post: linear HDR, premultiplied (what the 'linear' readback reads). */
+  private linearTex: THREE.Texture | null = null;
   private blit: FSPass;
   private transition = new TransitionPass();
   private accum: FSPass;
@@ -181,7 +187,8 @@ export class Engine {
     const am = this.accum.mat;
     am.blendEquation = THREE.AddEquation;
     am.blendSrc = THREE.OneFactor; am.blendDst = THREE.OneFactor;
-    am.blendSrcAlpha = THREE.ZeroFactor; am.blendDstAlpha = THREE.OneFactor;
+    // (alpha is summed too: a transparent render averages coverage like colour; opaque renders never read it)
+    am.blendSrcAlpha = THREE.OneFactor; am.blendDstAlpha = THREE.OneFactor;
     // sampling error: per block of B x B physical px (2x2 logical), how far the displayed average moves when a
     // step's new sub-frames (2n, summed in b) are merged with the n before them (summed in a): 2/3 of the gap
     const B = 2 * SCALE, ew = Math.ceil(PW / B), eh = Math.ceil(PH / B), R = 16;
@@ -636,7 +643,7 @@ export class Engine {
             for (let k = n; k < 3 * n; k++) sub(k, u[k]!, this.newRT, dt / (3 * n));
             const err = this.sampleError(n) / 2;
             this.lastErrors.push(err);
-            this.comp.draw(r, this.newRT.texture, this.sumRT, { mode: 'add', opacity: 1, premult: false });
+            this.addSum();
             n *= 3;
             if (err < samples.tol) break;
           }
@@ -660,7 +667,7 @@ export class Engine {
             const err = this.sampleError(n, masked) / 2;
             this.lastErrors.push(err);
             if (masked) this.setMasking(true);
-            this.comp.draw(r, this.newRT.texture, this.sumRT, { mode: 'add', opacity: 1, premult: false });
+            this.addSum();
             if (masked) this.setMasking(false);
             shaded += 2 * n * live; full += 2 * n * T;
             n *= 3;
@@ -695,6 +702,7 @@ export class Engine {
       outTex = this.avgRT.texture;
     }
     this.lastSamples = n;
+    this.linearTex = outTex;
     this.post.render(r, outTex, this.finalRT, post, t);
     this.lastPost = post;
     if (toScreen) {
@@ -702,6 +710,12 @@ export class Engine {
       this.blit.render(r, null);
     }
     return n;
+  }
+
+  /** Add a step's new sub-frames (newRT) into the frame's sum, colour and alpha. */
+  private addSum() {
+    this.accum.u.src!.value = this.newRT.texture;
+    this.accum.render(this.renderer, this.sumRT);
   }
 
   /**
@@ -750,12 +764,12 @@ export class Engine {
       clips.forEach((e, i) => boxes.fade(e.id, res.weights[i]! * opacity));
       // (the lowest track goes into the stack only when it is blended or something is drawn over it)
       if (ti === 0 && mode === 'normal' && opacity === 1) { outTex = res.outTex; return; }
-      if (ti === 0) clearRT(r, this.stackRT, [0, 0, 0]);
+      if (ti === 0) clearRT(r, this.stackRT, [0, 0, 0], ALPHA ? 0 : 1);
       else if (outTex !== this.stackRT.texture) this.comp.draw(r, outTex!, this.stackRT, { mode: 'replace', premult: false });
       this.comp.draw(r, res.outTex, this.stackRT, { mode, opacity, premult: false });
       outTex = this.stackRT.texture;
     });
-    if (!outTex) { clearRT(r, this.stackRT, [0, 0, 0]); outTex = this.stackRT.texture; }
+    if (!outTex) { clearRT(r, this.stackRT, [0, 0, 0], ALPHA ? 0 : 1); outTex = this.stackRT.texture; }
     return { outTex, post };
   }
 
@@ -811,7 +825,8 @@ export class Engine {
         // the clip's transition from the previous clip over the overlap (a crossfade unless it says otherwise)
         const tr = transitionOf(e.transition, e.id);
         const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
-        this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0);
+        // (in a transparent render the lowest track is like the others: a dip goes through transparent)
+        this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0 || ALPHA);
         outTex = mix.texture;
         const [wo, wi] = transitionWeights(tr, tin);
         for (let j = 0; j < idx; j++) weights[j]! *= wo;
@@ -839,48 +854,67 @@ export class Engine {
     return out;
   }
 
-  private packs: ({ buf: WebGLBuffer; sync: WebGLSync } | undefined)[] = [];
-  // the frame as packed RGB (rgb24, a quarter fewer bytes to read back and send than RGBA): texel i of a row
-  // holds bytes 4i..4i+3 of the row's R,G,B stream, copied exactly (8-bit in, 8-bit out)
-  private rgbRT = new THREE.WebGLRenderTarget((PW * 3) / 4, PH, { type: THREE.UnsignedByteType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter });
-  private rgbPass = new FSPass(/* glsl */ `
-    uniform sampler2D src;
-    void main() {
-      ivec2 o = ivec2(gl_FragCoord.xy);
-      vec4 v;
-      for (int c = 0; c < 4; c++) {
-        int b = o.x * 4 + c, i = b / 3, ch = b - i * 3;
-        vec4 p = texelFetch(src, ivec2(i, o.y), 0);
-        v[c] = ch == 0 ? p.r : ch == 1 ? p.g : p.b;
-      }
-      fragColor = v;
-    }`, { src: { value: null } });
-  /** Bytes per frame of readStart/readFinish (packed RGB, bottom-up rows). */
+  private packs: ({ buf: WebGLBuffer; sync: WebGLSync; bytes: number } | undefined)[] = [];
+  /**
+   * Packing passes, one per readback: the frame's channels laid out as the bytes of the row stream ffmpeg reads
+   * (little-endian), four bytes per texel of an RGBA8 target `PW * channels * bytes / 4` wide, copied exactly.
+   * rgb8 is packed rgb24 (a quarter fewer bytes to read back and send than RGBA).
+   */
+  private packers = new Map<Pixels, { rt: THREE.WebGLRenderTarget; pass: FSPass }>();
+  private packer(mode: Pixels) {
+    let p = this.packers.get(mode);
+    if (p) return p;
+    const { channels: C, bytes: B } = PIXELS[mode], w = (PW * C * B) / 4;
+    const max = (this.renderer.getContext() as WebGL2RenderingContext).getParameter(0x0d33) as number; // MAX_TEXTURE_SIZE
+    if (w > max) throw new Error(`a ${mode} readback of a ${PW} px wide frame needs a ${w} px wide target; this GPU allows ${max}`);
+    const byte = B === 1 ? 'p[ch]' : `float((${mode === 'linear' ? 'packHalf2x16(vec2(p[ch], 0.0))' : 'uint(clamp(p[ch], 0.0, 1.0) * 65535.0 + 0.5)'} >> (8u * uint(k))) & 255u) / 255.0`;
+    const pass = new FSPass(/* glsl */ `
+      uniform sampler2D src;
+      void main() {
+        ivec2 o = ivec2(gl_FragCoord.xy);
+        vec4 v;
+        for (int c = 0; c < 4; c++) {
+          int b = o.x * 4 + c, i = b / ${C * B}, ch = (b - i * ${C * B}) / ${B}, k = b - i * ${C * B} - ch * ${B};
+          vec4 p = texelFetch(src, ivec2(i, o.y), 0);
+          v[c] = ${byte};
+        }
+        fragColor = v;
+      }`, { src: { value: null } });
+    p = { rt: new THREE.WebGLRenderTarget(w, PH, { type: THREE.UnsignedByteType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }), pass };
+    this.packers.set(mode, p);
+    return p;
+  }
+  /** Bytes per frame of readStart/readFinish in `mode` (bottom-up rows). */
+  static bytes(mode: Pixels = 'rgb8') { return PW * PH * PIXELS[mode].channels * PIXELS[mode].bytes; }
+  /** Bytes per frame of the rgb24 readback. */
   static readonly RGB_BYTES = PW * PH * 3;
   /**
-   * Pipelined readback of the last rendered frame as packed RGB (rgb24, bottom-up rows; the bytes of
-   * readPixels() without alpha): queue the copy into pixel-pack buffer `slot` (it runs on the GPU after
-   * the frame, so the next frame can be rendered at once), then collect it with readFinish(slot). Two
-   * slots let frame n be collected while n+1 renders. (A fresh buffer each time, as three's readback does:
-   * Chrome warns on every frame when a read-back buffer is reused, though it reads no faster.)
+   * Pipelined readback of the last rendered frame in `mode` (bottom-up rows; rgb8 is the bytes of readPixels()
+   * without alpha): queue the copy into pixel-pack buffer `slot` (it runs on the GPU after the frame, so the next
+   * frame can be rendered at once), then collect it with readFinish(slot). Two slots let frame n be collected while
+   * n+1 renders. (A fresh buffer each time, as three's readback does: Chrome warns on every frame when a read-back
+   * buffer is reused, though it reads no faster.)
    */
-  readStart(slot: number) {
+  readStart(slot: number, mode: Pixels = 'rgb8') {
     const r = this.renderer, gl = r.getContext() as WebGL2RenderingContext;
     const old = this.packs[slot];
     if (old) { gl.deleteSync(old.sync); gl.deleteBuffer(old.buf); } // (left by a stream that failed)
+    if (mode === 'linear' && !this.linearTex) throw new Error('readStart: nothing rendered yet');
+    if ((mode === 'rgb16' || mode === 'rgba16') && BITS === 8) throw new Error(`readStart: a ${mode} readback needs a page opened with ?bits= above 8`);
+    const { rt, pass } = this.packer(mode), bytes = Engine.bytes(mode);
     const buf = gl.createBuffer()!;
-    this.rgbPass.u.src!.value = this.finalRT.texture;
-    this.rgbPass.render(r, this.rgbRT);
-    r.setRenderTarget(this.rgbRT);
+    pass.u.src!.value = mode === 'linear' ? this.linearTex : this.finalRT.texture;
+    pass.render(r, rt);
+    r.setRenderTarget(rt);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buf);
-    gl.bufferData(gl.PIXEL_PACK_BUFFER, Engine.RGB_BYTES, gl.STREAM_READ);
-    gl.readPixels(0, 0, this.rgbRT.width, PH, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ);
+    gl.readPixels(0, 0, rt.width, PH, gl.RGBA, gl.UNSIGNED_BYTE, 0);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
-    this.packs[slot] = { buf, sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)! };
+    this.packs[slot] = { buf, sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!, bytes };
     gl.flush();
   }
 
-  /** Wait for readStart(slot)'s copy and copy it into `out` (Engine.RGB_BYTES). */
+  /** Wait for readStart(slot)'s copy and copy it into `out` (Engine.bytes of its mode). */
   async readFinish(slot: number, out: Uint8Array) {
     const gl = this.renderer.getContext() as WebGL2RenderingContext, p = this.packs[slot];
     if (!p) throw new Error(`readFinish: nothing queued in slot ${slot}`);
@@ -894,7 +928,7 @@ export class Engine {
     this.packs[slot] = undefined;
     gl.deleteSync(p.sync);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, p.buf);
-    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out);
+    gl.getBufferSubData(gl.PIXEL_PACK_BUFFER, 0, out, 0, p.bytes);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     gl.deleteBuffer(p.buf);
     return out;

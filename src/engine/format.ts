@@ -20,7 +20,9 @@ function read() {
   if (w % 4 || h % 2) throw new Error(`frame size ${w}x${h}: the width must be a multiple of 4 and the height even`);
   const fps = Number(q.get('fps') ?? base.fps);
   if (!(fps > 0 && fps <= 240)) throw new Error(`?fps=${q.get('fps')}: expected a frame rate up to 240`);
-  return { w, h, fps, scale: int('scale', 1, 1, 4) };
+  const bits = int('bits', 8, 8, 16);
+  if (![8, 10, 12, 16].includes(bits)) throw new Error(`?bits=${bits}: expected 8, 10, 12 or 16`);
+  return { w, h, fps, scale: int('scale', 1, 1, 4), alpha: q.get('alpha') === '1', bits };
 }
 const f = read();
 
@@ -31,3 +33,14 @@ export const H = f.h;
 export const FPS = f.fps;
 /** Physical pixels per logical pixel of the output (integer 1..4, default 1). */
 export const SCALE = f.scale;
+/**
+ * A render with a transparent background (`?alpha=1`, which `reel video` sets for formats that carry alpha): the
+ * theme's background clears to transparent, the lowest track composites like the ones above it, and the final pass
+ * writes straight (unassociated) alpha.
+ */
+export const ALPHA = f.alpha;
+/**
+ * Bits per channel the output is encoded at (`?bits=`, 8 by default; 10, 12 or 16 for the formats that keep more):
+ * above 8 the final pass renders into a float target and dithers at that depth instead of at 8 bits.
+ */
+export const BITS = f.bits;

@@ -1,6 +1,7 @@
 // Entry: preview player (default) or export mode (?export=1, driven by cli/reel.ts).
-import { Engine, type AdaptiveSampling } from './engine/engine';
-import { W, H, PW, PH, SCALE, FPS } from './engine/gl';
+import { Engine, type AdaptiveSampling, type Pixels } from './engine/engine';
+import { W, H, PW, PH, SCALE, FPS, ALPHA } from './engine/gl';
+import { BITS } from './engine/format';
 import { THEME } from './engine/palette';
 import { frameStats, hexRgb, measureText } from './check';
 import config from '@project/reel.config';
@@ -47,7 +48,7 @@ interface Sender { send(fill: (buf: Uint8Array) => Promise<unknown>): Promise<vo
  * A WebSocket written from a worker thread: send() fills a pooled frame buffer, transfers it to the worker
  * (no copy) and returns once the buffer is on its way, waiting first while `inflight` frames are unacknowledged.
  */
-function sender(url: string, inflight: number): Promise<Sender> {
+function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
   let s = senders.get(url);
   if (s) return s;
   s = new Promise<Sender>((resolve, reject) => {
@@ -82,7 +83,7 @@ function sender(url: string, inflight: number): Promise<Sender> {
       while (!failed && sent - acked >= inflight) await wait();
       if (failed) throw new Error(failed);
       // two buffers: one being filled while the other is with the worker (it comes straight back)
-      if (!free.length && pool < 2) { free.push(new ArrayBuffer(Engine.RGB_BYTES)); pool++; }
+      if (!free.length && pool < 2) { free.push(new ArrayBuffer(bytes)); pool++; }
       while (!free.length) await wait();
       const buf = free.pop()!;
       await fill(new Uint8Array(buf));
@@ -136,13 +137,16 @@ function setupExport() {
      */
     beginRequest() { engine.clearRenderErrors(); return !contextLost; },
     get contextLost() { return contextLost; },
-    /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24). */
+    /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24) unless asked for other pixels. */
     scale: SCALE,
     width: PW,
     height: PH,
     /** The logical frame size scenes lay out in. */
     W, H,
     fps: FPS,
+    /** A transparent render (?alpha=1) and the output's bits per channel (?bits=). */
+    alpha: ALPHA,
+    bits: BITS,
     theme: THEME.name,
     /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
     stateful: [...engine.loaded.values()].some((l) => l.scene?.stateful),
@@ -240,9 +244,11 @@ function setupExport() {
      * pile frames up in memory. Pipelined: frame n's readback is collected while n+1 renders, and the
      * socket is written from a worker thread. Calls with the same `ws` reuse its connection, so a
      * renderer can be handed several ranges; a range that goes on where the last one ended skips the warm-up.
+     * `pixels` picks the readback (rgb8 by default; see Pixels).
      */
-    async stream(opts: { from: number; to: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number }) {
-      const snd = await sender(opts.ws, opts.inflight ?? 4);
+    async stream(opts: { from: number; to: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number; pixels?: Pixels }) {
+      const mode = opts.pixels ?? 'rgb8';
+      const snd = await sender(opts.ws, opts.inflight ?? 4, Engine.bytes(mode));
       const dt = 1 / FPS;
       const n0 = Math.round(opts.from * FPS), n1 = Math.round(opts.to * FPS);
       const S = opts.samples ?? 1, SH = opts.shutter ?? 0.5;
@@ -254,7 +260,7 @@ function setupExport() {
       for (let n = n0; n < n1; n++) {
         const k = await engine.renderFrame(n * dt, dt, false, S, SH);
         used[k] = (used[k] ?? 0) + 1;
-        engine.readStart(n & 1);
+        engine.readStart(n & 1, mode);
         if (pending >= 0) await snd.send((buf) => engine.readFinish(pending & 1, buf));
         pending = n;
       }

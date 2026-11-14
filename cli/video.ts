@@ -3,6 +3,8 @@ import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
+import { PIXELS } from '../src/engine/pixels';
+import { ffmpegArgs, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
 import { launchChrome, openPage, pageUrl, type Format } from './renderer';
 
 export interface VideoOpts {
@@ -16,9 +18,9 @@ export interface VideoOpts {
   from?: number;
   to?: number;
   out: string;
-  crf: number;
-  preset: string;
-  x264: string;
+  /** The format and what the page reads back for it (cli/formats.ts), and the encoder's options. */
+  plan: Plan;
+  enc: EncodeOpts;
   noaudio: boolean;
   workers: number;
   chunk: number;
@@ -41,10 +43,12 @@ export interface VideoResult { file: string; frames: number; seconds: number; wo
  */
 export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   const logs: string[] = [];
+  // (a loop's frame rate may be capped below the project's)
+  const fmt: Format = { ...o.fmt, fps: o.plan.fps };
   const browserOf = async () => {
     const browser = await launchChrome(o.headed);
     try {
-      return { browser, page: await openPage(browser, pageUrl(o.url, o.fmt, o), o.fmt, o, (l) => logs.push(l)) };
+      return { browser, page: await openPage(browser, pageUrl(o.url, fmt, { ...o, alpha: o.plan.alpha, bits: o.plan.bits }), fmt, o, (l) => logs.push(l)) };
     } catch (e) { await browser.close().catch(() => {}); throw e; }
   };
   // (the duration and the track come from the project's data, the same in every page)
@@ -54,31 +58,29 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   const from = o.from ?? 0, to = o.to ?? m.duration;
   if (!(to > from)) throw new Error(`--from ${from} --to ${to}: nothing to render`);
 
-  const fps = o.fmt.fps, OW = o.fmt.w * o.fmt.scale, OH = o.fmt.h * o.fmt.scale;
-  mkdirSync(path.dirname(o.out), { recursive: true });
+  const fps = fmt.fps, OW = Math.round(fmt.w * fmt.scale), OH = Math.round(fmt.h * fmt.scale);
+  const seq = o.plan.format.kind === 'sequence';
+  mkdirSync(path.dirname(seq ? sequencePattern(o.out, o.plan.format) : o.out), { recursive: true });
   // the sound the project's audio analysis names, if the file is there (a silent video has none)
   const audio = m.track && existsSync(path.join(o.project, m.track)) ? path.join(o.project, m.track) : null;
   const mux = !!audio && !o.noaudio;
-  // (frames come as rgb24: the same YUV out of the scaler as from rgba, a quarter fewer bytes to move)
-  const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${OW}x${OH}`, '-r', String(fps), '-i', 'pipe:0'];
-  if (mux) args.push('-ss', String(from), '-t', String(to - from), '-i', audio!);
-  // Frames are full-range sRGB (toSRGB in the final pass): converted with the BT.709 matrix into limited range,
-  // chroma averaged over its 2x2 block (no ringing at colour edges), and the stream tagged BT.709 throughout.
-  args.push('-vf', 'vflip,scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709',
-    '-c:v', 'libx264', '-preset', o.preset, '-crf', String(o.crf), '-pix_fmt', 'yuv420p', '-tune', 'grain', '-x264-params', o.x264,
-    '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709');
-  if (mux) args.push('-c:a', 'aac', '-b:a', '320k', '-shortest');
-  args.push('-movflags', '+faststart', o.out);
+  const f0 = Math.round(from * fps), f1 = Math.round(to * fps), total = f1 - f0;
+  // (an ffmpeg without libwebp: PNG frames into a folder, assembled by img2webp at the end)
+  const webpFrames = o.plan.format.id === 'webp' && !hasEncoder('libwebp_anim') ? path.join(tmpdir(), `reel-webp-${process.pid}-${Date.now()}`) : undefined;
+  if (webpFrames) {
+    if (!Bun.which('img2webp')) throw new Error('webp: this ffmpeg has no libwebp encoder and img2webp (libwebp\'s tools: brew install webp, apt install webp) is not installed');
+    mkdirSync(webpFrames, { recursive: true });
+  }
+  const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: o.out, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames });
   const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
 
-  const f0 = Math.round(from * fps), f1 = Math.round(to * fps), total = f1 - f0;
   const chunk = Math.max(1, o.chunk);
   // (a scene with simulation state needs its frames in order from one renderer)
   const workers = m.stateful ? 1 : Math.max(1, Math.min(o.workers, Math.ceil(total / chunk)));
   // reorder buffer: frames waiting for an earlier one or for the encoder, acknowledged while under ~1 GB in
   // memory; past that they go to a spool on disk (up to spoolGb, default 20), so the renderers never wait
   // for x264 in the light scenes and x264 catches up in the heavy ones, where the CPU is free
-  const frameBytes = OW * OH * 3;
+  const frameBytes = OW * OH * PIXELS[o.plan.pixels].channels * PIXELS[o.plan.pixels].bytes;
   const cap = Math.max(4, Math.floor((o.memGb * 1e9) / frameBytes));
   const spoolCap = Math.floor((o.spoolGb * 1e9) / frameBytes);
   const spoolDir = path.join(tmpdir(), `reel-spool-${process.pid}-${Date.now()}`);
@@ -157,7 +159,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     port: 0,
     fetch(req, srv) { return srv.upgrade(req, { data: { k: +(new URL(req.url).searchParams.get('w') ?? 0) } }) ? undefined : new Response('ws only', { status: 400 }); },
     websocket: {
-      maxPayloadLength: Math.max(64 * 1024 * 1024, OW * OH * 3 + 1024),
+      maxPayloadLength: Math.max(64 * 1024 * 1024, frameBytes + 1024),
       open(ws) { sockets[ws.data.k] = ws; if (failure) ws.close(); },
       message(ws, msg) {
         if (failure) return;
@@ -193,7 +195,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
       for (let r = take(); r && !failure; r = take()) {
         for (let n = r[0]; n < r[1]; n++) queue[k]!.push(n);
         const h: Record<string, number> = await page.evaluate((x) => (window as any).__reel.stream(x), {
-          from: r[0] / fps, to: r[1] / fps, ws: `ws://localhost:${server.port}/?w=${k}`, samples: o.samples, shutter: o.shutter, inflight: 4,
+          from: r[0] / fps, to: r[1] / fps, ws: `ws://localhost:${server.port}/?w=${k}`, samples: o.samples, shutter: o.shutter, inflight: 4, pixels: o.plan.pixels,
         });
         for (const [c, mm] of Object.entries(h)) used[c] = (used[c] ?? 0) + mm;
       }
@@ -207,6 +209,10 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     ff.stdin.end();
     const code = await ff.exited;
     if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`);
+    if (webpFrames) {
+      const w = Bun.spawnSync(webpArgs(webpFrames, total, fps, o.enc, o.out), { stdout: 'pipe', stderr: 'pipe' });
+      if (w.exitCode !== 0) throw new Error(`img2webp failed: ${w.stderr.toString().trim().slice(-800)}`);
+    }
     ok = true;
   } finally {
     ending = true;
@@ -215,7 +221,19 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     await closePages();
     server.stop(true);
     rmSync(spoolDir, { recursive: true, force: true });
+    if (webpFrames) rmSync(webpFrames, { recursive: true, force: true });
     for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, onSignal);
   }
   return { file: o.out, frames: written, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers, subFrames: used, spoolPeak, errors: [...sceneErrors], logs, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
+}
+
+const encoders = new Map<string, boolean>();
+/** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
+export function hasEncoder(name: string) {
+  if (!encoders.size) {
+    const out = Bun.spawnSync(['ffmpeg', '-hide_banner', '-encoders'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString();
+    for (const m of out.matchAll(/^\s*[VAS][.A-Z]{5}\s+(\S+)/gm)) encoders.set(m[1]!, true);
+    encoders.set('', true);
+  }
+  return encoders.has(name);
 }

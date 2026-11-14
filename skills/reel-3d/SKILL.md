@@ -44,7 +44,7 @@ export default class Bottle extends Scene {
 
 `new Stage3D(this.ctx, { background, fov, near, far, antialias, shadows, unitsPerMetre, label })`, as a field of the scene.
 
-- `background`: a palette key or `#rrggbb` (default `'bg'`, so the set sits in the theme), `'environment'` (the environment map, blurred by `backgroundBlur`), or `null`: transparent, for a stage on a track above 0 over other clips.
+- `background`: a palette key or `#rrggbb` (default `'bg'`, so the set sits in the theme), `'environment'` (the environment map, blurred by `backgroundBlur`), or `null`: transparent, for a stage on a track above 0 over other clips. In a render with alpha the theme's `bg` is left out too.
 - `stage.scene` is a plain `THREE.Scene`: add meshes, groups and lights to it. `stage.cam` is the `PerspectiveCamera`.
 - `stage.camera(pose)` places the camera for this sub-frame; `stage.render(out, { opacity })` renders and composites over `out` (an opaque background replaces it). Call both in every `render()`.
 - `antialias`: `'auto'` (MSAA in one-sample renders, sub-pixel jitter with several), `'jitter'` (never MSAA: less memory), `'none'`.

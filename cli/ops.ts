@@ -177,22 +177,28 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
 
   async perf(h, ctx) {
     const { req } = ctx;
-    return h.page.evaluate(async ({ from, to, samples, shutter }) => {
-      const P = (window as any).__reel, dt = 1 / P.fps;
+    return h.page.evaluate(async ({ from, to, samples, shutter, pixels }) => {
+      const P = (window as any).__reel, dt = 1 / P.fps, E = P.engine;
       const ms: number[] = [];
-      const buf = new Uint8Array(P.width * P.height * 4);
+      let render = 0, readback = 0;
+      const buf = new Uint8Array(E.constructor.bytes(pixels));
       await P.still(from);
       const used: Record<number, number> = {};
       for (let t = from; t < to; t += dt) {
         const a = performance.now();
-        const k = await P.engine.renderFrame(t, dt, false, samples, shutter);
+        const k = await E.renderFrame(t, dt, false, samples, shutter);
+        const b = performance.now();
+        E.readStart(0, pixels);
+        await E.readFinish(0, buf);
+        const c = performance.now();
         used[k] = (used[k] ?? 0) + 1;
-        await P.engine.readPixelsAsync(buf);
-        ms.push(performance.now() - a);
+        render += b - a; readback += c - b;
+        ms.push(c - a);
       }
       ms.sort((a, b) => a - b);
-      return { frames: ms.length, avg: ms.reduce((a, b) => a + b, 0) / ms.length, p50: ms[ms.length >> 1]!, p95: ms[Math.floor(ms.length * 0.95)]!, max: ms[ms.length - 1]!, subFrames: used };
-    }, { from: req.args.from ?? 0, to: req.args.to ?? 5, samples: req.samples, shutter: req.shutter });
+      const n = ms.length;
+      return { frames: n, pixels, avg: ms.reduce((a, b) => a + b, 0) / n, render: render / n, readback: readback / n, p50: ms[n >> 1]!, p95: ms[Math.floor(n * 0.95)]!, max: ms[n - 1]!, subFrames: used };
+    }, { from: req.args.from ?? 0, to: req.args.to ?? 5, samples: req.samples, shutter: req.shutter, pixels: req.args.pixels ?? 'rgb8' });
   },
 
   async gpu(h) {

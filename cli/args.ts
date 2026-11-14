@@ -10,7 +10,8 @@ reuses; each exits 1 on a scene error)
   info                       the project's format, duration, clips, tracks, cues and theme
   still   --t 1.5,23[,..]    PNG stills, the pixels the video export produces. Named after the clips
                              on screen and the time (hello_1.500s.png); never overwrites a file
-                             [--out <dir>|<file.png>] [--max-size <px>]
+                             [--out <dir>|<file.png>] [--max-size <px>] [--alpha: transparent, as
+                             the alpha formats of video render]
   sheet                      a contact sheet, each frame labelled with its time and clips: --from/--to
                              with --n frames, or --times a,b,c, or --cuts (4 frames around every cut)
                              [--cols 4] [--cell 480] [--out <file.png>] [--max-size <px>]
@@ -30,18 +31,38 @@ reuses; each exits 1 on a scene error)
                              changed                    [--tol 0] [--threshold 0] [--out <diff.png>]
   events                     write the sound-mix cues (the timeline and every cue() of the scenes)
                              [--out data/cues.json]
-  perf    --from 0 --to 5    milliseconds per frame, including the export's pixel readback
+  perf    --from 0 --to 5    milliseconds per frame: rendering and the export's pixel readback, apart
+                             [--pixels rgb8|rgba8|rgb16|rgba16|linear: the readback to time]
   gpu                        the GPU Chrome renders with
 
 Rendering
-  video                      the video: x264 through ffmpeg, with the project's audio track; runs its
-                             own browsers, not the warm renderer
-                             [--from 0] [--to <duration>] [--out <file.mp4>] [--crf 16] [--preset slow]
-                             [--x264 aq-mode=3] [--noaudio] [--workers 2] [--chunk 8] [--mem-gb 1]
-                             [--spool-gb 20] [--progress (JSON lines on stderr)]
+  video                      the video, in its own browsers (not the warm renderer), through ffmpeg with
+                             the project's audio track where the format carries sound
+                             [--from 0] [--to <duration>] [--out <file>] [--format <f>] [--noaudio]
+                             [--workers 2] [--chunk 8] [--mem-gb 1] [--spool-gb 20]
+                             [--progress (JSON lines on stderr)]
+                             --format (else from the --out extension; default h264, out/video.mp4):
+                               h264        .mp4  x264 [--crf 16] [--preset slow] [--x264 aq-mode=3]
+                                                 [--chroma 420|444] [--depth 8|10]
+                               hevc        .mp4  x265 Main10, 10-bit SDR BT.709 [--crf 18] [--preset
+                                                 medium] [--x265 k=v:...]
+                               prores      .mov  ProRes 422 HQ, 10-bit, PCM sound: an editing master
+                               prores4444  .mov  ProRes 4444 with alpha (--opaque: without)
+                               webm        .webm VP9 with alpha, Opus sound [--crf 24] (--opaque)
+                               gif         .gif  a palette per video, Sierra dither [--max-fps 25]
+                                                 [--max-size 640 (long side, px)]
+                               webp        .webp animated [--max-fps 30] [--max-size 1080] [--quality 80]
+                                                 [--alpha]
+                               png, png16  .png  numbered frames, 8 or 16 bits per channel [--alpha]
+                               jpeg        .jpg  numbered frames [--quality 92]
+                               exr         .exr  numbered frames of the linear HDR frame before tone
+                                                 mapping and post, half float [--alpha: premultiplied]
+                             Sequences are named after --out with the video frame number (f.png ->
+                             f_000120.png). Transparent renders clear the theme's bg to transparent
+                             and write straight alpha. Every YUV stream is limited-range BT.709, tagged.
                              --mix: the finished file in one go: the render, then reel mix (the
-                             track, music and cues of mix.json, at the loudness target)
-                             --subtitles: as --mix, with the timed words as a soft subtitle track
+                             track, music and cues of mix.json, at the loudness target); --subtitles:
+                             as --mix, with the timed words as a soft subtitle track (mp4, mov, webm)
 
 Working on a project
   init <folder>              a new project that renders straight away, with the reel skills in
@@ -102,15 +123,15 @@ const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
 /** Each command's flags (beyond RENDER for the rendering ones) and whether it takes positionals. */
 export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Opt>; positionals?: [min: number, max: number] }> = {
   info: { render: true, opts: {} },
-  still: { render: true, opts: { t: str, ...IMAGE } },
+  still: { render: true, opts: { t: str, alpha: bool, ...IMAGE } },
   sheet: { render: true, opts: { from: str, to: str, n: str, times: str, cuts: bool, cols: str, cell: str, ...IMAGE } },
   check: { render: true, opts: { from: str, to: str, step: str, safe: str, 'min-text': str, frozen: str, out: str } },
   diff: { render: true, opts: { t: str, tol: str, threshold: str, out: str }, positionals: [1, 2] },
   strip: { render: true, opts: { from: str, to: str, n: str, frames: str, cell: str, ...IMAGE } },
   events: { render: true, opts: { out: str } },
-  perf: { render: true, opts: { from: str, to: str } },
+  perf: { render: true, opts: { from: str, to: str, pixels: str } },
   gpu: { render: true, opts: {} },
-  video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
+  video: { render: true, opts: { from: str, to: str, out: str, format: str, crf: str, preset: str, x264: str, x265: str, chroma: str, depth: str, alpha: bool, opaque: bool, quality: str, 'max-fps': str, 'max-size': str, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
@@ -189,7 +210,7 @@ export function samplesOf(v: Values): number | AdaptiveSampling {
 }
 
 /** What a page is opened with: the format overrides, the clips to load and a built-in theme. */
-export interface PageOpts { w?: number; h?: number; fps?: number; scale: number; only?: string; theme?: string }
+export interface PageOpts { w?: number; h?: number; fps?: number; scale: number; only?: string; theme?: string; alpha?: boolean; bits?: number }
 
 export function pageOf(v: Values): PageOpts {
   const scale = num(v, 'scale', 1);
@@ -205,5 +226,6 @@ export function pageOf(v: Values): PageOpts {
     o.only = v.only;
   }
   if (typeof v.theme === 'string') o.theme = v.theme;
+  if (v.alpha === true) o.alpha = true;
   return o;
 }

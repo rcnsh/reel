@@ -5,7 +5,7 @@
 // sample (previews, stills, check) uses 4x MSAA instead, with shadow maps blurred by PCF. Tone mapping is the
 // engine's post; the stage hands it linear HDR.
 import * as THREE from 'three';
-import { makeRT, SUB_FRAME, W, H } from '../engine/gl';
+import { ALPHA, isBg, makeRT, SUB_FRAME, W, H } from '../engine/gl';
 import { LIN } from '../engine/palette';
 import { report, reporting } from '../engine/report';
 import type { SceneCtx } from '../engine/scene';
@@ -76,6 +76,8 @@ export class Stage3D {
     const bg = o.background === undefined ? 'bg' : o.background;
     this.bgEnv = bg === 'environment';
     this.bg = bg === null || this.bgEnv ? null : colour(bg);
+    // (a transparent render leaves the theme's background out, as clearRT does)
+    if (ALPHA && this.bg && isBg([this.bg.r, this.bg.g, this.bg.b])) this.bg = null;
     if (o.shadows !== false) {
       this.renderer.shadowMap.enabled = true;
       this.renderer.shadowMap.type = THREE.PCFShadowMap;

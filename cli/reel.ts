@@ -198,30 +198,35 @@ try {
   if (mode === 'video') {
     const { exportVideo } = await import('./video');
     const { Renderer } = await import('./renderer');
+    const F = await import('./formats');
+    const format = F.formatOf(A.format as string | undefined, abs(A.out));
+    const enc = F.encodeOptsOf(A, format);
+    const mixed = !!A.mix || A.subtitles === true;
+    if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
     const r = new Renderer(PROJECT, { headed: !!A.headed });
     const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
     try {
       const m = await r.meta();
-      const out = abs(A.out) ?? path.join(PROJECT, 'out/video.mp4');
+      const plan = F.planOf(format, enc, page.fps ?? m.format.fps);
+      const out = abs(A.out) ?? F.defaultOut(PROJECT, format);
       // (with --mix the picture is rendered beside the output and the mix writes the output)
-      const mixed = !!A.mix || typeof A.subtitles === 'string' || A.subtitles === true;
-      const pic = mixed ? out.replace(/(\.\w+)?$/, '.picture.mp4') : out;
+      const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;
       // (the subtitles first: a project without timed words fails before it renders, not after)
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
         url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme,
-        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic,
-        crf: num(A, 'crf', 16), preset: (A.preset as string) ?? 'slow', x264: (A.x264 as string) ?? 'aq-mode=3', noaudio: !!A.noaudio || mixed,
+        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic, plan, enc, noaudio: !!A.noaudio || mixed,
         workers: int(A, 'workers', 2), chunk: int(A, 'chunk', 8), memGb: num(A, 'mem-gb', 1), spoolGb: num(A, 'spool-gb', 20), headed: !!A.headed,
         onProgress: (p) => {
           if (A.progress) console.error(JSON.stringify(p));
           else if (!json) process.stdout.write(`\r${p.frames}/${p.total} frames  ${p.fps.toFixed(1)} fps  eta ${p.eta.toFixed(0)}s   `);
         },
       });
-      Object.assign(res, { file: v.file, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
+      const file = format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file;
+      Object.assign(res, { file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
       res.errors.push(...r.explain(v.errors));
       res.logs.push(...r.explain(v.logs));
-      say(`\nwrote ${v.file} (${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
+      say(`\nwrote ${file} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
       say(`sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
       if (mixed && !res.errors.length) {
         const { mixVideo } = await import('../tools/mix');
@@ -240,6 +245,9 @@ try {
     finish(res, () => {});
   }
   req = { op: mode as Req['op'], project: PROJECT, page, samples, shutter, args: argsOf(A) };
+  // (a deep or transparent readback needs a page made for it)
+  if (mode === 'perf' && /16/.test(req.args.pixels)) page.bits = 10;
+  if (mode === 'perf' && /rgba/.test(req.args.pixels)) page.alpha = true;
 } catch (e) {
   if (e instanceof UsageError) fail(e.message);
   throw e;
@@ -264,7 +272,11 @@ function argsOf(v: Values): Record<string, unknown> {
       return { from: num(v, 'from'), to: num(v, 'to'), step, safe, minText: num(v, 'min-text'), frozen: num(v, 'frozen', 3), out: abs(v.out) };
     }
     case 'events': return { out: abs(v.out) };
-    case 'perf': return { from: num(v, 'from', 0), to: num(v, 'to', 5) };
+    case 'perf': {
+      const pixels = (v.pixels as string | undefined) ?? 'rgb8';
+      if (!['rgb8', 'rgba8', 'rgb16', 'rgba16', 'linear'].includes(pixels)) throw new UsageError(`--pixels ${v.pixels}: expected rgb8, rgba8, rgb16, rgba16 or linear`);
+      return { from: num(v, 'from', 0), to: num(v, 'to', 5), pixels };
+    }
     default: return {};
   }
 }
@@ -314,6 +326,6 @@ finish(res, (x) => {
   } else if (mode === 'sheet' || mode === 'strip') say(String(x.file));
   else if (mode === 'check') printCheck(x);
   else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues, ${x.sounds} sounds on the timeline`);
-  else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
+  else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms (render ${(x.render as number).toFixed(1)}, readback ${(x.readback as number).toFixed(1)})  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
   else if (mode === 'gpu') say(String(x.gpu));
 });

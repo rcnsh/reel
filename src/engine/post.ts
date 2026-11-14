@@ -3,6 +3,7 @@
 // The defaults come from the project's theme (src/themes.ts); the colours of the flash and invert too.
 import * as THREE from 'three';
 import { FSPass, makeRT, W, H, SCALE } from './gl';
+import { ALPHA, BITS } from './format';
 import { THEME, TONE, glslName } from './palette';
 
 /** The tone shoulder (linear HDR -> 0..1 linear), shared with the engine's sampling error estimate. */
@@ -119,15 +120,19 @@ ${SCALE === 1 ? `        c += texture(src, vUv + texel * vec2(-1, -1)).rgb; c +=
         vec3 ha = texture(haloTex, uv).rgb;
         col += bl * bloom;
         col += vec3(1.0, 0.18, 0.04) * luma(ha) * halation;
-        col *= exposure;
+${ALPHA ? `        // transparent render: the frame is premultiplied; glow adds light (and coverage) where there was none,
+        // then the colour is divided out so the rest of the chain works on straight colour
+        vec3 glow = bl * bloom + vec3(1.0, 0.18, 0.04) * luma(ha) * halation;
+        float alpha = clamp(texture(src, uv).a + max(glow.r, max(glow.g, glow.b)), 0.0, 1.0);
+        col = alpha > 1e-5 ? col / alpha : vec3(0.0);
+` : ''}        col *= exposure;
         col = shoulder(col);
         col = mix(col, max(C_BG + C_FG - col, 0.0), invert); // bg <-> fg
         col += ${glslName(TONE.light)} * flash;
         // vignette
         float v = smoothstep(0.95, 0.25, length(dc * vec2(1.0, 0.8)));
         col *= mix(1.0, v, vignette);
-        col *= (1.0 - fade);
-        vec3 s = toSRGB(sat(col));
+${ALPHA ? '        alpha *= (1.0 - fade); // (a fade goes to transparent)\n' : '        col *= (1.0 - fade);\n'}        vec3 s = toSRGB(sat(col));
         // film grain: two scales, stronger in mid-tones
 ${SCALE === 1 ? `        float g1 = hash12(gl_FragCoord.xy + fract(time * 13.37) * 1000.0) - 0.5;
         float g2 = hash12(floor(gl_FragCoord.xy / 2.0) + fract(time * 7.13) * 1000.0) - 0.5;` : `        // output scale > 1: the fine grain is per physical px with its amplitude raised by PX_SCALE so its
@@ -137,8 +142,9 @@ ${SCALE === 1 ? `        float g1 = hash12(gl_FragCoord.xy + fract(time * 13.37)
         float lm = luma(s);
         float amt = grain * (0.55 + 1.2 * lm * (1.0 - lm));
         s += (g1 * 0.6 + g2 * 0.4) * amt;
-        s += (hash12(gl_FragCoord.xy * 1.37 + time) - 0.5) / 255.0; // dither
-        fragColor = vec4(sat(s), 1.0);
+${BITS === 8 ? `        s += (hash12(gl_FragCoord.xy * 1.37 + time) - 0.5) / 255.0; // dither` : `        s += (hash12(gl_FragCoord.xy * 1.37 + time) - 0.5) / ${2 ** BITS - 1}.0; // dither at the output's depth`}
+${ALPHA ? `        alpha = sat(alpha + (hash12(gl_FragCoord.yx * 1.91 + time) - 0.5) / ${2 ** BITS - 1}.0);
+        fragColor = vec4(sat(s), alpha);` : `        fragColor = vec4(sat(s), 1.0);`}
       }`, {
       src: { value: null }, bloomTex: { value: null }, haloTex: { value: null },
       exposure: { value: 1 }, bloom: { value: 0.5 }, halation: { value: 0.2 }, ca: { value: 1 }, grain: { value: 0.05 },

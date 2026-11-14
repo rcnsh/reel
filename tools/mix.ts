@@ -89,9 +89,22 @@ export function projectTrack(root: string): string | null {
   return t && existsSync(path.join(root, t)) ? path.join(root, t) : null;
 }
 
+/**
+ * How a finished file's container carries the mix and subtitles: AAC in MP4, 24-bit PCM in MOV (an editing
+ * master), Opus and WebVTT in WebM. Throws for a container that carries no sound.
+ */
+export function containerOf(file: string): { audio: string[]; subtitles: string; flags: string[] } {
+  const ext = path.extname(file).toLowerCase();
+  if (ext === '.mp4' || ext === '.m4v') return { audio: ['-c:a', 'aac', '-b:a', '320k'], subtitles: 'mov_text', flags: ['-movflags', '+faststart'] };
+  if (ext === '.mov') return { audio: ['-c:a', 'pcm_s24le'], subtitles: 'mov_text', flags: ['-movflags', '+faststart'] };
+  if (ext === '.webm') return { audio: ['-c:a', 'libopus', '-b:a', '256k'], subtitles: 'webvtt', flags: [] };
+  throw new Error(`${file}: the mix goes into an .mp4, .mov or .webm (a ${ext || 'file without extension'} carries no sound)`);
+}
+
 export async function mixVideo(o: MixOptions) {
   const { root, input, output } = o, from = o.from ?? 0;
   if (!existsSync(input)) throw new Error(`${input}: no such file (the rendered video to mix under)`);
+  containerOf(output);
   const cfgPath = path.join(root, 'mix.json');
   const cfg: MixConfig = existsSync(cfgPath) ? JSON.parse(readFileSync(cfgPath, 'utf8')) : {};
   const target = loudnessTarget(cfg.loudness);
@@ -127,8 +140,9 @@ export async function mixVideo(o: MixOptions) {
     tail = `[mixed]${loudnormFilter(target, parseLoudnorm(r.stderr.toString()))}[a]`;
   } else if (!g.silent) tail = '[mixed]alimiter=limit=0.955:level=false[a]';
   const subs = o.subtitles ? ['-i', o.subtitles] : [];
-  const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', 'mov_text', '-metadata:s:s:0', 'language=eng'] : [];
-  const r = await $`ffmpeg ${det} -loglevel error -y ${ins} ${subs} -filter_complex ${`${g.filter};${tail}`} -map 0:v -c:v copy -map [a] -c:a aac -b:a 320k -ar 48000 ${subMap} -fflags +bitexact -flags:a +bitexact -movflags +faststart ${output}`.quiet().nothrow();
+  const box = containerOf(output);
+  const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', box.subtitles, '-metadata:s:s:0', 'language=eng'] : [];
+  const r = await $`ffmpeg ${det} -loglevel error -y ${ins} ${subs} -filter_complex ${`${g.filter};${tail}`} -map 0:v -c:v copy -map [a] ${box.audio} -ar 48000 ${subMap} -fflags +bitexact -flags:a +bitexact ${box.flags} ${output}`.quiet().nothrow();
   if (r.exitCode !== 0) throw new Error(`ffmpeg (the mix): ${r.stderr.toString().slice(-1200)}`);
   const loud = g.silent ? null : await measure(output);
   const what = [track ? `the track (${path.basename(track)})` : 'no track', `${g.segments} music segment${g.segments === 1 ? '' : 's'}`, ...g.counts].join(', ');

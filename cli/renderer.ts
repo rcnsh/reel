@@ -31,10 +31,12 @@ export interface Format { w: number; h: number; fps: number; scale: number }
 export interface ClipInfo { id: string; start: number; end: number; track: number }
 
 /** The page URL for a format, clip selection and theme. */
-export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'theme'>) {
+export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'theme' | 'alpha'> & { bits?: number }) {
   const q = new URLSearchParams({ export: '1', w: String(f.w), h: String(f.h), fps: String(f.fps), scale: String(f.scale) });
   if (o.only) q.set('only', o.only);
   if (o.theme) q.set('theme', o.theme);
+  if (o.alpha) q.set('alpha', '1');
+  if (o.bits && o.bits !== 8) q.set('bits', String(o.bits));
   return `${base}/?${q}`;
 }
 
@@ -184,7 +186,7 @@ export class Renderer {
     this.rescan();
     const srv = await this.server();
     const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
-    const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '']);
+    const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', !!o.alpha, o.bits ?? 8]);
     let h = this.pages.get(key);
     if (h && (h.dead || h.page.isClosed() || h.gen !== this.gen)) {
       this.pages.delete(key);
