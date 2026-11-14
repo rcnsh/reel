@@ -133,4 +133,10 @@ describe('findingsOf', () => {
     expect(f[2]).toMatchObject({ t: 0, until: 3.5, value: 3.5 });
     expect(f[0]!.clip).toBe('a');
   });
+  test('blank frames that are not next to each other are separate findings', () => {
+    const flat = { sig: [10, 10], cols: 2, rows: 1, spread: 0 };
+    const at = (t: number, blank: boolean): Sample => blank ? { t, clips: ['a'], boxes: [], stats: flat, errors: [] } : sample(t);
+    const f = findingsOf([at(0, true), at(0.5, true), at(1, false), at(1.5, false), at(5, true)], opts).filter((x) => x.kind === 'blank');
+    expect(f.map((x) => [x.t, x.until, x.frames])).toEqual([[0, 0.5, 2], [5, 5, 1]]);
+  });
 });

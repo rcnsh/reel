@@ -174,15 +174,20 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
   const mx = o.W * o.safe, my = o.H * o.safe;
   const keys = Object.keys(o.palette);
 
+  // blank frames merge only with blank frames next to them (two fades to black are two findings)
+  let blankRun = 0, prevBlank = false;
   for (const s of samples) {
     for (const e of s.errors) {
       const clip = /^\[([^\]]+)\]/.exec(e)?.[1] ?? '';
       add({ kind: 'sceneError', severity: 'error', t: s.t, clip, message: e }, e, 0);
     }
     const onScreen = s.clips.filter((c) => c !== 'overlay');
-    if (s.stats.spread < 4 && !onScreen.every((c) => exempt('blank', c))) {
-      add({ kind: 'blank', severity: 'warning', t: s.t, clip: onScreen.join('+'), value: +s.stats.spread.toFixed(2), message: `the frame is one flat colour (its brightest and darkest areas differ by ${s.stats.spread.toFixed(1)} levels): ${onScreen.length ? 'a scene that draws nothing, or a fade held too long' : 'no clip is on screen here'}` }, '', -s.stats.spread);
+    const blank = s.stats.spread < 4 && !onScreen.every((c) => exempt('blank', c));
+    if (blank) {
+      if (!prevBlank) blankRun++;
+      add({ kind: 'blank', severity: 'warning', t: s.t, clip: onScreen.join('+'), value: +s.stats.spread.toFixed(2), message: `the frame is one flat colour (its brightest and darkest areas differ by ${s.stats.spread.toFixed(1)} levels): ${onScreen.length ? 'a scene that draws nothing, or a fade held too long' : 'no clip is on screen here'}` }, `run${blankRun}`, -s.stats.spread);
     }
+    prevBlank = blank;
     const texts = s.boxes.filter((b) => b.kind === 'text' && (b.alpha ?? 1) >= 0.05);
     for (const b of s.boxes) {
       if ((b.alpha ?? 1) < 0.05) continue;
