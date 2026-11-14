@@ -4,10 +4,10 @@
 
 `narration.txt` holds plates: a `# name` header and its lines. Time it:
 
-- `reel narrate`: a scratch voice from macOS `say`, word times proportional to length. Good enough to build to.
+- `reel narrate`: a voice from the script: Kokoro (local, the default), `say` (macOS scratch), or ElevenLabs / Fish Audio (hosted, with their key). Word times come from the voice's own timestamps or a forced aligner. Plates are cached: only the ones whose text changed are voiced again.
 - `reel align <recording>`: a real recording (one take, or a folder of per-plate files named after the plates), word times from Whisper matched to the script. `LEAD`, `HOLD` and `TAIL` in the environment set the silence before the first word, after each plate and after the last word.
 
-Both write `audio/narration.mp3`, `data/words.json` and `data/audio.json` (a silent 100 BPM grid, one section per plate). With `clipsFromSections` in the config, each plate shows the scene of the same name; a plate without a scene is skipped, so a video is built one plate at a time.
+Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a silent 100 BPM grid, one section per plate). With `clipsFromSections` in the config, each plate shows the scene of the same name; a plate without a scene is skipped, so a video is built one plate at a time.
 
 ## Words (`this.ctx.words`, `src.words`)
 

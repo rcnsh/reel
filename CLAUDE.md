@@ -19,7 +19,7 @@ Where to read before acting:
 ## How the pieces connect
 
 ```
-<project>/narration.txt ──reel narrate (say) or reel align (Whisper)──▶ audio/narration.mp3, data/words.json (words + times)
+<project>/narration.txt ──reel narrate (a voice) or reel align (a recording)──▶ audio/narration.flac, data/words.json (words + times)
 song ──reel analyze──▶ audio/<song>  +  data/audio.json  (beats, envelopes, onsets, sections, track)
 
 <project>/reel.config.ts ─▶ format (size, fps) + timeline(): clips on tracks, each naming a scene module
@@ -36,9 +36,9 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 - The config is the edit. `size`, `fps` and `theme` are read by the CLI outside the browser (so a config's top level is plain data: scenes are lazy imports, engine calls live inside `timeline()`), and reach the page as the compile-time constants `__REEL_FORMAT__` and `__REEL_THEME__` (the theme resolved by `src/themes.ts`). Being constants, they are in place before any module runs, which is what lets `glsl/common.ts` bake the palette into shader strings at import time.
 - The engine has no look of its own. The theme (`print`, `film`, `neutral` (the default) or an object) gives the palette, the post defaults and an optional overlay, which the engine places as a clip called `overlay` on a track above every other. The HUD (crop marks, captions) is an ordinary scene, `src/scenes/hud.ts` (`reel/scenes/hud`).
 - Audio and words are optional. Without `data/audio.json` and `data/words.json` a project is silent, its sources are empty and its length is `duration` or the end of its last clip.
-- `data/audio.json` `track` names the sound the preview plays and the export muxes (default `audio/narration.mp3`). Without `--keep-sections`, `reel analyze` points it at the song.
+- `data/audio.json` `track` names the sound the preview plays and the export muxes (default `audio/narration.flac`). Without `--keep-sections`, `reel analyze` points it at the song.
 - Scenes import the engine as `reel` (`src/index.ts`), configs import `reel/config` (`src/config.ts`), and both can name the engine's scenes as `reel/scenes/<name>` (`src/scenes/`): aliases in the dev server and `tsconfig.json`.
-- An example's generated files are committed so it renders from a clone: `audio/narration.mp3`, `data/words.json`, `data/audio.json`, `data/cues.json`. Regenerate them with their tool rather than editing them by hand.
+- An example's generated files are committed so it renders from a clone: `audio/narration.flac`, `data/words.json`, `data/audio.json`, `data/cues.json`. Regenerate them with their tool rather than editing them by hand.
 
 ## Rules
 
@@ -57,7 +57,7 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 
 `reel` below is `bun cli/reel.ts`; every command takes `--project <folder>`.
 
-**New scene for a narrated plate.** Add the `# name` plate and its lines to the project's `narration.txt`, re-time (`reel narrate` for a scratch track), write `scenes/<name>.ts` default-exporting a `Scene` subclass (`examples/demo/scenes/hello.ts` is the minimal reference, a text block revealed as it is spoken; `written.ts` shows stroke text broken to the frame's width, word timing and cues), then typecheck and look at stills across the clip's window, including its last frame.
+**New scene for a narrated plate.** Add the `# name` plate and its lines to the project's `narration.txt`, re-time (`reel narrate`: only the changed plate is voiced again), write `scenes/<name>.ts` default-exporting a `Scene` subclass (`examples/demo/scenes/hello.ts` is the minimal reference, a text block revealed as it is spoken; `written.ts` shows stroke text broken to the frame's width, word timing and cues), then typecheck and look at stills across the clip's window, including its last frame.
 
 **New project.** `reel init <folder> [--size WxH] [--fps N] [--theme print|film|neutral] [--narrated]` writes one that renders straight away (it refuses a folder holding anything but `.git` or `.DS_Store`). Its `tsconfig.json` extends `tsconfig.project.json` here by absolute path (paths for `reel`, `reel/config`, `reel/scenes/*`, `three`; `project.d.ts` brings Vite's `import.meta.glob` types), so it typechecks without an install; its `package.json` scripts run this checkout's CLI and `tsc`. Change `tsconfig.project.json` with care: every project outside this repo extends it. `examples/layers` is a silent two-track project, `examples/explainer` a silent one built from the component kit, `examples/demo` a narrated one. For a real voice in a narrated project, time it: `reel align <recording>` (one take, or a folder of per-plate files named after the plates). `align` takes `LEAD`, `HOLD` and `TAIL` from the environment (silence before the first word, after each plate, after the last word).
 

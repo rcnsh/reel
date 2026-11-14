@@ -223,10 +223,16 @@ export async function serveMcp() {
   }));
 
   server.registerTool('narrate', {
-    title: 'Scratch narration',
-    description: "Time the project's narration.txt (plates: '# name' headers and their lines) with a scratch voice (macOS say): writes audio/narration.mp3, data/words.json and data/audio.json (one section per plate). Takes seconds per line.",
-    inputSchema: { project },
-  }, (a) => guard(() => tool('narrate', a.project, [])));
+    title: 'Voice the narration',
+    description: "Voice the project's narration.txt (plates: '# name' headers and their lines) and time every word: writes audio/narration.flac, data/words.json and data/audio.json (one section per plate). Plates are cached, so after an edit only changed plates are voiced again. The voice comes from `narration` in reel.config.ts unless given: 'kokoro[:voice]' (local model, default kokoro:af_heart), 'say[:name]' (macOS scratch), 'elevenlabs:<voice-id>' or 'fish:<voice-id>' (hosted, only with ELEVENLABS_API_KEY / FISH_API_KEY set). The first local run downloads models (minutes).",
+    inputSchema: {
+      project, voice: z.string().optional().describe("Voice, e.g. 'kokoro:bm_george', 'say:Daniel', 'elevenlabs:<voice-id>'."), speed: z.number().min(0.5).max(2).optional(),
+      lead: z.number().min(0).optional().describe('Seconds before the first word (default 0.6).'), hold: z.number().min(0).optional().describe('Seconds at least between plates (default 0.85).'), tail: z.number().min(0).optional().describe('Seconds after the last word (default 1.6).'),
+      force: z.boolean().optional().describe('Voice every plate again, ignoring the cache.'),
+    },
+  }, (a) => guard(() => tool('narrate', a.project, [
+    ...(['voice', 'speed', 'lead', 'hold', 'tail'] as const).flatMap((k) => (a[k] !== undefined ? [`--${k}`, String(a[k])] : [])), ...(a.force ? ['--force'] : []),
+  ])));
 
   server.registerTool('align_recording', {
     title: 'Align a recording',

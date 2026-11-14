@@ -1,4 +1,4 @@
-// Timing and music analysis (data/audio.json: tools/narration.ts, tools/align.ts or tools/analyze.py)
+// Timing and music analysis (data/audio.json: reel narrate, reel align or reel analyze)
 // sampled at arbitrary time.
 
 export interface AudioJSON {
@@ -10,7 +10,7 @@ export interface AudioJSON {
   sections: { name: string; start: number; end: number }[];
   features: Record<string, number[]>;
   onsets: Record<string, [number, number][]>;
-  /** The sound the preview plays and the export muxes, relative to the project root (default audio/narration.mp3). */
+  /** The sound the preview plays and the export muxes, relative to the project root (default audio/narration.flac). */
   track?: string;
 }
 
@@ -51,7 +51,7 @@ export class AudioData {
     // envelopes may be nested under `features` or top-level arrays
     for (const k of FEATURES) this.feat[k] = Float32Array.from(j.features?.[k] ?? ((j as any)[k] as number[] | undefined) ?? []);
     this.onsets = j.onsets ?? {};
-    this.track = j.track ?? (j.duration > 0 ? 'audio/narration.mp3' : null);
+    this.track = j.track ?? (j.duration > 0 ? 'audio/narration.flac' : null);
   }
 
   /** No analysis: a silent 100 BPM grid, no sections (the length then comes from the config or its clips). */

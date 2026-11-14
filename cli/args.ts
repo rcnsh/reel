@@ -56,7 +56,8 @@ Working on a project
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
-  narrate                    time narration.txt with a scratch voice (macOS say)
+  narrate                    voice narration.txt (Kokoro by default; say, elevenlabs, fish) and time
+                             every word; caches each plate      (flags: reel narrate --help)
   align <recording|folder>   time narration.txt to a voice recording
   analyze <song> [...]       beats, envelopes and sections of a song (flags: reel analyze --help)
   mix <in.mp4> <out.mp4>     lay music and cue sounds under a render             [--from 0]

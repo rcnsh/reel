@@ -3,7 +3,7 @@
 // without an install), a package.json whose scripts run this checkout's CLI, a .gitignore, a CLAUDE.md and the
 // engine's agent skills in .claude/skills (copied: a project keeps the version it was made with until
 // `reel skills update`).
-// --narrated adds narration.txt and mix.json and times the script with a scratch voice (reel narrate).
+// --narrated adds narration.txt and mix.json and voices the script (reel narrate, Kokoro by default).
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf } from '../src/config';
@@ -54,7 +54,7 @@ export function initProject(dir: string, o: InitOptions): string[] {
       type: 'module',
       scripts: { reel: reel, dev: `${reel} dev`, typecheck: `${sh(path.join(ENGINE, 'node_modules/.bin/tsc'))} --noEmit -p .` },
     }, null, 2) + '\n',
-    '.gitignore': ['# renders, stills and contact sheets', 'out/', '', '# working files of reel narrate, reel align and the config loader', 'audio/.align/', 'audio/.work/', 'audio/narration.scratch.mp3', '.reel.config.*.mjs', '', 'node_modules/', '.DS_Store', ''].join('\n'),
+    '.gitignore': ['# renders, stills and contact sheets', 'out/', '', '# working files of reel narrate, reel align and the config loader', 'audio/.align/', 'audio/.narration/', '.reel.config.*.mjs', '', 'node_modules/', '.DS_Store', ''].join('\n'),
     'CLAUDE.md': claudeMd(title, o),
   };
   if (o.narrated) {
@@ -110,7 +110,7 @@ ${head(o)}
 
 function narratedConfig(o: InitOptions) {
   return `// The edit: the format, the theme, and one clip per plate of narration.txt (a \`# name\` header) that has a
-// scene of the same name in scenes/. Re-time the script with \`reel narrate\` (scratch voice) or \`reel align <recording>\`.
+// scene of the same name in scenes/. Re-time the script with \`reel narrate\` or \`reel align <recording>\`.
 import { clipsFromSections, defineVideo } from 'reel/config';
 
 export default defineVideo({
@@ -186,7 +186,7 @@ Read before acting (the skills are copied into \`.claude/skills\`; \`bun run ree
 ## This project
 
 - \`reel.config.ts\` is the edit: ${o.size[0]}×${o.size[1]} at ${o.fps} fps, the \`${o.theme}\` theme, ${o.narrated ? 'one clip per plate of `narration.txt` that has a scene of the same name' : 'the clips on the timeline'}. Scenes live in \`scenes/\`, one default-exported \`Scene\` class per file.${o.narrated ? `
-- Narration: \`narration.txt\` holds the plates (\`# name\` and its lines). \`bun run reel narrate\` times it with a scratch voice; \`bun run reel align <recording>\` times a real one. Both write \`audio/narration.mp3\`, \`data/words.json\` and \`data/audio.json\`: regenerate them, never edit them by hand. Scenes find their timing by text (\`ctx.words.get('…')\`).
+- Narration: \`narration.txt\` holds the plates (\`# name\` and its lines). \`bun run reel narrate\` voices and times it (\`narration\` in the config or \`--voice\` picks the voice; plates are cached); \`bun run reel align <recording>\` times a real one. Both write \`audio/narration.flac\`, \`data/words.json\` and \`data/audio.json\`: regenerate them, never edit them by hand. Scenes find their timing by text (\`ctx.words.get('…')\`).
 - Sound: scenes call \`cue(kind, t)\`; \`mix.json\` maps kinds to files in \`audio/\`. \`bun run reel events\`, then \`bun run reel mix <raw.mp4> <out.mp4>\`.` : ''}
 
 ## Checks

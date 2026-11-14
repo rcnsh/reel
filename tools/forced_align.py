@@ -1,0 +1,71 @@
+# /// script
+# requires-python = ">=3.12,<3.13"
+# dependencies = ["mlx-qwen3-asr==0.4.4", "numpy>=2.0"]
+# ///
+"""Forced alignment of known text to speech: Qwen3-ForcedAligner-0.6B, run natively on Apple Silicon through MLX.
+
+    uv run tools/forced_align.py <jobs.json>
+
+jobs.json is a list of {"audio": <16 kHz mono wav>, "text": <what is said>, "out": <json path>}; each out gets a
+list of {"w", "start", "end"}, one per token the aligner kept (the text split on spaces, punctuation removed).
+The model (about 1.2 GB) is fetched from Hugging Face on first use into its normal cache. Audio longer than WINDOW
+seconds is aligned in overlapping windows: each takes the words not yet placed and keeps those that end well
+before its edge, with the last few words placed as context. LANGUAGE (default English) names the language for the aligner's tokenizer.
+"""
+import json
+import os
+import sys
+import wave
+
+import numpy as np
+from mlx_qwen3_asr.forced_aligner import ForcedAligner
+
+SR = 16000
+WINDOW = float(os.environ.get("WINDOW", 60))  # (measured on a 220 s take: 60 s windows hold, 150 s ones drift by seconds)
+LANGUAGE = os.environ.get("LANGUAGE", "English")
+
+
+def load(path):
+    w = wave.open(path)
+    if w.getframerate() != SR or w.getnchannels() != 1 or w.getsampwidth() != 2:
+        sys.exit(f"forced_align: {path} must be 16 kHz mono 16-bit")
+    return np.frombuffer(w.readframes(w.getnframes()), np.int16).astype(np.float32) / 32768
+
+
+def align(fa, audio, text):
+    # (the aligner keeps one token per word that has a letter or a digit)
+    words = [w for w in text.split() if any(c.isalnum() for c in w)]
+    dur = len(audio) / SR
+    if dur <= WINDOW:
+        return [{"w": x.text, "start": x.start_time, "end": x.end_time} for x in fa.align(audio, " ".join(words), LANGUAGE)]
+    # long audio: overlapping windows. Each starts half a second before the last CONTEXT words placed (aligned
+    # again as context, not kept), is given about as many new words as its length holds at the take's average
+    # rate (OVER times that), and keeps those ending more than EDGE seconds before its end
+    CONTEXT, EDGE, OVER = 5, 8.0, 1.3
+    out, t0, i = [], 0.0, 0
+    rate = len(words) / dur
+    while i < len(words):
+        t1 = min(dur, t0 + WINDOW)
+        last = t1 >= dur
+        ctx = min(CONTEXT, i)
+        n = len(words) - i if last else max(20, int(rate * (t1 - t0) * OVER))
+        chunk = words[i - ctx:i + n]
+        got = fa.align(audio[int(t0 * SR):int(t1 * SR)], " ".join(chunk), LANGUAGE)[ctx:]
+        keep = [x for x in got if last or x.end_time + t0 < t1 - EDGE] or got[:1]
+        out += [{"w": x.text, "start": x.start_time + t0, "end": x.end_time + t0} for x in keep]
+        i += len(keep)
+        t0 = max(t0 + 1, out[max(0, len(out) - CONTEXT)]["start"] - 0.5)
+    return out
+
+
+def main():
+    jobs = json.load(open(sys.argv[1]))
+    fa = ForcedAligner()
+    for j in jobs:
+        res = align(fa, load(j["audio"]), j["text"])
+        json.dump([{"w": r["w"], "start": round(float(r["start"]), 3), "end": round(float(r["end"]), 3)} for r in res], open(j["out"], "w"))
+    print(f"forced_align: {len(jobs)} passage{'s' if len(jobs) != 1 else ''} aligned", file=sys.stderr)
+
+
+if __name__ == "__main__":
+    main()

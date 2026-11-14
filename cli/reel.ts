@@ -21,7 +21,7 @@ const fail = (msg: string): never => {
 
 // the project tools keep their own flags: hand the rest of the line to them
 const TOOLS: Record<string, string[]> = {
-  narrate: ['bun', path.join(ENGINE, 'tools/narration.ts')],
+  narrate: ['bun', path.join(ENGINE, 'tools/narrate.ts')],
   align: ['bun', path.join(ENGINE, 'tools/align.ts')],
   mix: ['bun', path.join(ENGINE, 'tools/mix.ts')],
   analyze: ['uv', 'run', path.join(ENGINE, 'tools/analyze.py')],
@@ -32,8 +32,6 @@ if (TOOLS[mode]) {
   const i = rest.findIndex((a) => a === '--project' || a.startsWith('--project='));
   if (i >= 0) dir = rest[i]!.includes('=') ? rest.splice(i, 1)[0]!.slice('--project='.length) : rest.splice(i, 2)[1] ?? fail('--project needs a folder');
   const help = rest.includes('--help') || rest.includes('-h');
-  // (only analyze has flags of its own to list; the other tools would run)
-  if (help && mode !== 'analyze') { console.log(HELP); process.exit(0); }
   let project = path.resolve(dir);
   if (!help) try { project = projectDir(dir); } catch (e) { fail((e as Error).message); }
   const proc = Bun.spawn([...TOOLS[mode]!, ...rest], { stdio: ['inherit', 'inherit', 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
@@ -70,7 +68,7 @@ if (mode === 'init') {
   Object.assign(out, { project, files });
   if (A.narrated) {
     // time the script with a scratch voice, so the project has its words and length before the first render
-    const p = Bun.spawn(['bun', path.join(ENGINE, 'tools/narration.ts')], { stdio: ['ignore', json ? 'pipe' : 'inherit', json ? 'pipe' : 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
+    const p = Bun.spawn(['bun', path.join(ENGINE, 'tools/narrate.ts')], { stdio: ['ignore', json ? 'pipe' : 'inherit', json ? 'pipe' : 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
     if (await p.exited !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` (macOS say) or \`reel align <recording>\` there`);
   }
   out.ok = !out.errors.length;

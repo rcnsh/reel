@@ -1,0 +1,26 @@
+// Kokoro-82M, a local model (tools/voices/kokoro.py through uv): a natural voice with no key and nothing sent
+// anywhere. Runs on Apple Silicon through MLX; its duration predictor gives the word times.
+import { $ } from 'bun';
+import { readFileSync } from 'node:fs';
+import path from 'node:path';
+import type { VoiceSource } from './voice';
+
+export const kokoro: VoiceSource = {
+  about: 'kokoro[:<voice>]      local model, Kokoro-82M on MLX (default af_heart; am_michael, bf_emma, bm_george, …)',
+  hosted: false,
+  create(arg) {
+    const voice = arg || 'af_heart';
+    if (!/^[ab][fm]_[a-z]+$/.test(voice)) throw new Error(`kokoro:${voice}: expected an English Kokoro voice such as af_heart, am_michael, bf_emma or bm_george`);
+    return {
+      id: `kokoro:${voice}`,
+      async synth(reqs, work) {
+        const items = reqs.map((r, i) => ({ text: r.text, speed: r.speed, out: path.join(work, `kokoro${i}.wav`) }));
+        const jf = path.join(work, 'kokoro.json');
+        await Bun.write(jf, JSON.stringify({ voice, items }));
+        const r = await $`uv run -q ${path.join(import.meta.dir, 'kokoro.py')} ${jf}`.nothrow();
+        if (r.exitCode !== 0) throw new Error(`kokoro failed (it runs through MLX on Apple Silicon):\n${r.stderr.toString().slice(-1500)}`);
+        return items.map((it) => ({ file: it.out, words: JSON.parse(readFileSync(`${it.out}.json`, 'utf8')) }));
+      },
+    };
+  },
+};

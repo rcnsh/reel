@@ -40,5 +40,5 @@ test('no analysis: a silent grid, no track', () => {
   expect(E.track).toBeNull();
   expect(E.beatAt(0.6)).toBeCloseTo(1, 9); // 100 BPM
   expect(E.nearestDownbeat(3)).toBe(3);
-  expect(new AudioData({ duration: 5, bpm: 100, fps: 100, beats: [], downbeats: [], sections: [], features: {}, onsets: {} }).track).toBe('audio/narration.mp3');
+  expect(new AudioData({ duration: 5, bpm: 100, fps: 100, beats: [], downbeats: [], sections: [], features: {}, onsets: {} }).track).toBe('audio/narration.flac');
 });

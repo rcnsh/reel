@@ -61,6 +61,27 @@ export interface Sources {
   audio: AudioData;
 }
 
+/**
+ * How `reel narrate` voices narration.txt and how narrate and `reel align` space it (flags override each).
+ */
+export interface NarrationSettings {
+  /**
+   * The voice (default 'kokoro:af_heart'): 'kokoro[:<voice>]' (a local model), 'say[:<name>]' (macOS scratch voice),
+   * 'elevenlabs:<voice-id>' or 'fish:<voice-id>' (hosted: used only when ELEVENLABS_API_KEY or FISH_API_KEY is set).
+   */
+  voice?: string;
+  /** Speaking rate (default 1). */
+  speed?: number;
+  /** A hosted voice's model (ElevenLabs model_id, Fish Audio model). */
+  model?: string;
+  /** Seconds of silence before the first word (default 0.6), at least between plates (default 0.85), after the last word (default 1.6). */
+  lead?: number;
+  hold?: number;
+  tail?: number;
+  /** The script's language for the forced aligner (default 'English'). */
+  language?: string;
+}
+
 export interface VideoConfig {
   /** Logical frame size in px, [width, height] (default [1920, 1080]). The width is a multiple of 4, the height even. */
   size?: [number, number];
@@ -79,6 +100,8 @@ export interface VideoConfig {
    */
   words?: string | false;
   audio?: string | false;
+  /** How narration.txt is voiced and spaced (reel narrate, reel align). Plain data. */
+  narration?: NarrationSettings;
   /** The edit: every clip of the video. Called once the sources are loaded. */
   timeline(src: Sources): Clip[];
 }

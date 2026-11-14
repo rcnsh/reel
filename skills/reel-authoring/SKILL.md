@@ -13,7 +13,7 @@ reel renders a video from code: every frame is a pure function of the time `t`, 
 reel.config.ts      the edit: format, theme, every clip on the timeline
 scenes/<name>.ts    one Scene class per file (default export); shared helpers as scenes/_<name>.ts
 narration.txt       (narrated) plates: "# name" then its lines
-data/words.json     (generated) every word with its time      audio/narration.mp3 (generated)
+data/words.json     (generated) every word with its time      audio/narration.flac (generated)
 data/audio.json     (generated) beats, envelopes, sections, the track to mux
 mix.json            music beds and cue sounds for `reel mix`
 out/                renders (not committed)
