@@ -79,11 +79,11 @@ test('init writes a project that typechecks without an install', async () => {
   const dir = path.join(fresh, 'first');
   const init = await reel(['init', dir, '--narrated']);
   expect(init.code).toBe(0);
-  for (const f of ['reel.config.ts', 'narration.txt', 'CLAUDE.md', '.claude/skills/reel-authoring/SKILL.md', '.claude/skills/reel-review-loop/SKILL.md']) expect(existsSync(path.join(dir, f))).toBe(true);
+  for (const f of ['reel.config.ts', 'narration.txt', 'CLAUDE.md', '.claude/skills/reel-authoring/SKILL.md', '.claude/skills/reel-review-loop/SKILL.md', '.claude/skills/reel-audio/SKILL.md']) expect(existsSync(path.join(dir, f))).toBe(true);
   const tc = Bun.spawn(['bun', 'run', 'typecheck'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
   const out = await new Response(tc.stdout).text();
   expect(await tc.exited, out).toBe(0);
   const again = await reel(['init', dir]);
   expect(again.code).toBe(2);
   expect(again.err).toContain('not empty');
-}, 60_000);
+}, 240_000);

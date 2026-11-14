@@ -243,7 +243,7 @@ export async function serveMcp() {
 
   server.registerTool('analyze_song', {
     title: 'Analyze a song',
-    description: "Beats, downbeats, loudness envelopes, drum and vocal onsets and sections of a song into data/audio.json (the song becomes the track). Extra flags as in `reel analyze --help`, e.g. ['--sections', 'sections.json'] or ['--keep-sections', '--offset', '12']. The first run fetches Python packages (minutes).",
+    description: "Beats and downbeats (Beat This!), loudness envelopes of the mix and of Demucs stems (drums, bass, other, vocal), drum and vocal onsets and sections of a song into data/audio.json (the song becomes the track). Extra flags as in `reel analyze --help`, e.g. ['--sections', 'sections.json'], ['--keep-sections', '--offset', '12'] or ['--fast'] (no models, a draft). The first run fetches packages and models (minutes).",
     inputSchema: { project, song: z.string().describe('The audio file.'), args: z.array(z.string()).optional().describe('Extra flags for reel analyze.') },
   }, (a) => guard(() => tool('analyze', a.project, [path.resolve(a.song), ...(a.args ?? [])])));
 
@@ -257,6 +257,18 @@ export async function serveMcp() {
     if (!ev.ok) return { content: [text(summary(ev))], isError: true };
     return tool('mix', a.project, [path.resolve(a.input), path.resolve(a.output), ...(a.from !== undefined ? ['--from', String(a.from)] : [])]);
   }));
+
+  server.registerTool('subtitles', {
+    title: 'Subtitles',
+    description: "Write SRT and VTT subtitles from the project's timed words (data/words.json) into out/subtitles: cues of at most two lines of 42 characters and 7 s. from/to match a partial render. (video_start with subtitles: true adds them to the finished file.)",
+    inputSchema: { project, from: z.number().min(0).optional(), to: z.number().optional() },
+  }, (a) => guard(() => tool('subtitles', a.project, [...(a.from !== undefined ? ['--from', String(a.from)] : []), ...(a.to !== undefined ? ['--to', String(a.to)] : [])])));
+
+  server.registerTool('assets', {
+    title: 'Generated assets',
+    description: "The images and sounds the project declares in assets.json ({ assets: [{ id, kind: 'image'|'sfx'|'music', prompt, size|duration, out }] }) and their state. Generates the missing ones when the provider's key is set (OPENAI_API_KEY for images, ELEVENLABS_API_KEY for sounds and music; only the prompt and size or duration are sent); otherwise returns each missing asset's prompt, size and path so a person can make it. isError while any is missing. Renders show a labelled placeholder for a missing image.",
+    inputSchema: { project, list: z.boolean().optional().describe('Only list, generate nothing.'), force: z.boolean().optional().describe('Generate the generated ones again.') },
+  }, (a) => guard(() => tool('assets', a.project, ['--json', ...(a.list ? ['--list'] : []), ...(a.force ? ['--force'] : [])])));
 
   // (a job left running when the client goes away would hold Chromes and ffmpeg)
   const cleanup = () => { for (const j of jobs.values()) if (j.state === 'running') j.proc.kill('SIGTERM'); };

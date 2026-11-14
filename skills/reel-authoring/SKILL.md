@@ -156,4 +156,5 @@ Aim under 25 ms a frame (`reel perf --from a --to b`). Precompute in `init()`. A
 - `reference/sampling.md`: motion blur, adaptive sampling and what it asks of scenes; 4K output scale; stateful scenes; supersampling shaders.
 - `reference/themes.md`: palettes, post parameters, overlays, custom themes.
 - `reference/timing.md`: words (narration, lyrics), audio analysis and beat helpers, narration and music workflows, the sound mix.
+- The `reel-audio` skill: voicing and aligning narration, analysing songs, the mix and its loudness, subtitles, generated assets.
 - The engine's source (where the project's `package.json` points `reel`): `src/engine/*.ts` when the reference is not enough.

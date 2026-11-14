@@ -28,7 +28,7 @@ const call = async (name: string, args: Record<string, unknown>) => {
 test('lists its tools, each with a description', async () => {
   const { tools } = await client.listTools();
   const names = tools.map((t) => t.name).sort();
-  expect(names).toEqual(['align_recording', 'analyze_song', 'check_video', 'contact_sheet', 'diff_images', 'mix_audio', 'motion_strip', 'narrate', 'project_info', 'render_still', 'video_cancel', 'video_start', 'video_status'].sort());
+  expect(names).toEqual(['align_recording', 'analyze_song', 'assets', 'check_video', 'contact_sheet', 'diff_images', 'mix_audio', 'motion_strip', 'narrate', 'project_info', 'render_still', 'subtitles', 'video_cancel', 'video_start', 'video_status'].sort());
   for (const t of tools) expect((t.description ?? '').length).toBeGreaterThan(60);
   for (const t of tools.filter((x) => !x.name.startsWith('video_s') && !x.name.startsWith('video_c') && x.name !== 'diff_images')) expect(t.inputSchema.required ?? []).toContain('project');
 });
