@@ -2,6 +2,10 @@ import { expect, test } from 'bun:test';
 import { clipsFromSections, defineVideo, formatOf } from '../src/config';
 import { AudioData } from '../src/engine/audio';
 import { Words } from '../src/engine/words';
+import { loadConfig } from '../cli/server';
+import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 
 test('formatOf: defaults and checks', () => {
   expect(formatOf(defineVideo({ timeline: () => [] }))).toEqual({ w: 1920, h: 1080, fps: 60 });
@@ -18,4 +22,12 @@ test('clipsFromSections: one clip per section with a scene, each until the next'
   const load = async () => ({ default: class {} });
   const clips = clipsFromSections({ audio, words: new Words({ lines: [] }) }, { './scenes/a.ts': load, './scenes/b.ts': load, './scenes/_helpers.ts': load });
   expect(clips.map(({ id, start, end }) => ({ id, start, end }))).toEqual([{ id: 'a', start: 0, end: 5 }, { id: 'b', start: 5, end: 9 }]);
+});
+
+test('loadConfig: a config that does not parse names the file, line and column', async () => {
+  const dir = mkdtempSync(path.join(tmpdir(), 'reel-test-config-'));
+  try {
+    writeFileSync(path.join(dir, 'reel.config.ts'), "import { defineVideo } from 'reel/config';\nexport default defineVideo({ timeline: () => [] });\ngarbage(\n");
+    await expect(loadConfig(dir)).rejects.toThrow(`${path.join(dir, 'reel.config.ts')}:3:9: Unexpected end of file`);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
 });

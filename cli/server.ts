@@ -34,7 +34,12 @@ export function projectDir(dir: string) {
  */
 export async function loadConfig(project: string): Promise<VideoConfig> {
   const src = await Bun.file(path.join(project, 'reel.config.ts')).text();
-  const js = new Bun.Transpiler({ loader: 'ts' }).transformSync(src)
+  let compiled: string;
+  try { compiled = new Bun.Transpiler({ loader: 'ts' }).transformSync(src); } catch (e) {
+    const p = (e as { position?: { line: number; column: number; lineText: string } }).position;
+    throw new Error(`${path.join(project, 'reel.config.ts')}${p ? `:${p.line}:${p.column}` : ''}: ${(e as Error).message}${p ? `\n  ${p.lineText}` : ''}`);
+  }
+  const js = compiled
     .replace(/(from\s*|import\s*\(\s*)(["'])reel(\/config|\/scenes\/[\w-]+)?\2/g, (_, pre: string, q: string, sub?: string) => `${pre}${q}${path.join(ENGINE, sub === '/config' ? 'src/config.ts' : sub ? `src${sub}.ts` : 'src/index.ts')}${q}`);
   // (beside the config, so its relative imports resolve; removed once loaded)
   const file = path.join(project, `.reel.config.${Bun.hash(js).toString(36)}.mjs`);
