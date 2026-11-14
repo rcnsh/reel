@@ -1,13 +1,14 @@
 // The warm renderer: one background process per project that keeps its dev server, a headless Chrome and its
 // pages open between commands, so a still takes a fraction of a second instead of seconds. The CLI and the MCP
-// server start it on demand (call()), it reloads its pages when the project's files change and stops itself
+// server start it on demand (call()), it reloads its pages when the project's files change (cli/renderer.ts
+// looks before every request) and stops itself
 // after an idle period (REEL_DAEMON_IDLE seconds, default 900).
 //
 // It listens on 127.0.0.1 with a random port and token, written with its pid and the engine's version to a
 // state file in the temp folder. A client whose engine version differs (the engine's code, the protocol or
 // CHROME_PATH changed) stops it and starts a fresh one. Requests run one at a time, in arrival order.
 import { spawn } from 'node:child_process';
-import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, watch, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ENGINE } from './server';
@@ -142,9 +143,6 @@ export async function stop(project: string | null): Promise<string[]> {
   return stopped;
 }
 
-/** Paths under a project whose changes never matter to its pages. */
-const IGNORED = /^(out|node_modules|\.git|audio\/\.work|audio\/\.align|\.claude)(\/|$)|(^|\/)\.reel\.config\.[^/]*\.mjs$|(^|\/)\.DS_Store$/;
-
 /** `reel daemon run`: be the project's warm renderer until stopped or idle. */
 export async function serve(project: string) {
   mkdirSync(DIR, { recursive: true });
@@ -163,23 +161,10 @@ export async function serve(project: string) {
   const started = Date.now(), version = engineVersion(), token = crypto.randomUUID();
   let last = Date.now(), busy = false, requests = 0, closing = false;
   let chain: Promise<unknown> = Promise.resolve();
-  /** Files this process wrote (stills, sheets): their change events are its own. */
-  const written = new Map<string, number>();
-
-  const watcher = watch(project, { recursive: true }, (_ev, name) => {
-    if (!name) return r.invalidate();
-    const rel = String(name).split(path.sep).join('/');
-    if (IGNORED.test(rel)) return;
-    const w = written.get(path.join(project, rel));
-    if (w && Date.now() - w < 5000) return;
-    r.invalidate();
-  });
-
   const shutdown = async (why: string) => {
     if (closing) return;
     closing = true;
     console.log(`stopping: ${why}`);
-    watcher.close();
     server.stop(true);
     await chain.catch(() => {});
     await r.close().catch(() => {});
@@ -204,7 +189,7 @@ export async function serve(project: string) {
         const job = chain.then(async () => {
           busy = true; requests++;
           try {
-            return await run(r, q, (file) => written.set(file, Date.now()));
+            return await run(r, q, (file) => r.written.add(file));
           } catch (e) {
             return { ok: false, errors: [String((e as Error)?.message ?? e)], logs: [], warnings: [] } satisfies Result;
           } finally { busy = false; last = Date.now(); }

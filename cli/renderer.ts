@@ -4,8 +4,13 @@
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { formatOf } from '../src/config';
 import { resolveTheme } from '../src/themes';
+import { readdirSync, statSync } from 'node:fs';
+import path from 'node:path';
 import { loadConfig, startServer } from './server';
 import type { PageOpts } from './args';
+
+/** Paths in a project whose changes never matter to its pages (renders, tools' working files, the config loader's). */
+export const IGNORED = /^(out|node_modules|\.git|audio\/\.work|audio\/\.align|\.claude)(\/|$)|(^|\/)\.reel\.config\.[^/]*\.mjs$|(^|\/)\.DS_Store$/;
 
 /** The flags every Chrome the CLI starts gets. */
 export const CHROME_ARGS = ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];
@@ -86,12 +91,43 @@ export class Renderer {
   private configDirty = false;
   private uses = 0;
 
+  /** What the project's files looked like at the last request (path -> mtime and size). */
+  private seen = new Map<string, string>();
+  /** Files this renderer wrote into the project (stills to a folder of the project's own): not changes to it. */
+  readonly written = new Set<string>();
+
   constructor(public project: string, private opts: { headed?: boolean; maxPages?: number } = {}) {}
 
-  /** The project's files changed (`config`: the config may have, so the format and theme are read again). */
-  invalidate(config = true) {
+  /**
+   * Look for changes to the project's files since the last request (a stat of each: a project is a few dozen
+   * files, and a scan cannot miss an edit made a millisecond before the request the way a file watcher can).
+   * A change reloads the pages before their next use, makes Vite transform the changed modules again, and has
+   * the config read again (its format or theme may have changed).
+   */
+  private rescan() {
+    const now = new Map<string, string>(), changed: string[] = [];
+    const walk = (d: string, rel: string) => {
+      let es;
+      try { es = readdirSync(d, { withFileTypes: true }); } catch { return; }
+      for (const e of es) {
+        const r = rel ? `${rel}/${e.name}` : e.name, f = path.join(d, e.name);
+        if (IGNORED.test(r)) continue;
+        if (e.isDirectory()) walk(f, r);
+        else if (e.isFile() && !this.written.has(f)) {
+          try { const st = statSync(f); now.set(f, `${st.mtimeMs}:${st.size}`); } catch {}
+        }
+      }
+    };
+    walk(this.project, '');
+    for (const [f, v] of now) if (this.seen.get(f) !== v) changed.push(f);
+    for (const f of this.seen.keys()) if (!now.has(f)) changed.push(f);
+    const first = this.seen.size === 0;
+    this.seen = now;
+    if (first || !changed.length) return;
     this.gen++;
-    if (config) this.configDirty = true;
+    this.configDirty = true;
+    const g = this.srv?.server.moduleGraph;
+    if (g) for (const f of changed) for (const m of g.getModulesByFile(f) ?? []) g.invalidateModule(m);
   }
 
   get pageCount() { return this.pages.size; }
@@ -124,6 +160,7 @@ export class Renderer {
 
   /** The page for these options, ready for a request: reused while the project is unchanged, else (re)opened. */
   async page(o: PageOpts): Promise<PageHandle> {
+    this.rescan();
     const srv = await this.server();
     const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
     const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '']);
