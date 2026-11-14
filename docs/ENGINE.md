@@ -46,7 +46,7 @@ In practice a still frame stops at 12, ordinary camera motion at 36, whips and f
 
 ## Readback and export
 
-`readPixelsAsync` reads `finalRT` through a pixel-pack buffer and a fence (several times faster than a blocking `readPixels` in Chrome). The video path packs RGB into a `(PW*3/4) x PH` RGBA8 target (`rgbPass`, exact bytes), queues the copy with `readStart(slot)` and collects it with `readFinish(slot)` while the next frame renders. `stream()` sends frames over a WebSocket written from a worker thread, with at most `inflight` unacknowledged frames: the encoder's backpressure. `cli/video.ts` runs several pages (each its own Chrome and GPU process) on chunks of frames, puts the frames back in order, spools to disk when x264 falls behind, and pipes them into one ffmpeg (BT.709, tagged).
+`readPixelsAsync` reads `finalRT` through a pixel-pack buffer and a fence (several times faster than a blocking `readPixels` in Chrome). The video path packs RGB into a `(PW*3/4) x PH` RGBA8 target (`rgbPass`, exact bytes), queues the copy with `readStart(slot)` and collects it with `readFinish(slot)` while the next frame renders. `stream()` sends frames over a WebSocket written from a worker thread, with at most `inflight` unacknowledged frames: the encoder's backpressure. `cli/video.ts` runs several pages (each its own Chrome and GPU process) on chunks of frames, puts the frames back in order, spools to disk when x264 falls behind, and pipes them into one ffmpeg, which converts full-range RGB to limited-range BT.709 YUV explicitly (chroma averaged over each 2x2 block, accurate rounding) and tags matrix, range, primaries and transfer.
 
 ## Reporting and check
 

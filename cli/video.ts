@@ -62,10 +62,11 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   // (frames come as rgb24: the same YUV out of the scaler as from rgba, a quarter fewer bytes to move)
   const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${OW}x${OH}`, '-r', String(fps), '-i', 'pipe:0'];
   if (mux) args.push('-ss', String(from), '-t', String(to - from), '-i', audio!);
-  // Frames are sRGB (toSRGB in the final pass): convert with the BT.709 matrix and tag the stream,
-  // otherwise ffmpeg converts with BT.601 while players and YouTube decode untagged HD as BT.709.
-  // scale tags the matrix and range; primaries and transfer need setparams (the -color_* output flags don't reach the stream).
-  args.push('-vf', 'vflip,scale=out_color_matrix=bt709,setparams=color_primaries=bt709:color_trc=bt709', '-c:v', 'libx264', '-preset', o.preset, '-crf', String(o.crf), '-pix_fmt', 'yuv420p', '-tune', 'grain', '-x264-params', o.x264);
+  // Frames are full-range sRGB (toSRGB in the final pass): converted with the BT.709 matrix into limited range,
+  // chroma averaged over its 2x2 block (no ringing at colour edges), and the stream tagged BT.709 throughout.
+  args.push('-vf', 'vflip,scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=yuv420p,setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709',
+    '-c:v', 'libx264', '-preset', o.preset, '-crf', String(o.crf), '-pix_fmt', 'yuv420p', '-tune', 'grain', '-x264-params', o.x264,
+    '-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709');
   if (mux) args.push('-c:a', 'aac', '-b:a', '320k', '-shortest');
   args.push('-movflags', '+faststart', o.out);
   const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
