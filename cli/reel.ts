@@ -80,11 +80,19 @@ if (mode === 'init') {
   });
 }
 
+if (mode === 'mcp') {
+  const { serveMcp } = await import('./mcp');
+  await serveMcp();
+  await new Promise(() => {});
+}
+
 if (mode === 'daemon') {
   const sub = P.positionals[0];
   const d = await import('./daemon');
   if (sub === 'run') {
-    try { await d.serve(projectDir(typeof A.project === 'string' ? A.project : '.')); } catch (e) { fail((e as Error).message); }
+    let running = false;
+    try { running = await d.serve(projectDir(typeof A.project === 'string' ? A.project : '.')); } catch (e) { fail((e as Error).message); }
+    if (!running) process.exit(0);
     await new Promise(() => {});
   }
   const res: Result = { ok: true, errors: [], logs: [], warnings: [] };

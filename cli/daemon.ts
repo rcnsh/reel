@@ -143,14 +143,14 @@ export async function stop(project: string | null): Promise<string[]> {
   return stopped;
 }
 
-/** `reel daemon run`: be the project's warm renderer until stopped or idle. */
-export async function serve(project: string) {
+/** `reel daemon run`: be the project's warm renderer until stopped or idle. False when another one already is. */
+export async function serve(project: string): Promise<boolean> {
   mkdirSync(DIR, { recursive: true });
   const f = files(project);
   // one per project: whoever creates the lock file runs; a lock left by a dead process is taken over
   for (;;) {
     try { writeFileSync(f.lock, String(process.pid), { flag: 'wx' }); break; } catch {
-      if (lockHeld(f.lock)) { console.log(`another warm renderer runs for ${project}`); return; }
+      if (lockHeld(f.lock)) { console.log(`another warm renderer runs for ${project}`); return false; }
       rmSync(f.lock, { force: true });
     }
   }
@@ -211,4 +211,5 @@ export async function serve(project: string) {
   }, 5000).unref();
   // warm up while the first request is being written: the server, Chrome and a page at the project's format
   chain = chain.then(() => r.page({ scale: 1 }).catch(() => {}));
+  return true;
 }
