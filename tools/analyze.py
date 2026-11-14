@@ -4,25 +4,28 @@
 # ///
 """Music analysis -> data/audio.json, for videos cut to a song.
 
-    uv run tools/analyze.py <song> [--sections sections.json] [--keep-sections] [--offset 0] [--free-tempo]
-                                   [--onset-delta 0.5,0.4,0.25]
+    uv run tools/analyze.py <song> [--fast] [--sections sections.json] [--keep-sections] [--offset 0]
+                                   [--free-tempo] [--onset-delta 0.5,0.4,0.25]
 
 Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit, f.a, f.beat, ...):
 
-  * a beat grid: librosa's beat tracker, then (unless --free-tempo) one constant tempo fitted through it,
-    which is what produced music has and what cuts snap to cleanly, its phase moved onto the strong kicks;
-  * downbeats, bars of 4 beats: kicks on 1 and 3 against snares on 2 and 4 pick the pair of phases, then
-    the one with more low end and more harmonic change (chords move on the bar line) is the one;
+  * beats and downbeats from Beat This! (a transformer beat tracker; tools/music_models.py). Where they keep one
+    tempo (produced music: a residual under 20 ms) a constant grid is fitted through them, which fills beats the
+    tracker missed in breaks and puts every beat between its frames; otherwise (a live tempo, or --free-tempo)
+    the tracked beats are kept. The bar length and the downbeat's place in it are what most of the tracked
+    downbeats agree on;
   * 100 fps envelopes, each normalised to 0..1 at its 99th percentile, with a fast-attack, slower-release
-    follower: rms, low (<200 Hz), mid (200 Hz-2 kHz), high (>2 kHz) of the mix; drums (percussive part),
-    other (harmonic part), bass (harmonic <200 Hz) and vocal (harmonic 300 Hz-3.4 kHz) from a
-    harmonic/percussive split. The last three are proxies, not separated stems;
-  * kick / snare / hat onsets from the percussive part (low, mid and high bands), and vocal onsets from the
-    harmonic 300 Hz-3.4 kHz band (a proxy like the vocal envelope), strengths 0..1; raise a
-    band's --onset-delta (peak-picking threshold) if it fires on other instruments, lower it if it misses;
+    follower: rms, low (<200 Hz), mid (200 Hz-2 kHz) and high (>2 kHz) of the mix, and drums, bass, other and
+    vocal from stems separated by Demucs (htdemucs through demucs-mlx);
+  * kick / snare / hat onsets from the drum stem (low, mid and high bands) and vocal onsets from the vocal stem,
+    strengths 0..1; raise a band's --onset-delta (peak-picking threshold) if it fires on other sounds;
   * sections: from --sections (a JSON list of {"name", "bar"} or {"name", "start"} in seconds, in order),
     else kept from the existing data/audio.json with --keep-sections (a narrated video with a music bed),
     else found by structural segmentation and named part1, part2, ... on downbeats.
+
+--fast skips the models (no download, seconds instead of tens of seconds): librosa's beat tracker with one
+fitted tempo and a kick/snare heuristic for the bar phase, and harmonic/percussive proxies for the stems. Good
+for drafts; it loses its place where the tempo moves.
 
 The timeline shows each section with the scene of the same name, so name sections after your scenes.
 Without --keep-sections the song becomes the video's sound: it is copied to audio/ and data/audio.json
@@ -35,7 +38,10 @@ import math
 import os
 import re
 import shutil
+import subprocess
 import sys
+import tempfile
+from collections import Counter
 from pathlib import Path
 
 import librosa
@@ -177,12 +183,61 @@ def auto_sections(y, downbeats, duration):
     return [{"name": f"part{i + 1}", "start": s} for i, s in enumerate(starts)]
 
 
+def load_on_timeline(path, lead, n_samples):
+    """A file's mono samples at SR, shifted by `lead` samples and cut or padded to n_samples."""
+    x, _ = librosa.load(path, sr=SR, mono=True)
+    x = np.concatenate([np.zeros(max(lead, 0)), x[max(-lead, 0):]])[:n_samples]
+    return np.pad(x, (0, max(0, n_samples - len(x))))
+
+
+def run_models(song, work):
+    """Beat This! beats and Demucs stems (tools/music_models.py in its own environment)."""
+    script = Path(__file__).with_name("music_models.py")
+    r = subprocess.run(["uv", "run", "-q", str(script), str(song), str(work)])
+    if r.returncode != 0:
+        sys.exit("analyze: the models failed (see above); --fast analyses without them")
+    return json.loads((Path(work) / "beats.json").read_text())
+
+
+def regularize(beats, downbeats, free, duration):
+    """Tracked beats as a constant-tempo grid where they keep one tempo; downbeats where most tracked ones fall."""
+    b = np.array(beats, dtype=float)
+    if len(b) < 8:
+        sys.exit("analyze: too few beats found; is this music?")
+    # beat indices from the intervals (a gap of two periods is a missed beat)
+    d = np.diff(b)
+    idx = np.r_[0, np.cumsum(np.maximum(1, np.round(d / np.median(d))))]
+    grid = None
+    if not free:
+        period, phase = np.polyfit(idx, b, 1)
+        res = b - (phase + period * idx)
+        inl = np.abs(res) < 0.05
+        if inl.sum() >= 8:
+            period, phase = np.polyfit(idx[inl], b[inl], 1)
+            res = b[inl] - (phase + period * idx[inl])
+            if np.sqrt(np.mean(res ** 2)) < 0.02:
+                k = np.arange(idx[inl].min(), idx[inl].max() + 1)
+                grid = phase + period * k
+                grid = grid[(grid >= 0) & (grid < duration)]
+    out = grid if grid is not None else b
+    # bar length and phase: the tracked downbeats' places on the beats
+    on = [int(np.abs(out - t).argmin()) for t in downbeats if np.abs(out - t).min() < 0.07]
+    if len(on) >= 2:
+        steps = [y - x for x, y in zip(on, on[1:]) if 2 <= y - x <= 7]
+        meter = Counter(steps).most_common(1)[0][0] if steps else 4
+        ph = Counter(i % meter for i in on).most_common(1)[0][0]
+    else:
+        meter, ph = 4, 0
+    return [float(x) for x in out], [float(x) for x in out[ph::meter]], meter, grid is not None
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("song")
     ap.add_argument("--sections", help="JSON list of {name, bar} or {name, start}")
     ap.add_argument("--keep-sections", action="store_true", help="keep track, duration and sections of the existing data/audio.json")
     ap.add_argument("--offset", type=float, default=0.0, help="video time the song starts at (with --keep-sections)")
+    ap.add_argument("--fast", action="store_true", help="no models: librosa beats and harmonic/percussive proxies for the stems")
     ap.add_argument("--free-tempo", action="store_true", help="keep the tracked beats instead of fitting one tempo")
     ap.add_argument("--onset-delta", default="0.5,0.4,0.25", help="kick,snare,hat peak-picking thresholds")
     a = ap.parse_args()
@@ -205,17 +260,44 @@ def main():
     y = np.pad(y, (0, max(0, int(math.ceil(duration * SR)) - len(y))))
     n = int(math.ceil(duration * FPS))
 
-    harm, perc = librosa.effects.hpss(y)
-    bpm, beats = beat_grid(y, duration, a.free_tempo)
-    # (a free-tempo grid from a shifted song starts at its first beat; a fitted one extends back to 0)
     dk, ds, dh = (float(x) for x in a.onset_delta.split(","))
-    kick = onsets(band(perc, None, 150), delta=dk, min_gap=0.10)
-    snare = onsets(band(perc, 150, 2500), delta=ds, min_gap=0.10)
-    hat = onsets(band(perc, 6000, None), delta=dh, min_gap=0.05)
-    vocal = onsets(band(harm, 300, 3400), delta=0.3, min_gap=0.12)
-    beats = refine_phase(beats, kick, a.free_tempo, duration)
-    p = downbeat_phase(y, harm, beats, kick, snare)
-    downbeats = beats[p::4]
+    meter = 4
+    if a.fast:
+        harm, perc = librosa.effects.hpss(y)
+        bpm, beats = beat_grid(y, duration, a.free_tempo)
+        # (a free-tempo grid from a shifted song starts at its first beat; a fitted one extends back to 0)
+        kick = onsets(band(perc, None, 150), delta=dk, min_gap=0.10)
+        snare = onsets(band(perc, 150, 2500), delta=ds, min_gap=0.10)
+        hat = onsets(band(perc, 6000, None), delta=dh, min_gap=0.05)
+        vocal = onsets(band(harm, 300, 3400), delta=0.3, min_gap=0.12)
+        beats = refine_phase(beats, kick, a.free_tempo, duration)
+        p = downbeat_phase(y, harm, beats, kick, snare)
+        downbeats = beats[p::4]
+        stems = {"drums": perc, "other": harm, "bass": band(harm, None, 200), "vocal": band(harm, 300, 3400)}
+        how = "librosa beats, harmonic/percussive proxies"
+    else:
+        with tempfile.TemporaryDirectory(prefix="reel-analyze-") as work:
+            tracked = run_models(song, work)
+            n_samples = len(y)
+            stems = {k: load_on_timeline(Path(work) / f"{f}.wav", lead, n_samples) for k, f in [("drums", "drums"), ("bass", "bass"), ("other", "other"), ("vocal", "vocals")]}
+        shift = lambda ts: [t + off for t in ts if 0 <= t + off < duration]
+        beats, downbeats, meter, gridded = regularize(shift(tracked["beats"]), shift(tracked["downbeats"]), a.free_tempo, duration)
+        bpm = 60.0 / float(np.median(np.diff(beats)))
+        kick = onsets(band(stems["drums"], None, 150), delta=dk, min_gap=0.10)
+        snare = onsets(band(stems["drums"], 150, 2500), delta=ds, min_gap=0.10)
+        hat = onsets(band(stems["drums"], 6000, None), delta=dh, min_gap=0.05)
+        vocal = onsets(stems["vocal"], delta=0.3, min_gap=0.12)
+        if gridded:
+            # the tracker works in 20 ms frames: move the grid onto the strong kicks of the drum stem (the median
+            # offset of those within 60 ms of a beat), which measured more consistent on songs with known beats
+            b = np.array(beats)
+            dd = [t - b[np.abs(b - t).argmin()] for t, st in kick if st >= 0.5]
+            dd = [x for x in dd if abs(x) < 0.06]
+            if len(dd) >= 4:
+                sh = float(np.median(dd))
+                beats = [x + sh for x in beats if 0 <= x + sh < duration]
+                downbeats = [x + sh for x in downbeats if 0 <= x + sh < duration]
+        how = f"Beat This! beats ({'one tempo' if gridded else 'as tracked'}), Demucs stems"
 
     if a.sections:
         starts = []
@@ -243,7 +325,7 @@ def main():
         "duration": round(duration, 3),
         "bpm": round(bpm, 3),
         "beat_period": round(60 / bpm, 4),
-        "time_signature": 4,
+        "time_signature": meter,
         "beats": [round(b, 3) for b in beats],
         "downbeats": [round(b, 3) for b in downbeats],
         "sections": sections,
@@ -253,13 +335,13 @@ def main():
             "low": envelope(band(y, None, 200), n),
             "mid": envelope(band(y, 200, 2000), n),
             "high": envelope(band(y, 2000, None), n),
-            "drums": envelope(perc, n),
-            "other": envelope(harm, n),
-            "bass": envelope(band(harm, None, 200), n),
-            "vocal": envelope(band(harm, 300, 3400), n),
+            "drums": envelope(stems["drums"], n),
+            "other": envelope(stems["other"], n),
+            "bass": envelope(stems["bass"], n),
+            "vocal": envelope(stems["vocal"], n),
         },
         "onsets": {"kick": kick, "snare": snare, "hat": hat, "vocal": vocal},
-        "notes": f"tools/analyze.py on {song.name}" + (f", placed at {off} s" if off else ""),
+        "notes": f"reel analyze on {song.name}: {how}" + (f", placed at {off} s" if off else ""),
     }
     if prev:
         if "track" in prev:
@@ -271,6 +353,7 @@ def main():
             dest.parent.mkdir(exist_ok=True)
             shutil.copyfile(song, dest)
         doc["track"] = f"audio/{dest.name}"
+    out.parent.mkdir(exist_ok=True)
     out.write_text(json.dumps(doc, separators=(",", ":")))
     print(f"{out.relative_to(ROOT)}: {bpm:.2f} BPM, {len(beats)} beats, {len(downbeats)} bars, "
           f"{len(kick)} kick / {len(snare)} snare / {len(hat)} hat / {len(vocal)} vocal onsets, sections: {', '.join(s['name'] for s in sections)}")
