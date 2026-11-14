@@ -12,7 +12,8 @@ function projectAssets(): Plugin {
       if (!options.dir) return;
       for (const dir of assetDirs) {
         const src = path.resolve(import.meta.dirname, dir);
-        if (existsSync(src)) cpSync(src, path.join(options.dir, dir), { recursive: true });
+        // (skipping the tools' working folders, audio/.align and audio/.work)
+        if (existsSync(src)) cpSync(src, path.join(options.dir, dir), { recursive: true, filter: (f) => !path.basename(f).startsWith('.') });
       }
     },
   };

@@ -10,7 +10,8 @@
 //     "entryCues": { "turn": ["chapter2", "chapter3"] }
 //   }
 // music: files in audio/, looped, from the start of entry `from` (default: the video start) to the start of
-// entry `to` (default: the video end), ducked while the voice speaks. cues: the sound for each cue kind;
+// entry `to` (default: the video end), ducked while the voice speaks. Fades default to 1.5 s in at the video's
+// start, 3 s out at its end and 0.4 s elsewhere; a render that cuts a segment fades it at the cut. cues: the sound for each cue kind;
 // cues closer than minGap s share one. entryCues: extra cues of that kind at the start of the listed entries.
 import path from 'node:path';
 import { existsSync } from 'node:fs';
@@ -45,11 +46,14 @@ const segs: Seg[] = [];
 for (const m of cfg.music ?? []) {
   const a = m.from ? entryStart(m.from) : 0, b = m.to ? entryStart(m.to) : ev.duration;
   const s = Math.max(a, T0), e = Math.min(b, T1);
-  if (e - s > 0.1) segs.push([s - T0, e - T0, m.file, m.db ?? -17, s === a ? m.fadeIn ?? 0.4 : 0, e === b ? m.fadeOut ?? 0.4 : 0]);
+  const L = e - s;
+  if (L <= 0.1) continue;
+  // (a segment cut by the render's window fades at the cut, like the video's own ends)
+  const fi = s === a ? m.fadeIn ?? (a === 0 ? 1.5 : 0.4) : 1.5;
+  const fo = e === b ? m.fadeOut ?? (b === ev.duration ? 3.0 : 0.4) : 3.0;
+  // fades longer than half the segment would overlap (or start before it: ffmpeg refuses a negative st)
+  segs.push([s - T0, e - T0, m.file, m.db ?? -17, Math.min(fi, L / 2), Math.min(fo, L / 2)]);
 }
-// the video's own ends fade too (partial renders)
-segs.sort((x, y) => x[0] - y[0]);
-if (segs.length) { segs[0]![4] ||= 1.5; segs[segs.length - 1]![5] ||= 3.0; }
 
 // cue times per kind, in video time
 const inWin = (t: number) => t >= T0 && t < T1 - 0.2;
