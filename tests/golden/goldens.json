@@ -12,6 +12,8 @@
     { "example": "explainer", "times": [4.3, 6.5], "samples": "auto" },
     { "example": "music", "times": [2, 8.5, 13.5, 17] },
     { "example": "product3d", "times": [0.5, 4.2] },
-    { "example": "product3d", "times": [3], "samples": "auto" }
+    { "example": "product3d", "times": [3], "samples": "auto" },
+    { "example": "media", "times": [1.3, 3, 6.5] },
+    { "example": "media", "times": [2.8], "samples": "auto" }
   ]
 }

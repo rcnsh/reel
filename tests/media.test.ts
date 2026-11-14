@@ -1,9 +1,12 @@
 // Media inputs: the 16-bit PNG decoder (every row filter, grey and alpha, sRGB, gamma and Display P3 by cICP, what it
 // leaves to the browser), an SVG's own size, and a video clip's time (trim, speed, loop, held and blended frames, its
 // sound).
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
+import { readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { decodePng16, pngDepth } from '../src/engine/png16';
+import { hasChrome, reel, scratchCopy } from './helpers';
 import { svgSize, sourceTime, frameAt, framesAt, trimFrames, videoSounds, type FrameSpan, type VideoTiming } from '../src/kit';
 
 function crc32(b: Uint8Array) {
@@ -126,4 +129,35 @@ describe('video time', () => {
     expect(s.map((x) => [x.at, x.duration, x.from, x.speed, x.db])).toEqual([[11, 2, 0.5, 0.5, -3], [13, 1, 0.5, 0.5, -3]]);
     expect(videoSounds('a.mp4', 0, T({ at: [0, 9] }))).toHaveLength(1);
   });
+});
+
+describe.skipIf(!hasChrome)('media rendered', () => {
+  const media = scratchCopy('media');
+  afterAll(async () => { await reel(['daemon', 'stop', '--project', media.dir]); media.cleanup(); });
+
+  test('a video frame, a Lottie frame and the rest are the same reached in order or by a seek', async () => {
+    // frames 40 to 47 at 30 fps: the clip's second group of pictures, the badge drawing its ring and tick
+    const times = Array.from({ length: 8 }, (_, k) => ((40 + k) / 30).toFixed(4));
+    const stills = async (ts: string[]) => {
+      const r = await reel(['still', '--t', ts.join(','), '--json', '--project', media.dir]);
+      expect(r.code).toBe(0);
+      return new Map((r.json().frames as { t: number; file: string }[]).map((f) => [f.t.toFixed(4), readFileSync(f.file)]));
+    };
+    const played = await stills(times);
+    await reel(['still', '--t', '7.5', '--project', media.dir]);
+    const sought = await stills([...times].reverse());
+    for (const t of times) expect(Buffer.compare(played.get(t)!, sought.get(t)!)).toBe(0);
+    expect(new Set([...played.values()].map((b) => b.toString('base64'))).size).toBe(times.length);
+  }, 120_000);
+
+  test('a missing video is a scene error that check reports', async () => {
+    const shot = path.join(media.dir, 'scenes/shot.ts');
+    const text = readFileSync(shot, 'utf8');
+    writeFileSync(shot, text.replace("src: 'assets/clip.mp4', alt: 'colour field'", "src: 'assets/nope.mp4', alt: 'colour field'"));
+    try {
+      const r = await reel(['check', '--json', '--only', 'shot', '--project', media.dir]);
+      expect(r.code).toBe(1);
+      expect(JSON.stringify(r.json())).toContain("video 'assets/nope.mp4' did not load");
+    } finally { writeFileSync(shot, text); }
+  }, 120_000);
 });
