@@ -84,8 +84,14 @@ export function extendTheme(base: ThemeName | Theme, over: Partial<Theme>): Them
   };
 }
 
+/** Own keys only: a theme name or palette key such as 'constructor' must not find Object.prototype. */
+const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
+
+/** Whether `name` is a built-in theme. */
+export const isThemeName = (name: string): name is ThemeName => has(themes, name);
+
 function themeByName(name: string): Theme {
-  const t = (themes as Record<string, Theme>)[name];
+  const t = isThemeName(name) ? themes[name] : undefined;
   if (!t) throw new Error(`theme '${name}': expected ${Object.keys(themes).join(', ')} or a theme object`);
   return t;
 }
@@ -111,21 +117,21 @@ export function resolveTheme(t: ThemeName | Theme | string): ResolvedTheme {
   if (!theme || typeof theme !== 'object' || !theme.palette || typeof theme.palette !== 'object') throw new Error('theme: expected a name or an object with a palette');
   const raw = theme.palette, out: Record<string, string> = {};
   const look = (key: string, seen: string[]): string => {
-    if (out[key]) return out[key];
-    const v = raw[key];
+    if (has(out, key)) return out[key]!;
+    const v = has(raw, key) ? raw[key] : undefined;
     if (typeof v !== 'string') throw new Error(`theme palette: '${seen.at(-1) ?? key}' names '${key}', which is not in the palette`);
     if (HEX_RE.test(v)) return (out[key] = hex6(v));
     if ([...seen, key].includes(v)) throw new Error(`theme palette: ${[...seen, key, v].join(' -> ')} is a loop`);
-    if (!(v in raw)) throw new Error(`theme palette: '${key}' is '${v}', which is neither a #rrggbb colour nor a key of the palette`);
+    if (!has(raw, v)) throw new Error(`theme palette: '${key}' is '${v}', which is neither a #rrggbb colour nor a key of the palette`);
     return (out[key] = look(v, [...seen, key]));
   };
   for (const key of Object.keys(raw)) {
     if (!/^[a-z][A-Za-z0-9]*$/.test(key)) throw new Error(`theme palette: key '${key}' must be an identifier starting with a lowercase letter (it becomes C_${key.toUpperCase()} in GLSL)`);
     look(key, []);
   }
-  for (const k of ['bg', 'fg', 'accent']) if (!out[k]) throw new Error(`theme palette: '${k}' is required (bg, fg and accent are)`);
-  out.accentHi ??= mixHex(out.accent!, '#FFFFFF', 0.3);
-  out.accentLo ??= mixHex(out.accent!, '#000000', 0.4);
+  for (const k of ['bg', 'fg', 'accent']) if (!has(out, k)) throw new Error(`theme palette: '${k}' is required (bg, fg and accent are)`);
+  if (!has(out, 'accentHi')) out.accentHi = mixHex(out.accent!, '#FFFFFF', 0.3);
+  if (!has(out, 'accentLo')) out.accentLo = mixHex(out.accent!, '#000000', 0.4);
   const glsl = new Map<string, string>();
   for (const k of Object.keys(out)) {
     const g = glslName(k);

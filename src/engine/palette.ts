@@ -23,12 +23,12 @@ const missing = (key: string) => new Error(`palette: the ${THEME.name} theme has
 /** Linear RGB triplets for GL uniforms (a key the theme lacks throws). */
 export const LIN: Readonly<Record<PaletteKey, [number, number, number]>> = new Proxy(
   Object.fromEntries(Object.entries(HEX).map(([k, v]) => [k, hexToLinear(v)])) as Record<PaletteKey, [number, number, number]>,
-  { get: (o, k) => (typeof k !== 'string' || k in o || k === 'then' || k === 'toJSON' ? (o as any)[k] : (() => { throw missing(k); })()) },
+  { get: (o, k) => (typeof k !== 'string' || Object.prototype.hasOwnProperty.call(o, k) || k === 'then' || k === 'toJSON' ? (o as any)[k] : (() => { throw missing(k); })()) },
 );
 
 /** CSS rgba() for Canvas2D: a palette key, or a '#rrggbb' colour. */
 export function rgba(key: PaletteKey, a = 1): string {
-  const hex = HEX[key] ?? (key.startsWith('#') ? key : undefined);
+  const hex = Object.prototype.hasOwnProperty.call(HEX, key) ? HEX[key] : key.startsWith('#') ? key : undefined;
   if (!hex) throw missing(key);
   const n = parseInt(hex.replace('#', ''), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;

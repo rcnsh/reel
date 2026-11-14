@@ -5,7 +5,7 @@
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf } from '../src/config';
-import { themes } from '../src/themes';
+import { isThemeName, themes } from '../src/themes';
 import { ENGINE } from './server';
 
 export interface InitOptions { size: [number, number]; fps: number; theme: string; narrated: boolean }
@@ -24,7 +24,7 @@ export function initOptions(o: { size?: string; fps?: string; theme?: string; na
   const fps = o.fps === undefined ? 60 : Number(o.fps);
   formatOf({ size, fps, timeline: () => [] });
   const theme = o.theme ?? 'neutral';
-  if (!(theme in themes)) throw new Error(`--theme ${theme}: expected ${Object.keys(themes).join(', ')}`);
+  if (!isThemeName(theme)) throw new Error(`--theme ${theme}: expected ${Object.keys(themes).join(', ')}`);
   return { size, fps, theme, narrated: !!o.narrated };
 }
 
