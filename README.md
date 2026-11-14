@@ -15,7 +15,7 @@ A project's own fonts live in its `fonts/` folder with their licences: `reel fon
 
 ## How a video is made
 
-A video is a project: a folder with a `reel.config.ts`, a `scenes/` folder and whatever audio and data it uses. The config sets the frame size, frame rate and theme and returns the timeline, a list of clips: each names a scene module, a time window and a track. Tracks stack, so a caption or a title can sit over whatever runs below; clips that overlap on one track crossfade.
+A video is a project: a folder with a `reel.config.ts`, a `scenes/` folder and whatever audio and data it uses. The config sets the frame size, frame rate and theme and returns the timeline, a list of clips: each names a scene module, a time window and a track. Tracks stack, so a caption or a title can sit over whatever runs below; clips that overlap on one track make a transition (a crossfade, or the incoming clip's `transition`: `wipe`, `slide`, `zoom`, `dip`).
 
 ```ts
 import { defineVideo } from 'reel/config';

@@ -9,6 +9,8 @@ import type { AudioData } from './engine/audio';
 import type { BlendMode } from './engine/gl';
 import type { Theme, ThemeName } from './themes';
 import type { CheckRule } from './engine/report';
+import type { Transition, TransitionKind } from './engine/transitions';
+export type { Transition, TransitionKind, TransitionDirection } from './engine/transitions';
 
 export { themes, extendTheme, resolveTheme } from './themes';
 export type { Theme, ThemeName, HudParams, ResolvedTheme } from './themes';
@@ -28,6 +30,13 @@ export interface Clip {
    * transition (a crossfade unless the incoming scene handles it); clips that touch make a hard cut.
    */
   track?: number;
+  /**
+   * How the clip comes in over the clip before it on its track while they overlap (default a crossfade):
+   * 'crossfade', 'wipe', 'slide', 'zoom', 'dip', or { kind, direction?: 'left' | 'right' | 'up' | 'down',
+   * softness?: share of the frame (a wipe's edge), color?: palette key or '#rrggbb' (a dip's) }. A scene with
+   * handlesTransition draws the transition itself instead.
+   */
+  transition?: TransitionKind | Transition;
   /**
    * How the clip's track is drawn over the tracks below (default 'normal'), and how strongly (default 1; under
    * the lowest track is black). Across a transition the opacity fades from the outgoing clip's to the incoming

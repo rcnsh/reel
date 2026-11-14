@@ -22,7 +22,7 @@ Layers are `drawable` children of the engine's canvas (`content="drawable"`). Th
 
 `render(t, dt, toScreen, samples, shutter)`:
 
-1. `composite(t)`: the clips active at t, grouped by track in number order. Per track, `compositeTrack` renders each clip into a scene target (stateful scenes are reset and pre-rolled at the frame step after a seek), crossfades overlapping clips with `xfade` unless the incoming scene `handlesTransition`, and merges post overrides (clip `post`, then the scene's return). The lowest track is used as is when it is opaque, unblended and alone; otherwise tracks stack into `stackRT` with their blend and opacity (an opacity fades from clip to clip across a transition).
+1. `composite(t)`: the clips active at t, grouped by track in number order. Per track, `compositeTrack` renders each clip into a scene target (stateful scenes are reset and pre-rolled at the frame step after a seek), draws overlapping clips' transitions with `TransitionPass` (`transitions.ts`; the incoming clip's `transition`, a crossfade by default) unless the incoming scene `handlesTransition`, and merges post overrides (clip `post`, then the scene's return). The lowest track is used as is when it is opaque, unblended and alone; otherwise tracks stack into `stackRT` with their blend and opacity (an opacity fades from clip to clip across a transition).
 2. Motion blur (`samples` > 1): sub-frames summed into `sumRT`, averaged into `avgRT`. Post parameters come from the sub-frame nearest 1/8 of the shutter after t.
 3. `post.render` (bloom pyramid, halation, CA, shoulder, invert, flash, vignette, grain, dither, sRGB) into `finalRT`, then blitted to the canvas.
 

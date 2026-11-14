@@ -11,6 +11,7 @@ import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
+import { TransitionPass, transitionOf, transitionWeights } from './transitions';
 import type { Clip, VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -111,7 +112,7 @@ export class Engine {
   lastShaded = 1;
   private finalRT = new THREE.WebGLRenderTarget(PW, PH, { type: THREE.UnsignedByteType, depthBuffer: false });
   private blit: FSPass;
-  private xfade: FSPass;
+  private transition = new TransitionPass();
   private accum: FSPass;
   private lastT = -1;
   lastPost: PostParams = { ...DEFAULT_POST };
@@ -161,8 +162,6 @@ export class Engine {
       if (!this.loadErrors.includes(msg)) { this.loadErrors.push(msg); console.error(msg); }
     };
     this.blit = new FSPass(`uniform sampler2D src; void main(){ fragColor = texture(src, vUv); }`, { src: { value: null } });
-    this.xfade = new FSPass(`uniform sampler2D a; uniform sampler2D b; uniform float k;
-      void main(){ fragColor = mix(texture(a, vUv), texture(b, vUv), k); }`, { a: { value: null }, b: { value: null }, k: { value: 0 } });
     // adds a sub-frame to a sum; a non-finite pixel (a stray NaN from some shader in one sub-frame out of
     // hundreds) is dropped, or it would poison the average and bloom into a disc
     this.accum = new FSPass(`uniform sampler2D src;
@@ -356,6 +355,7 @@ export class Engine {
       const ex = e.check?.exempt;
       if (ex !== undefined && ex !== true && !(Array.isArray(ex) && ex.every((r) => CHECK_RULES.includes(r))))
         throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
+      transitionOf(e.transition, `timeline: clip '${e.id}'`);
     }
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
@@ -737,15 +737,14 @@ export class Engine {
       rec.lastT = t;
       post = { ...post, ...(e.post ?? {}), ...(ov ?? {}) };
       if (idx > 0 && !s.handlesTransition && under) {
-        // default: crossfade from the previous clip over the overlap
-        this.xfade.u.a!.value = under;
-        this.xfade.u.b!.value = rt.texture;
-        this.xfade.u.k!.value = tin;
+        // the clip's transition from the previous clip over the overlap (a crossfade unless it says otherwise)
+        const tr = transitionOf(e.transition, e.id);
         const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
-        this.xfade.render(r, mix);
+        this.transition.draw(r, tr, under, rt.texture, tin, mix);
         outTex = mix.texture;
-        for (let j = 0; j < idx; j++) weights[j]! *= 1 - tin;
-        weights[idx] = tin;
+        const [wo, wi] = transitionWeights(tr, tin);
+        for (let j = 0; j < idx; j++) weights[j]! *= wo;
+        weights[idx] = wi;
       } else outTex = rt.texture;
       under = outTex;
     });
