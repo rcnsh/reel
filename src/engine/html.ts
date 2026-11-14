@@ -395,23 +395,43 @@ export class HtmlLayer {
 
   /** Report the layer's text and images to `reel check`, through the draw transform. */
   private report(m: THREE.Matrix3, opacity: number) {
-    if (opacity < 0.01) return;
+    const e = m.elements;
+    this.reportThrough((px, py) => [e[0]! * px + e[3]! * py + e[6]!, e[1]! * px + e[4]! * py + e[7]!], opacity);
+  }
+
+  /**
+   * Report the layer's text and images to `reel check` (in a check only; a no-op otherwise) through `map`, which
+   * takes a point of the layer (px, origin top left) to the frame (logical px), or null when it is not in view
+   * (behind a 3D camera). A box is reported as the rectangle around its mapped corners, its font size scaled by
+   * how much the mapping enlarges it there. For a layer shown some other way than draw(): a texture on a 3D plane.
+   */
+  reportThrough(map: (x: number, y: number) => [number, number] | null, opacity = 1) {
+    if (!reporting() || opacity < 0.01 || !this.uploaded) return;
     const key = this.shown;
     if (this.boxCache?.key !== key) this.boxCache = { key, boxes: domBoxes(this) };
-    const e = m.elements, k = Math.sqrt(Math.abs(e[0]! * e[4]! - e[1]! * e[3]!));
-    const map = (x: number, y: number, w: number, h: number): [number, number, number, number] => {
-      const pts = [[x, y], [x + w, y], [x, y + h], [x + w, y + h]].map(([px, py]) => [e[0]! * px! + e[3]! * py! + e[6]!, e[1]! * px! + e[4]! * py! + e[7]!]);
-      const xs = pts.map((q) => q[0]!), ys = pts.map((q) => q[1]!);
+    const rect = (x: number, y: number, w: number, h: number): [number, number, number, number] | null => {
+      const pts = [map(x, y), map(x + w, y), map(x, y + h), map(x + w, y + h)];
+      if (pts.some((q) => !q)) return null;
+      const xs = pts.map((q) => q![0]), ys = pts.map((q) => q![1]);
       return [Math.min(...xs), Math.min(...ys), Math.max(...xs) - Math.min(...xs), Math.max(...ys) - Math.min(...ys)];
     };
     for (const b of this.boxCache.boxes) {
-      const [x, y, w, h] = map(b.x, b.y, b.w, b.h);
+      const r = rect(b.x, b.y, b.w, b.h);
+      if (!r) continue;
+      const [x, y, w, h] = r;
+      // (the enlargement at the box's centre: the square root of the mapping's local area scale)
+      const cx = b.x + b.w / 2, cy = b.y + b.h / 2, o = map(cx, cy), ox = map(cx + 1, cy), oy = map(cx, cy + 1);
+      const k = o && ox && oy ? Math.sqrt(Math.abs((ox[0] - o[0]) * (oy[1] - o[1]) - (ox[1] - o[1]) * (oy[0] - o[0]))) : 1;
+      const c = b.overflow && rect(...b.overflow.container);
       report({
         kind: b.kind, x, y, w, h, text: b.text, size: b.size === undefined ? undefined : b.size * k, color: b.color, alpha: b.alpha * opacity, label: b.label, exempt: b.exempt, flow: b.flow,
-        overflow: b.overflow && { ...b.overflow, container: map(...b.overflow.container), px: b.overflow.px * k },
+        overflow: b.overflow && c ? { ...b.overflow, container: c, px: b.overflow.px * k } : undefined,
       });
     }
   }
+
+  /** Whether the layer has been painted and uploaded at least once (its texture holds a picture). */
+  get ready() { return this.uploaded; }
 
   dispose() {
     this.observer.disconnect();

@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Words } from './words';
-import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, makeRT, clearRT } from './gl';
+import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT } from './gl';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
 import { THEME } from './palette';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene';
@@ -229,6 +229,19 @@ export class Engine {
       }`, { tiles: { value: this.tileTex }, map: { value: new THREE.Vector4(1, 1, 0, 0) } });
     const mm = this.maskPass.mat;
     mm.colorWrite = false; mm.depthTest = true; mm.depthWrite = true; mm.depthFunc = THREE.AlwaysDepth;
+    // the inverse, for scenes' own depth-tested targets (maskDepth): depth 0 (the near plane) where a tile has
+    // converged, so their own depth test rejects it; live tiles keep the cleared depth
+    this.nearPass = new FSPass(/* glsl */ `
+      uniform sampler2D tiles; uniform vec4 map;
+      void main() {
+        vec2 p = gl_FragCoord.xy * map.xy + map.zw;
+        if (p.x < 0.0 || p.y < 0.0 || p.x >= ${PW}.0 || p.y >= ${PH}.0) discard;
+        if (texelFetch(tiles, ivec2(floor(p / ${TP}.0)), 0).r >= 0.5) discard;
+        gl_FragDepth = 0.0;
+        fragColor = vec4(0.0);
+      }`, { tiles: { value: this.tileTex }, map: { value: new THREE.Vector4(1, 1, 0, 0) } });
+    const nm = this.nearPass.mat;
+    nm.colorWrite = false; nm.depthTest = true; nm.depthWrite = true; nm.depthFunc = THREE.AlwaysDepth;
     for (const rt of [this.stackRT, this.newRT, this.sumRT]) this.maskedRTs.set(rt, { margin: 0 });
     this.hookDepthState();
     // errPass with the error of tiles no longer refining forced to 0 (their sums hold nothing new)
@@ -347,6 +360,20 @@ export class Engine {
     this.maskPass.render(r, rt);
   }
 
+  private nearPass: FSPass;
+  /** SceneCtx.maskDepth: clear rt's depth; in a masked sub-frame, converged tiles go to the near plane. */
+  private maskDepth(rt: THREE.WebGLRenderTarget) {
+    const r = this.renderer, d = r.state.buffers.depth;
+    r.setRenderTarget(rt);
+    d.setMask(true);
+    r.clear(false, true, true);
+    // (while a slide or zoom moves the scene targets, nothing is masked in place)
+    if (!this.masking || this.displaced.size) return;
+    (this.nearPass.u.map!.value as THREE.Vector4).set(PW / rt.width, PH / rt.height, 0, 0);
+    this.nearPass.render(r, rt);
+    r.setRenderTarget(rt);
+  }
+
   /** SceneCtx.mapTileMask: `map` takes rt uv to screen uv. */
   private mapTileMask(rt: THREE.WebGLRenderTarget, map: THREE.Vector4 | null) {
     const m = this.maskedRTs.get(rt);
@@ -388,7 +415,7 @@ export class Engine {
       this.trackRTs.push(t);
       for (const rt of [...t.rts, ...t.mix]) this.maskedRTs.set(rt, { margin: 0 });
     }
-    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map) };
+    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map), maskDepth: (rt) => this.maskDepth(rt) };
     this.post = new Post();
     // (the overlay is part of the look: loaded with any --only)
     const entries = only ? this.timeline.filter((e) => e === overlay || only(e)) : this.timeline;
@@ -509,6 +536,7 @@ export class Engine {
     if (collect) this.lastBoxes = [];
     if (samples === 1) {
       SS_TAP.value = -1;
+      SUB_FRAME.index = -1;
       if (collect) boxes.begin();
       ({ outTex, post } = this.composite(t, dt, seeked));
       if (collect) this.lastBoxes = boxes.end();
@@ -534,6 +562,7 @@ export class Engine {
       // sub-frame k at shutter offset u (-0.5..0.5), summed into `into`; `step` = the sub-frame spacing
       const sub = (k: number, u: number, into: THREE.WebGLRenderTarget, step: number) => {
         SS_TAP.value = cycle ? (k + (k >> 2)) % 4 : -1;
+        SUB_FRAME.index = k;
         // (clamped at 0: before the video no scene is active, and frame 0 would come out half black)
         const ts = Math.max(0, t + dt * shutter * u);
         let res: ReturnType<Engine['composite']>;
@@ -634,6 +663,7 @@ export class Engine {
         }
       }
       SS_TAP.value = -1;
+      SUB_FRAME.index = -1;
       if (perTile) {
         this.gainPass.u.tex!.value = this.sumRT.texture;
         this.gainPass.render(r, this.avgRT);

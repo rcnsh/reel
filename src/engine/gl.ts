@@ -25,6 +25,15 @@ int ssK0() { return ssTap < 0 ? 0 : ssTap; }
 int ssK1() { return ssTap < 0 ? 4 : ssTap + 1; }
 float ssWeight() { return ssTap < 0 ? 0.25 : 1.0; }`;
 
+/**
+ * The motion-blur sub-frame being drawn: its index in the frame's sampling order (0, 1, 2 …), or -1 in a render of
+ * one sample (previews, stills, check). Jitter that should average out across a frame's sub-frames (sub-pixel
+ * anti-aliasing, a lens aperture, an area light) is indexed by it with a low-discrepancy sequence, so every
+ * prefix of the sub-frames, which is what adaptive sampling stops at, is evenly spread. It says nothing about time:
+ * a sub-frame's time is `f.t`.
+ */
+export const SUB_FRAME = { index: -1 };
+
 const RT_SCALE = new WeakMap<THREE.WebGLRenderTarget, number>();
 /** Physical px per logical px of a render target made by makeRT (1 for other targets; SCALE for the canvas). */
 export function rtScale(rt: THREE.WebGLRenderTarget | null) { return rt ? RT_SCALE.get(rt) ?? 1 : SCALE; }

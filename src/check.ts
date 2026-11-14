@@ -193,6 +193,19 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
       if ((b.alpha ?? 1) < 0.05) continue;
       const name = b.label ?? `${b.kind}#${b.index}`, rect: [number, number, number, number] = [b.x, b.y, b.w, b.h];
       const base = { t: s.t, clip: b.clip, rect, text: b.text ?? b.label };
+      // 3D: a stage with nothing in view, an object behind the camera or too small to make out
+      if (b.kind === 'stage') {
+        if (b.visible === 0 && !exempt('empty', b.clip, b)) add({ ...base, rect: undefined, text: undefined, kind: 'empty', severity: 'warning', value: 0, message: `the 3D stage${b.label ? ` '${b.label}'` : ''} has nothing in the camera's view: the camera looks away from the objects, they are behind it, or outside its near and far planes` }, name, 1);
+        continue;
+      }
+      if (b.kind === 'object' && b.behind) {
+        if (!exempt('offFrame', b.clip, b)) add({ ...base, rect: undefined, kind: 'offFrame', severity: 'info', message: `${quote(b.label)} is behind the camera: it is in the scene but never seen` }, name, 0);
+        continue;
+      }
+      if (b.kind === 'object' && !exempt('tiny', b.clip, b) && b.x < o.W && b.y < o.H && b.x + b.w > 0 && b.y + b.h > 0) {
+        const short = Math.min(b.w, b.h), need = Math.min(o.W, o.H) * 0.02;
+        if (short < need) add({ ...base, kind: 'tiny', severity: 'info', value: +short.toFixed(1), message: `${quote(b.label)} is ${fmt(b.w)}x${fmt(b.h)} px on screen: too small to make out (under ${fmt(need)} px across); bring the camera closer or narrow its field of view` }, name, need - short);
+      }
       // off the frame
       const over = { left: -b.x, top: -b.y, right: b.x + b.w - o.W, bottom: b.y + b.h - o.H };
       const out = Object.entries(over).filter(([, v]) => v > 1);
@@ -205,7 +218,7 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
           ...base, kind: 'offFrame', severity: b.kind === 'text' ? 'error' : 'info', value: +Math.max(...out.map(([, v]) => v)).toFixed(1),
           message: b.kind === 'text'
             ? `${quote(b.text)}${b.size ? ` (${fmt(b.size)} px)` : ''} runs ${where} edge of the ${o.W}x${o.H} frame. Lay it out from W and H: in an HTML layer give it a width in % and let it wrap (or fit it with a text block); in Canvas2D size it with fitSize(text, family, W - ${fmt(2 * mx)}, size) or break it into lines`
-            : `this ${b.kind} runs ${where} edge of the frame`,
+            : `${b.label ? quote(b.label) : `this ${b.kind}`} runs ${where} edge of the frame`,
         }, name, worst);
       }
       if (b.kind !== 'text') continue;

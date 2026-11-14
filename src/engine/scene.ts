@@ -27,6 +27,13 @@ export interface SceneCtx {
    * draws it whole. A no-op outside masked sub-frames.
    */
   mapTileMask(rt: THREE.WebGLRenderTarget, map: THREE.Vector4 | null): void;
+  /**
+   * Clear the depth (and stencil) of the scene's own target `rt` before drawing depth-tested 3D into it, instead of
+   * clearing it yourself. In a sub-frame of per-tile adaptive sampling it also puts the tiles that have converged at
+   * the near plane, so the 3D's own depth test rejects them before shading. Only for a target the size of the
+   * output (or a multiple of it) whose texels are composited back at their own screen position.
+   */
+  maskDepth(rt: THREE.WebGLRenderTarget): void;
 }
 
 export interface Frame {

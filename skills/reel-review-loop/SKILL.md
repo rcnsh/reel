@@ -42,6 +42,7 @@ Each finding has a `kind`, a `severity`, the time span it was seen (`t` to `unti
 - `safeArea`, `overlap`, `minSize` (warnings): fix unless the design means it.
 - `overflow` (error) and `clipped` (warning; a note when it is an ellipsis or line clamp): text in an HTML layer that runs out of its box, or is cut off by `overflow: hidden` or the edge of its layer (a component's box). Let it wrap, make it smaller (a `TextBlock` fits text to its box), or give it room.
 - `blank` (a flat frame) and `frozen` (nothing moved for seconds) (warnings): a scene drawing nothing, a fade held too long, a still held without intent.
+- 3D (the `reel-3d` skill): `empty` (warning: a stage whose camera sees none of its objects), `tiny` (a note: a labelled object too small to make out), and `offFrame` notes for labelled objects off the frame or behind the camera.
 - Check sees text in HTML layers by itself, and text scenes draw themselves only when they report it: after every `fillText`, `reportText(c, text, x, y)`; for other drawn text, `report({ … })`. A scene that reports nothing passes check while broken. If check is silent about text you can see, add the reports.
 - When a rule is broken on purpose, mark it in the scene (`exempt: ['offFrame']` on the box, `data-exempt="offFrame"` on an HTML element) or on the clip (`check: { exempt: ['blank'] }`) rather than ignoring the finding, so the next check is clean.
 

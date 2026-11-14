@@ -16,8 +16,11 @@ const TYPES: Record<string, string> = {
   '.json': 'application/json', '.mp3': 'audio/mpeg', '.wav': 'audio/wav', '.m4a': 'audio/mp4', '.ogg': 'audio/ogg', '.flac': 'audio/flac',
   '.png': 'image/png', '.jpg': 'image/jpeg', '.jpeg': 'image/jpeg', '.webp': 'image/webp', '.avif': 'image/avif', '.gif': 'image/gif', '.svg': 'image/svg+xml',
   '.mp4': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime', '.glb': 'model/gltf-binary', '.gltf': 'model/gltf+json',
-  '.ttf': 'font/ttf', '.otf': 'font/otf', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.hdr': 'application/octet-stream', '.bin': 'application/octet-stream',
+  '.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.hdr': 'application/octet-stream', '.exr': 'image/x-exr', '.bin': 'application/octet-stream',
+  '.ktx2': 'image/ktx2', '.m4v': 'video/mp4', '.aac': 'audio/aac', '.opus': 'audio/ogg', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.lottie': 'application/zip', '.csv': 'text/csv; charset=utf-8',
 };
+/** Files a scene loads from the project: one that is missing is a 404 (not the page, which a dev server would send). */
+const MEDIA = new Set(Object.keys(TYPES).filter((x) => x !== '.json' && x !== '.txt'));
 
 /**
  * The folder of the project to work on: `dir`, which must hold a reel.config.ts. Symlinks are resolved, so one
@@ -112,7 +115,13 @@ export async function startServer(project: string, opts: { port?: number; strict
           if (rel === '/' || rel.startsWith('/@') || rel.startsWith('/src/') || rel.startsWith('/node_modules/')) return next();
           const file = path.join(project, rel);
           // (inside the project only, never its config or sources: those go through Vite's transform)
-          if (!file.startsWith(project + path.sep) || /\.(ts|tsx|js|mjs)$/.test(file) || !existsSync(file) || !statSync(file).isFile()) return next();
+          if (!file.startsWith(project + path.sep) || /\.(ts|tsx|js|mjs)$/.test(file)) return next();
+          if (!existsSync(file) || !statSync(file).isFile()) {
+            if (!MEDIA.has(path.extname(file).toLowerCase()) || rel.startsWith('/public/')) return next();
+            // (unless the engine's public/ serves it: its fonts)
+            if (existsSync(path.join(ENGINE, 'public', rel))) return next();
+            res.statusCode = 404; res.setHeader('Content-Type', 'text/plain'); res.end(`${rel.slice(1)} is not in the project`); return;
+          }
           res.setHeader('Content-Type', TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream');
           res.setHeader('Cache-Control', 'no-store');
           res.setHeader('Accept-Ranges', 'bytes');

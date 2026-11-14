@@ -4,12 +4,16 @@
 import { HEX } from './palette';
 
 /** The rules of `reel check` a box or a clip can be exempt from. */
-export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped';
-export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped'];
+export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped' | 'tiny' | 'empty';
+export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped', 'tiny', 'empty'];
 
 export interface DrawnBox {
-  /** What was drawn: text is checked for size, overlap and contrast; every kind for leaving the frame. */
-  kind: 'text' | 'image' | 'shape';
+  /**
+   * What was drawn: text is checked for size, overlap and contrast; every kind for leaving the frame. `object` is a
+   * labelled 3D object's projected box (also checked for being behind the camera or too small to see); `stage` is a
+   * 3D stage as a whole, with `visible`, the number of its objects in the camera's view (none: an empty frame).
+   */
+  kind: 'text' | 'image' | 'shape' | 'object' | 'stage';
   /** The rectangle in logical px, frame coordinates (origin top left, y down). */
   x: number;
   y: number;
@@ -34,6 +38,10 @@ export interface DrawnBox {
   overflow?: { clipped: boolean; truncated?: boolean; container: [number, number, number, number]; px: number };
   /** Boxes with the same flow are parts of one run of text (a word in a span of a paragraph): they never overlap. */
   flow?: string;
+  /** A 3D object entirely behind the camera (its rectangle is empty). */
+  behind?: boolean;
+  /** A stage's objects in the camera's view. */
+  visible?: number;
 }
 
 /**
