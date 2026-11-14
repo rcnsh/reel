@@ -29,9 +29,9 @@ export default defineVideo({
 });
 ```
 
-The theme is the look, and the engine itself has none: `print` (ink on paper, faint grain), `film` (a dark grade with bloom, halation, heavy grain and crop marks) or `neutral` (clean greys and one accent, the default), or a theme of your own. It supplies the palette scenes colour with (`bg`, `fg`, `accent` and its own named colours), the default post-processing, and optionally an overlay drawn over every clip. `docs/ENGINE.md` has the details.
+The theme is the look, and the engine itself has none: `print` (ink on paper, faint grain), `film` (a dark grade with bloom, halation, heavy grain and crop marks) or `neutral` (clean greys and one accent, the default), or a theme of your own. It supplies the palette scenes colour with (`bg`, `fg`, `accent` and its own named colours), the default post-processing, and optionally an overlay drawn over every clip. The `reel-authoring` skill has the details.
 
-`reel init <folder>` starts one: a config, one scene, a `CLAUDE.md`, a `.gitignore`, and a `tsconfig.json` and `package.json` that point at this checkout, so the project needs no install and renders at once (`reel init short --size 1080x1920 --fps 30 --theme film`; `--narrated` adds a script, times it with a scratch voice and lays out one clip per plate). The project's `tsconfig.json` extends this repo's `tsconfig.project.json` by absolute path, which maps `reel`, `reel/config`, `reel/scenes/*` and three.js's types here; its `package.json` scripts run this checkout's CLI (`bun run reel still --t 1`) and typechecker (`bun run typecheck`). A project moved to another machine changes those paths to that machine's checkout.
+`reel init <folder>` starts one: a config, one scene, a `CLAUDE.md`, the reel skills in `.claude/skills`, a `.gitignore`, and a `tsconfig.json` and `package.json` that point at this checkout, so the project needs no install and renders at once (`reel init short --size 1080x1920 --fps 30 --theme film`; `--narrated` adds a script, times it with a scratch voice and lays out one clip per plate). The project's `tsconfig.json` extends this repo's `tsconfig.project.json` by absolute path, which maps `reel`, `reel/config`, `reel/scenes/*` and three.js's types here; its `package.json` scripts run this checkout's CLI (`bun run reel still --t 1`) and typechecker (`bun run typecheck`). A project moved to another machine changes those paths to that machine's checkout.
 
 `examples/layers` is that kind of project: silent, vertical, two tracks, the film theme. `examples/demo` is a narrated one in the print theme, made like this:
 
@@ -81,7 +81,8 @@ or, for a client configured with JSON:
 - `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export; `cli/diff.ts` and `cli/png.ts`: image comparison; `cli/mcp.ts`: the MCP server. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
-- `docs/ENGINE.md`: the scene author's guide: the Scene API, rules for determinism and sampling, the toolbox, 4K.
+- `skills/`: agent skills (Agent Skills format) that `reel init` copies into a project's `.claude/skills` and `reel skills update` refreshes: `reel-authoring` (the config, the Scene API, determinism and sampling rules, themes, the toolbox, timing; reference files beside it) and `reel-review-loop` (render, look, check, fix; when to export).
+- `docs/ENGINE.md`: the engine's internals, for changing it: the page, a frame's pipeline, adaptive sampling, readback and export, reporting.
 
 ## Running
 

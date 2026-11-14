@@ -1,8 +1,10 @@
 // reel init <folder>: a new video project that renders straight away. It writes reel.config.ts, one scene, a
 // tsconfig.json that extends this checkout's tsconfig.project.json (so `reel`, `reel/config` and three.js typecheck
-// without an install), a package.json whose scripts run this checkout's CLI, a .gitignore and a CLAUDE.md.
+// without an install), a package.json whose scripts run this checkout's CLI, a .gitignore, a CLAUDE.md and the
+// engine's agent skills in .claude/skills (copied: a project keeps the version it was made with until
+// `reel skills update`).
 // --narrated adds narration.txt and mix.json and times the script with a scratch voice (reel narrate).
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf } from '../src/config';
 import { isThemeName, themes } from '../src/themes';
@@ -66,7 +68,27 @@ export function initProject(dir: string, o: InitOptions): string[] {
     writeFileSync(f, text);
     written.push(f);
   }
-  return written;
+  return [...written, ...installSkills(root)];
+}
+
+/** The engine's skills: skills/<name>/SKILL.md and the files beside it. */
+export const SKILLS = path.join(ENGINE, 'skills');
+export const skillNames = () => readdirSync(SKILLS, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(path.join(SKILLS, e.name, 'SKILL.md'))).map((e) => e.name).sort();
+
+/**
+ * Copy the engine's skills into `project`/.claude/skills, replacing those folders whole (a file the engine
+ * dropped goes too); other skills there are left alone. Returns the files written.
+ */
+export function installSkills(project: string): string[] {
+  const out: string[] = [];
+  for (const name of skillNames()) {
+    const dest = path.join(project, '.claude/skills', name);
+    rmSync(dest, { recursive: true, force: true });
+    cpSync(path.join(SKILLS, name), dest, { recursive: true });
+    const walk = (d: string): void => { for (const e of readdirSync(d, { withFileTypes: true })) e.isDirectory() ? walk(path.join(d, e.name)) : out.push(path.join(d, e.name)); };
+    walk(dest);
+  }
+  return out;
 }
 
 const head = (o: InitOptions) => `  size: [${o.size[0]}, ${o.size[1]}],
@@ -100,7 +122,7 @@ ${head(o)}
 
 /** The shared body of both scenes: a background, a line of type rising in, an accent rule drawn under it. */
 const sceneBody = (textExpr: string, comment: string) => `import type * as THREE from 'three';
-import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, fitSize, rgba, ease, prog, window01${textExpr.includes('Words') ? ', Words' : ''} } from 'reel';
+import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, fitSize, rgba, ease, prog, window01, reportText${textExpr.includes('Words') ? ', Words' : ''} } from 'reel';
 
 export default class Intro extends Scene {
   // the theme's background, a touch lighter at the top
@@ -126,6 +148,8 @@ export default class Intro extends Scene {
     const width = c.measureText(full).width;
     c.fillStyle = rgba('fg', a);
     c.fillText(shown, W / 2 - width / 2, H / 2 + (1 - rise) * size * 0.4);
+    // what \`reel check\` sees of it (its box, size and colour); free outside a check
+    reportText(c, shown, W / 2 - width / 2, H / 2 + (1 - rise) * size * 0.4, { label: 'title' });
     c.fillStyle = rgba('accent', a);
     const rule = width * prog(f.lt, 0.3, 1.3, ease.inOutCubic);
     c.fillRect(W / 2 - rule / 2, H / 2 + size * 0.45, rule, Math.max(2, size * 0.06));
@@ -147,30 +171,29 @@ function narratedScene() {
 }
 
 function claudeMd(title: string, o: InitOptions) {
-  const e = (p: string) => path.join(ENGINE, p);
   return `# ${title}
 
-A video made with reel, the deterministic WebGL video engine at \`${ENGINE}\`. Every frame is a pure function of the time \`t\`; the preview and the export render the same pixels.
+A video made with reel, the deterministic WebGL video engine at \`${ENGINE}\`. Every frame is a pure function of the time \`t\`; the preview, stills and the export render the same pixels.
 
-Read before acting:
+Read before acting (the skills are copied into \`.claude/skills\`; \`bun run reel skills update\` refreshes them from the engine):
 
-- **Writing or changing a scene**: \`${e('docs/ENGINE.md')}\` in full (the Scene API, determinism and sampling rules, themes, the toolbox, 4K).
-- **Commands**: \`${e('README.md')}\`, and \`bun run reel --help\` for every command and flag.
-- **The config's types**: \`${e('src/config.ts')}\` (\`VideoConfig\`, \`Clip\`); themes in \`${e('src/themes.ts')}\`.
+- **Writing or changing a scene, the config or the theme**: the \`reel-authoring\` skill (\`.claude/skills/reel-authoring/SKILL.md\` and its \`reference/\` files).
+- **Checking your work**: the \`reel-review-loop\` skill. Look at rendered frames before calling anything done.
+- **Every command and flag**: \`bun run reel --help\`.
 
 ## This project
 
 - \`reel.config.ts\` is the edit: ${o.size[0]}×${o.size[1]} at ${o.fps} fps, the \`${o.theme}\` theme, ${o.narrated ? 'one clip per plate of `narration.txt` that has a scene of the same name' : 'the clips on the timeline'}. Scenes live in \`scenes/\`, one default-exported \`Scene\` class per file.${o.narrated ? `
 - Narration: \`narration.txt\` holds the plates (\`# name\` and its lines). \`bun run reel narrate\` times it with a scratch voice; \`bun run reel align <recording>\` times a real one. Both write \`audio/narration.mp3\`, \`data/words.json\` and \`data/audio.json\`: regenerate them, never edit them by hand. Scenes find their timing by text (\`ctx.words.get('…')\`).
 - Sound: scenes call \`cue(kind, t)\`; \`mix.json\` maps kinds to files in \`audio/\`. \`bun run reel events\`, then \`bun run reel mix <raw.mp4> <out.mp4>\`.` : ''}
-- Colours come from the theme: \`C_BG\`, \`C_FG\`, \`C_ACCENT\` in GLSL, \`rgba('fg')\` for Canvas2D, \`LIN.accent\` for GL.
 
 ## Checks
 
 1. \`bun run typecheck\`.
-2. Stills of every clip you touched, looked at: \`bun run reel still --t <times> --only <clip> --out out/stills\`.
-3. Motion: \`bun run reel video --samples auto --preset veryfast --out out/draft.mp4\`.
+2. Stills of every clip you touched (its first, middle and last frame) and a strip of its motion, looked at: \`bun run reel still --t <times> --only <clip>\`, \`bun run reel strip --from <s> --to <s> --only <clip>\`.
+3. \`bun run reel check\` with no errors (and \`--size 1080x1920\` if the video may go vertical).
+4. Motion blur and timing: \`bun run reel video --samples auto --preset veryfast --out out/draft.mp4\`.
 
-\`bun run reel …\` is \`bun ${e('cli/reel.ts')} …\` in this folder. Chrome: set \`CHROME_PATH\` as the engine's \`CLAUDE.md\` says.
+\`bun run reel …\` is \`bun ${path.join(ENGINE, 'cli/reel.ts')} …\` in this folder; it starts a warm renderer for the project on first use. Chrome: \`CHROME_PATH\`, else the installed Google Chrome.
 `;
 }

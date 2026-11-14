@@ -40,8 +40,10 @@ Rendering
                              [--spool-gb 20] [--progress (JSON lines on stderr)]
 
 Working on a project
-  init <folder>              a new project that renders straight away; refuses a folder that holds anything
+  init <folder>              a new project that renders straight away, with the reel skills in
+                             .claude/skills; refuses a folder that holds anything
                              [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
+  skills update              copy this engine's skills into the project's .claude/skills
   daemon status              the warm renderers running, per project
   daemon stop                stop the project's warm renderer          [--all: every project's]
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
@@ -92,6 +94,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   gpu: { render: true, opts: {} },
   video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
+  skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
   mcp: { render: false, opts: { help: bool } },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },

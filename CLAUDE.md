@@ -6,7 +6,8 @@ This repo is the engine and its `reel` CLI. A video is a **project**: a folder w
 
 Where to read before acting:
 
-- **Writing or changing a scene**: `docs/ENGINE.md` in full. It owns the Scene API, the determinism and sampling rules, the toolbox, typography, 4K and the spark.
+- **Writing or changing a scene or a config**: `skills/reel-authoring/SKILL.md` and the reference files beside it (the Scene API, determinism and sampling rules, themes, the toolbox, timing). **Checking it**: `skills/reel-review-loop/SKILL.md`.
+- **Changing the engine**: `docs/ENGINE.md` (the page, a frame's pipeline, adaptive sampling, readback, reporting).
 - **Making a video, the layout, render commands**: `README.md`, and `bun cli/reel.ts --help` for every command and flag.
 - **A project's config**: the types in `src/config.ts` (`VideoConfig`, `Clip`). **Analysis flags**: `reel analyze --help`. **Mix config**: the comment at the top of `tools/mix.ts`.
 
@@ -42,7 +43,7 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 
 - **Deterministic.** A scene's output depends on `f.t` only. Randomness comes from `hash`/`mulberry32` with fixed seeds; per-frame jitter uses `frameIdx(t)`, which holds across a frame's shutter, and a frame step is `1 / FPS`, never `1 / 60`. `--samples auto` renders sub-frames out of order and in any number, so nothing may count `render()` calls. Simulation state means `stateful = true`, and the engine then refuses adaptive sampling (render such a video with a fixed `--samples N`).
 - **Anchored to words.** Scenes find timing by text: `ctx.words.get('some words')` (throws when the line is missing, so a script edit fails loudly) and its word times. Times typed as numbers break the moment the voice is re-timed.
-- **Logical pixels.** Scenes lay out in logical px, `W`×`H` (the `--size`, default 1920×1080), at every output scale; `PW`/`PH`, `gl_FragCoord`, `fwidth` and canvas backing sizes are physical. GLSL uses `FRAG_PX`, `PX_SCALE` and `pxLine` (`docs/ENGINE.md`, "Output scale").
+- **Logical pixels.** Scenes lay out in logical px, `W`×`H` (the `--size`, default 1920×1080), at every output scale; `PW`/`PH`, `gl_FragCoord`, `fwidth` and canvas backing sizes are physical. GLSL uses `FRAG_PX`, `PX_SCALE` and `pxLine` (`skills/reel-authoring/reference/sampling.md`, "Output scale").
 - **Linear colour, from the theme.** Render targets are HalfFloat linear HDR. Colours come from the theme's palette (`src/engine/palette.ts`): `LIN.<key>` for GL, `C_<KEY>` in GLSL, `rgba('<key>', a)` for Canvas2D. Scenes meant to follow any theme use the keys every palette has: `bg`, `fg`, `accent`, `accentHi`, `accentLo`. The engine's own colours (flash, invert, heat ramp, spark, HUD) come from those keys too, never from a theme's extra keys.
 - **Project-neutral engine.** `src/engine/` holds only what any video could use, and no look: colours and grades belong to themes (`src/themes.ts`). A video's own colours, story helpers, data and motifs live in its project (shared helpers as `scenes/_<name>.ts`, which `clipsFromSections` skips because no section is named `_…`).
 - **Scenes report their text.** Text drawn with `fillText` is followed by `reportText(c, text, x, y)`, other drawn text (stroke fonts, glyphs, textures) by `report({ kind: 'text', … })`, so `reel check` can see it. Both are free outside a check; anything they need that costs work goes behind `if (reporting())`.
@@ -62,7 +63,9 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 
 **Narrated video with a music bed.** Time the narration first, then `reel analyze <bed> --keep-sections --offset <s>` to add the bed's beats from where it enters, and list the bed under `music` in `mix.json` with the same start.
 
-**Engine change.** Change `src/engine/` only for something any video could use; update `docs/ENGINE.md` in the same change (it is what scene authors read). After touching `engine.ts`, `gl.ts`, `post.ts` or `main.ts`, render a short `--samples auto` video as well as stills: the sampler, tile masking and readback paths only run on export.
+**Engine change.** Change `src/engine/` only for something any video could use. In the same change, update the `reel-authoring` skill for anything a scene author sees and `docs/ENGINE.md` for how it works inside; a fact lives in one of them, not both. After touching `engine.ts`, `gl.ts`, `post.ts` or `main.ts`, render a short `--samples auto` video as well as stills: the sampler, tile masking and readback paths only run on export.
+
+**Skills.** `skills/<name>/SKILL.md` (YAML `name` and `description`) plus files beside it, each under about 300 lines; long reference goes in the files. They are written for a capable agent that has never seen reel and carry knowledge, not process. Projects hold copies (`reel init`, `reel skills update`), so a skill must make sense without this repo.
 
 **Fonts.** `uv run tools/make_fonts.py` cuts the static instances from `public/fonts/src/`. Its instance lists and `src/engine/type.ts` (`ARCHIVO_WIDTHS`, `ARCHIVO_WEIGHTS`, `DEFS`) must match. Regenerated files differ from the committed ones only in the `head` table, so an unchanged rebuild needs no commit.
 
@@ -99,6 +102,6 @@ No test suite exists yet; these renders are the tests.
 
 ## Git
 
-Every change is committed straight to `main`, one logical change per commit: no branches, no PRs. Conventional Commits (`feat(analyze): …`, `fix(mix): …`, `docs: …`), title only: no body and no trailers. A change large enough to want review gets a fresh-context review of the diff before it is committed. Keep `README.md`, `docs/ENGINE.md` and this file current in the same commit as the behaviour they describe.
+Every change is committed straight to `main`, one logical change per commit: no branches, no PRs. Conventional Commits (`feat(analyze): …`, `fix(mix): …`, `docs: …`), title only: no body and no trailers. A change large enough to want review gets a fresh-context review of the diff before it is committed. Keep `README.md`, `docs/ENGINE.md`, the skills, `reel --help` (`cli/args.ts`) and this file current in the same commit as the behaviour they describe.
 
 If a gitignored `plan.md` exists in the root, read it before starting work: it holds the agreed direction and what is in progress. Nothing committed refers to it.

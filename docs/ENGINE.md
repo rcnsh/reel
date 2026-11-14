@@ -1,146 +1,43 @@
-# Engine guide (for scene authors)
+# Engine internals
 
-Adapted from the upstream engine guide (mexicat/pdoom-video). Paths are relative to the project root.
+How `src/engine/` and the page (`src/main.ts`) work, for changing them. Writing scenes and configs is in the `reel-authoring` skill (`skills/reel-authoring/`); the render-and-check loop in `reel-review-loop`. The engine is adapted from the upstream engine of [mexicat/pdoom-video](https://github.com/mexicat/pdoom-video) (MIT, Giacomo Magnanini; see `LICENSE`).
 
-The video is a web app (TypeScript + three.js, run with bun + Vite) that renders any time `t` deterministically at the frame size and rate the render asks for (`--size 1080x1920 --fps 30`; default 1920×1080 at 60 fps), optionally at 2× the pixels (`--scale 2`; see "Output scale" below). The same code drives the live preview and the offline export. Lay scenes out from `W` and `H` (`gl.ts`) and step frames by `1 / FPS`, so a scene holds at any format.
+## The page
 
-## Running things
+`cli/server.ts` serves `index.html` and `src/main.ts` with Vite, the project mapped in as `@project/` (its config) and its files served from the site root. Two things are compile-time constants (Vite `define`), so they are in place before any module runs: `__REEL_FORMAT__` (size, fps) and `__REEL_THEME__` (the theme the CLI resolved from the config with `src/themes.ts`). The page URL overrides the size and rate (`?w=&h=&fps=`), sets the output scale (`?scale=`) and can name a built-in theme (`?theme=`, what `--theme` sends); `format.ts` and `palette.ts` read them at import. Because the palette is fixed at import, `glsl/common.ts` bakes every key into `GLSL_COMMON` as `C_<KEY>` and `post.ts` its defaults; a change to the config's format or theme needs a new dev server, which the warm renderer handles by restarting Vite.
 
-`reel` is `bun <engine>/cli/reel.ts`; run it in the project folder or pass `--project <folder>`. `reel --help` lists everything. In a project made by `reel init`, `bun run reel …` does the same and `bun run typecheck` checks its scenes against the engine.
+`main.ts` boots the `Engine` and then either the preview player or, with `?export=1`, the export API `window.__reel`: `still`, `png` (the readback as PNG, optionally cropped, downscaled and with rectangles marked), `grid` (sheets and strips), `inspect` (`reel check`), `stream` (video frames), `clipsAt`, `timeline`, `cues`, `errors`, `beginRequest`, `contextLost`. The CLI's ops (`cli/ops.ts`) are thin drivers of that API.
 
-- Preview: `reel dev`, then the URL it prints with `?t=2.0` (space = play/pause, ←/→ = ±1 s, shift = ±5 s, `,`/`.` = ±1 frame, `[`/`]` = previous/next clip, `l` = loop the current clip, `h` = hide the UI).
-- Stills (the main way to check your work — then LOOK at the PNGs with the Read tool): `reel still --t 12.5,13.0,14.2 --only hello --out out/wip/hello`. They are the pixels the video export produces.
-- Contact sheet of a time range, each frame labelled with its time and clips: `reel sheet --from 1.5 --to 9 --n 16 --cols 4 --only hello --out out/wip/hello/sheet.png`; `reel sheet --cuts` shows the frames around every cut.
-- Motion in one image: `reel strip --from 3.4 --to 4.2 --n 8 --only hello` (evenly spaced, both ends included) or `--frames 6` (consecutive frames from `--from`), side by side and labelled.
-- Before and after a change: `reel diff <a.png> <b.png>`, or `reel diff --t 2.5 <before.png>` to render now and compare; it prints the changed pixels and the box around them and writes a diff image. Grain differs from frame to frame, so compare the same time, and `--tol 8` ignores it.
-- Short video clip (to judge motion): `reel video --from 20 --to 25 --only hello --out out/wip/hello.mp4 --preset veryfast`
-- `--only a,b` loads only those clips (fast, and isolates you from other broken scenes). Clips that are not loaded draw nothing.
-- A scene that throws makes the command exit 1 and lists the error (`--json`: in `errors`); in a render it shows as a dark red frame.
-- Format: the project's config sets `size` and `fps`; `--size WxH` and `--fps N` override them for one command. 4K: add `--scale 2`.
+## Engine.init
 
-## Data
+Loads the words, the audio analysis, the fonts and the stroke fonts in parallel, calls the config's `timeline()`, checks the clips (unique ids, windows, `check.exempt` rules), sets the duration (config, else audio, else the last clip's end), appends the theme's overlay as the clip `overlay` on a track above every other, allocates per track three scene targets and two transition mixes, and loads each clip's scene (module import, constructor, `init()`). A clip whose scene fails to load is recorded in `loadErrors` and drawn dark red. `--only` loads the selected clips plus the overlay.
 
-- `words` (`ctx.words`; `src/engine/words.ts`; empty in a project without `data/words.json`): `lines[]` with `text,start,end,words[]`, each word `{w,start,end}` (word-level, aligned to the vocal). Find lines by content, never hard-code times: `const l = this.ctx.words.get('sudden drop')` → `l.words[3].start`. Helpers: `Words.wordProgress(word, t)` (0..1 sung progress), `Words.lineCharProgress(line, t)` (chars sung so far — for per-glyph wipes), `words.findWords('word')`.
-- `audio` (`src/engine/audio.ts`; a silent 100 BPM grid in a project without `data/audio.json`): `beats[]`, `downbeats[]`, `sections[]`, `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `beatBefore(t)` (the beat at or before t: a cut that never lands after a word), `nearestDownbeat(t)`, `events('kick'|'snare'|'hat'|'vocal', t0, t1)`, `env(name, t)` for `rms|low|mid|high|vocal|drums|bass|other` (0..1), `hit(kind, t, halfLife)` decaying pulses.
-- Every `Frame` already carries `f.a` = `{rms,low,mid,high,vocal,drums,bass,other,kick,snare,hat,vonset}` and `f.beat,f.bar,f.beatPhase,f.barPhase`.
+## A frame
 
-## Writing a scene
+`render(t, dt, toScreen, samples, shutter)`:
 
-One file `scenes/<name>.ts` in the project, default-exporting a class extending `Scene` (`src/engine/scene.ts`), placed on the timeline by a clip in `reel.config.ts`:
+1. `composite(t)`: the clips active at t, grouped by track in number order. Per track, `compositeTrack` renders each clip into a scene target (stateful scenes are reset and pre-rolled at the frame step after a seek), crossfades overlapping clips with `xfade` unless the incoming scene `handlesTransition`, and merges post overrides (clip `post`, then the scene's return). The lowest track is used as is when it is opaque, unblended and alone; otherwise tracks stack into `stackRT` with their blend and opacity (an opacity fades from clip to clip across a transition).
+2. Motion blur (`samples` > 1): sub-frames summed into `sumRT`, averaged into `avgRT`. Post parameters come from the sub-frame nearest 1/8 of the shutter after t.
+3. `post.render` (bloom pyramid, halation, CA, shoulder, invert, flash, vignette, grain, dither, sRGB) into `finalRT`, then blitted to the canvas.
 
-```ts
-import * as THREE from 'three';
-import { Scene, type Frame, FSPass, Layer2D, W, H, clearRT } from 'reel';
+A scene that throws in `render()` is recorded once per clip in `renderErrors` (cleared by `clearRenderErrors`, which the warm renderer calls per request through `beginRequest`) and drawn dark red. A shader that fails to compile surfaces through three's `debug.onShaderError`, recorded in `loadErrors` (three compiles a program once) with the drawing clip's id and the source line each error points at.
 
-export default class MyScene extends Scene {
-  bg = new FSPass(`uniform float t; void main(){ fragColor = vec4(C_BG, 1.0); }`, { t: { value: 0 } });
-  text = new Layer2D();
-  async init() { /* build geometry, precompute text outlines, etc. */ }
-  render(f: Frame, out: THREE.WebGLRenderTarget) {
-    const { renderer, comp, words } = this.ctx;
-    this.bg.u.t!.value = f.t;
-    this.bg.render(renderer, out);            // fullscreen shader → out (overwrites)
-    const c = this.text.ctx; this.text.clear(); /* draw with Canvas2D */
-    comp.draw(renderer, this.text.upload(), out); // alpha-over onto out
-    return { bloom: 0.7 };                   // post overrides (optional)
-  }
-}
-```
+## Adaptive sampling
 
-Rules:
+`--samples auto` (`AdaptiveSampling`) steps the sub-frame count through 4, 12, 36, 108, 324. `ternaryOffsets` orders the shutter offsets so that each step adds a sub-frame either side of every existing one: every prefix of 4·3^l is evenly spread and centred on t, and so is each step's new set, so comparing the new set's average with the old one's measures sampling error rather than a shift in time. After each step, `sampleError` renders the displayed difference (through the tone shoulder and sRGB, worst channel, 2x2-logical-px blocks, `errRT`) and reduces it to a max per 32x32-logical-px tile (`maxRT`, read back). Stepped copies of a moving edge shrink as 1/count, so the error left is about half the last step's change.
 
-- **Deterministic**: output must be a pure function of `f.t` (and seeded randomness: `mulberry32(seed)`, `hash(...)`). Never use `Math.random()`, `Date.now()` or `performance.now()` for visuals. The export averages many sub-frames per frame, in any order (see "Motion blur and sampling"). If you need simulation state (particles, feedback buffers), set `stateful = true`, reset in `reset()`, integrate with `f.dt`, and the engine will fast-forward after seeks; such a scene can only be exported with a fixed `--samples`.
-- `render()` must fully overwrite `out` (a HalfFloat linear-HDR target). On track 0 that means opaque; on a higher track, clear to transparent first (`clearRT(renderer, out, [0, 0, 0], 0)`) and draw over it, and the tracks below show through. A clip's `blend` and `opacity` set how its track is laid over the ones below. Colours are **linear**; values > ~0.85 bloom. Take them from the theme's palette (see "Themes"): `C_BG`, `C_FG`, `C_ACCENT`… in GLSL, `LIN.accent` in TS for GL, `rgba('accent', a)` for Canvas2D.
-- `ctx.params` holds the clip's params (one module can serve several clips); `ctx.start/ctx.end` its window; `f.lt`/`f.p` local time/progress.
-- Transitions: by default the engine crossfades clips that overlap on one track. For custom transitions set `handlesTransition = true` and composite `f.under` (the previous scene's frame) yourself using `f.tin` (0→1 over the overlap). Most cuts should be hard cuts on downbeats (no overlap) — that's the default when windows touch.
-- Post overrides you can return: `exposure, bloom, bloomThreshold, bloomKnee, bloomRadius, halation, ca, grain, vignette, fade, flash (in the theme's light colour), shake:[x,y], zoom, invert (swaps bg and fg)`. The defaults are the theme's `post` over `NEUTRAL_POST` (`DEFAULT_POST`, `src/engine/post.ts`); a clip's `post` goes over them and the scene's return over that. Another theme's grade for one scene: `return { ...themes.film.post, bloom: 0.8 }`.
-- Performance: aim for < 25 ms/frame. Canvas2D layers cost ~2–4 ms to upload each; don't use more than 2–3 per scene. Precompute in `init()`.
-- Sound: call `cue(kind, t)` (`util.ts`) from `init()` for each sound the mix should lay (a pen tick, a whoosh); `mix.json` maps kinds to files.
+Per tile (`refine: 'tiles'`, the default): a tile goes on while it or one of its 8 neighbours is at or over `tol`; a tile that stops is final, the average of its first n sub-frames. Later sub-frames skip stopped tiles: `writeTileMask` writes the live tiles into the depth buffer of every masked target (the engine's, plus scenes' `tileMasked` targets, `moving` ones through `mapTileMask`), and while `masking` is on, `hookDepthState` forces every draw into a masked target to depth-test LEQUAL against it without writing depth, whatever its material says, so the GPU rejects stopped tiles before shading (early-Z; a stencil test does not reject early on Apple GPUs). A draw whose material wants its own depth test sets `depthSeen`; that clip's sub-frames are then drawn unmasked from then on (`depthEntries`). The final average weights each tile by its own count (`gainPass`). `refine: 'frame'` decides for the whole frame at once.
 
-## Toolbox
+In practice a still frame stops at 12, ordinary camera motion at 36, whips and fast zooms at 108 or 324; at 1:1 in 4K, 108 cannot be told from 324.
 
-- `gl.ts`: `FSPass(frag, uniforms)` fullscreen GLSL3 pass (has `vUv`, writes `fragColor`, gets `GLSL_COMMON`), `Compositor` via `this.ctx.comp.draw(renderer, tex, target, {mode:'normal'|'add'|'screen'|'multiply'|'max', opacity, tint, scale, offset})`, `Layer2D` (frame-sized logical Canvas2D → sRGB texture), `makeRT()` (screen-sized HDR target; `makeRT(w, h)` takes logical px), `clearRT(renderer, rt, [r,g,b])`, `W`/`H`/`FPS` (the format), `SCALE`/`PW`/`PH` (output scale and physical size).
-- `glsl/common.ts` (`GLSL_COMMON`, prepended to FSPass; import it into your own ShaderMaterials): the palette's `C_<KEY>` consts, `hash*`, `snoise(vec2|vec3)`, `fbm`, `curl2`, 2D/3D SDFs, `smin`, `aaFill`, `aaStroke`, **`hatch(u, darkness)` and `engrave(uv, darkness, freq, angle)`** for engraving-style shading (`hatchD(u, darkness, du)` takes the derivative of `u` from the caller, for a coordinate whose `fwidth` lies, such as an angle that wraps), `heat(x)` ramp (the theme's dark colour through the accent to white-hot), `toSRGB/toLinear`.
-- `lines.ts`: `LineBatch(capacity, {screen2D, worldWidth, blend})` — GPU capsule segments, 2D pixels (y down) or 3D with a camera. `seg2`, `seg`, `polyline`, `render(renderer, out, camera?)`. Colours linear, can exceed 1 for glow. Good for 10k–200k segments.
-- `type.ts`: fonts. `F.archivo(width 62–125, weight 300–900)` (grotesk with width steps 62/75/87.5/100/112.5/125), `F.archivoItalic()`, `F.serif(weight, italic)` (Cormorant Garamond), `F.mono(weight, italic)` (IBM Plex Mono). `font(family, px)` → CSS font string. `layout(text, family, size, tracking)` → per-glyph x/advance with the font's kerning (draw glyph i at `glyphs[i].x`). `glyphX(text, i, family, size)` → where to start drawing `text[i..]` when a word is drawn in pieces (sung/unsung colours, wipes); never offset a piece by `measure(text.slice(0, i))`, which drops the kern between the pieces. `fitSize`, `measure`, `textPath2D` (opentype outline as Path2D), `textPathCommands`, `textPoints(text, family, size, step)` (points filling the glyphs — "text made of atoms"). `smart(s)` / `plain(s)`: typewriter quotes → typographic (’ “ ” …) and back.
-- `stroke.ts`: single-stroke plotter/engraving fonts (`script`, `hscript`, `sans`, `readable`, `tech`, `serif`, `osmotron`, `felix`): `strokeText(text, font, size, tracking, kern)`, `drawStrokeText(ctx2d, st, lengthPx)` → returns pen head position, `writtenLength(st, charTimes, t)` to sync writing to word timings. The fonts have no kerning tables: pairs that leave a hole (To, Yo, We, AV, LT…) are kerned optically from the glyph shapes (off for the connected scripts).
+## Readback and export
 
-## Reporting what you draw (`reel check`)
+`readPixelsAsync` reads `finalRT` through a pixel-pack buffer and a fence (several times faster than a blocking `readPixels` in Chrome). The video path packs RGB into a `(PW*3/4) x PH` RGBA8 target (`rgbPass`, exact bytes), queues the copy with `readStart(slot)` and collects it with `readFinish(slot)` while the next frame renders. `stream()` sends frames over a WebSocket written from a worker thread, with at most `inflight` unacknowledged frames: the encoder's backpressure. `cli/video.ts` runs several pages (each its own Chrome and GPU process) on chunks of frames, puts the frames back in order, spools to disk when x264 falls behind, and pipes them into one ffmpeg (BT.709, tagged).
 
-`reel check` reads the boxes a scene reports while it draws (`src/engine/report.ts`, exported by `reel`):
+## Reporting and check
 
-- `reportText(c, text, x, y, { label?, exempt? })` right after `c.fillText(text, x, y)`: the box comes from the context's font, alignment, baseline and transform, the size from its font, the colour from `fillStyle` and `globalAlpha`.
-- `report({ kind: 'text' | 'image' | 'shape', x, y, w, h, text?, size?, color?, alpha?, label?, exempt? })` for anything else (stroke fonts, glyph atlases, images), in logical px, origin top left. `color` is `#rrggbb`, `rgb()` or a palette key.
-- Give a `label` when the text changes over time (a line revealed letter by letter), so findings across frames merge. `exempt: ['offFrame']` (or `true`) marks a rule the box breaks on purpose; a clip's `check: { exempt: [...] }` does that for everything it shows. Rules: `blank`, `frozen`, `offFrame`, `safeArea`, `overlap`, `minSize`, `contrast`.
-- Both return at once outside a check (`reportText` does not even measure), so they cost nothing in previews and exports; put any extra work for them behind `if (reporting())`. Boxes drawn under 0.05 opacity are ignored, and contrast is measured only on text at 0.9 opacity or more (a fade is meant to be faint).
-- Contrast is measured in the rendered frame: the text's colour from its box's pixels nearest the reported colour, the background from a ring just outside the box, both after post-processing.
+`report.ts` holds a module-level sink. `Engine.render` with `collectBoxes` opens it around the composite (around the sub-frame nearest t when there are several; paused during a stateful scene's pre-roll) and names each box with the drawing clip; outside that, `report()` and `reportText()` return on their first line. `__reel.inspect(t)` renders with collection, reads the pixels back and measures them with the pure functions of `src/check.ts` (a brightness grid per frame, each text box's text and background luminance); the CLI turns the samples into findings with `findingsOf` from the same module.
 
-## Typography
+## Warm pages
 
-- Proportional text gets the font's kerning: whole strings through Canvas2D get it for free; glyph-by-glyph drawing must use `layout()` / `glyphX()`. Adjacent runs in different fonts or sizes have no kerning between them: set that gap by eye.
-- Timed words come with typographic punctuation (`don’t`, `’cause`, `“Just`): `Word.w` and `Line.text` go through `smart()`; `words.get()` matches straight or curly quotes. Hardcoded display strings use ’ “ ” … – — × − too. Mono text (IBM Plex Mono) is the UI/terminal voice and keeps typewriter quotes (`plain()` for a lyric shown as typed input).
-- No outlined or haloed type.
-- `util.ts`: `clamp, lerp, remap, smoothstep, ease.*, prog(x,a,b,ease), keys(t, [[t,v,ease],...]), springStep, pulse, mulberry32, hash, noise1/2/3, fbm1/2, polylineLengths, pointAtLength, window01`.
-- `reel/scenes/hud` (`src/scenes/hud.ts`): an ordinary scene for an upper track that draws crop marks (`marks: true`, flying in and out over `fly` seconds at the clip's ends; `fly: 0` keeps them in place) and a caption bottom right (`caption: { fig, text }`, revealed from the clip's start, faded out at its end), in the theme's colours for a light or dark picture (`tone`, default from the theme's `bg`). Place it like any scene: `{ id: 'fig1', scene: () => import('reel/scenes/hud'), start: 12, end: 16, track: 2, params: { caption: { fig: 'FIG. 1', text: 'Population over 65' } } }`. The `film` theme places it over the whole video with `marks: true`.
-
-## Themes
-
-A project picks its look with `theme` in `reel.config.ts`; `--theme <name>` swaps in a built-in one for a single command (handy to compare). A theme (`src/themes.ts`) is plain data: a palette, default post values and an optional overlay.
-
-- `print`: ink on paper (`bg` paper, `fg` ink, `accent` signal red), no glow, faint grain, vignette and chromatic aberration.
-- `film`: the same inks the other way round (`bg` ink, `fg` bone), upstream pdoom-video's dark grade (bloom, red-orange halation, aberration, heavy grain and vignette) and crop marks over everything.
-- `neutral` (the default): greys (`bg`, `fg`, `surface`, `muted`, `line`) and one blue `accent`; no grain, vignette, aberration or overlay.
-
-Every palette has `bg`, `fg` and `accent`, and `accentHi`/`accentLo` (a lighter and a darker accent, derived from `accent` when a theme leaves them out); `print` and `film` add `ink`, `ink2`, `graphite`, `ash`, `bone`, `paper`, `rule`, `signal`, `ember`, `blood`. Write scenes against the semantic keys (`C_BG`, `rgba('fg')`, `LIN.accent`) and they follow any theme; a theme's own keys tie a scene to that theme. A key that is not in the palette throws in `rgba()` and `LIN`, and fails to compile in GLSL; either makes the command exit 1. `THEME` (`reel`) is the resolved theme: `THEME.name`, `THEME.palette` (hex per key); `TONE.light`/`TONE.dark` say which of `bg` and `fg` is the light one.
-
-A theme of your own is an object, or a built-in one changed with `extendTheme` (palette and post merged, overlay replaced; a new `accent` without its own `accentHi`/`accentLo` gets them derived from it), both from `reel/config`:
-
-```ts
-import { defineVideo, extendTheme } from 'reel/config';
-export default defineVideo({
-  theme: extendTheme('print', { palette: { accent: '#1F6F5C', note: '#E8D9A8' }, post: { grain: 0 }, overlay: { marks: true, fly: 0 } }),
-  timeline: () => [/* … */],
-});
-```
-
-Palette values are `#rrggbb`, `#rgb` or another key's name; keys are identifiers and become `C_<KEY>` in GLSL (`accentHi` → `C_ACCENT_HI`). The overlay is the HUD scene's params (`reel/scenes/hud`, see the toolbox); the engine places it over the whole video as a clip called `overlay` on a track above every other, and loads it with any `--only`. The CLI reads the theme from the config outside the browser and hands the page the resolved palette as a compile-time constant, so the palette is in place before any module runs: that is what lets `GLSL_COMMON` bake `C_<KEY>` into shader strings at import time.
-
-## Output scale (4K)
-
-`?scale=2` (`--scale 2`) renders every logical px as 2×2 physical px: a true 3840×2160 frame from the default size. Scenes keep laying out in logical px (`W`, `H`, `ctx.W`, `ctx.H` do not change with the scale); the engine handles the rest:
-
-- Render targets: `out`, the engine's targets and `makeRT()` are physical (`PW`×`PH`). `makeRT(w, h)` takes logical px and allocates `w*SCALE`×`h*SCALE`; pass `{ pxScale: 1 }` for a data-sized target whose resolution must not follow the output.
-- `Layer2D`: the backing canvas is `SCALE`× larger and its context is pre-scaled, so drawing code works in logical px. `setTransform`/`resetTransform`/`getTransform`, `shadowBlur`, `shadowOffsetX/Y` and `filter` px lengths are patched to stay logical. Not patched: `canvas.width/height` and `getImageData`/`putImageData` are physical px, and `drawImage(layer.canvas, x, y)` needs an explicit size. `new Layer2D(w, h, 1)` makes a deliberately low-res layer (e.g. a soft glow). `scaleContext2D(ctx, SCALE)` applies the same patch to your own canvas.
-- `LineBatch`: coordinates and widths stay logical; the AA feather and the hairline floor work in physical px, so hairlines stay crisp.
-- GLSL (`GLSL_COMMON`): `gl_FragCoord`, `fwidth` and `dFdx` are physical. Use `FRAG_PX` (the fragment position in logical px) instead of `gl_FragCoord.xy` whenever it is combined with logical sizes, and `PX_SCALE` to convert. A line whose width comes from `fwidth` ("a 1.2 px hairline": `1.0 - smoothstep(a, b, d / fwidth(u))`) gets thinner and fainter at 4K: write it as `pxLine(d, a, b)`, which is identical at 1× and keeps the 1× ink with sharper edges at 4K (`rampLine` does the same for the linear-ramp idiom). `hatch`, `engrave` and `aaStroke` already do this. LOD thresholds and supersampling offsets expressed in pixels should be logical (`fwidth(u) * PX_SCALE`, offsets `/ PX_SCALE`).
-- Offscreen canvases used as textures (atlases, text planes) keep their own size: make them `SCALE`× larger (with `ctx.scale(SCALE, SCALE)`) if they are shown large, or they look soft at 4K.
-- Post (bloom, halation, CA, grain, vignette) scales automatically; the bloom pyramid stays at the logical resolution.
-
-## Motion blur and sampling
-
-The export renders every frame as the average of many sub-frames spread over the shutter (`--shutter 0.2`: a fifth of the frame time, centred on the frame's time), before post-processing. `--samples N` takes N evenly spaced sub-frames; `--samples auto` chooses the count per 32×32-logical-px tile (`Engine.render`, `AdaptiveSampling`):
-
-- The count steps through 4, 12, 36, 108, 324. Each step adds a sub-frame either side of every existing one, so each set is evenly spread and centred on the frame's time.
-- After each step the engine compares the new sub-frames' average with the old ones' (displayed values, worst 2×2-logical-px block). Stepped copies of a moving edge differ between the two sets; a converged streak or a still image does not. Stepping shrinks as 1/count, so the remaining error is about half the change the last step made; a tile stops when that is below `--tol` (default 3 levels of 255) in it and its 8 neighbours. A tile that has stopped is final: it is the average of its first n sub-frames, the image the per-frame sampler would give had it stopped at n.
-- Later sub-frames skip the tiles that have stopped: the engine writes the tiles still refining into the depth buffer of its targets, and while it renders a sub-frame every draw into them is depth-tested against that mask, whatever the material says, so the GPU rejects the stopped tiles before shading them (early-Z; a stencil test does not reject early on Apple GPUs). The final average weighs each tile by its own count.
-- In practice a still frame stops at 12, ordinary camera motion at 36, and whips, slams and fast zooms at 108 or 324. At 1:1 in 4K, 108 can't be told from 324, while 36 still shows faint striations on the fastest edges.
-- `refine: 'frame'` (`--refine frame`) decides for the whole frame at once, as before tiles: every tile then takes the count its worst tile needs.
-
-What this asks of scenes:
-
-- Sub-frames are rendered out of time order and in any number: a scene's output must depend on `f.t` only. `stateful` scenes can't be sampled adaptively (the engine refuses); nothing may count `render()` calls.
-- Per-frame flicker and jitter must use `frameIdx(t)` (`util.ts`), not `Math.floor(t * FPS)`. `frameIdx` is constant over the frame's shutter; `floor` switches at the frame's own time and double-exposes two states in every frame.
-- Noise that changes with continuous `t` (a hash seeded by time) is resampled in every sub-frame: it averages out, but slowly, and makes the adaptive sampler work harder. Seed it with `frameIdx(t)` unless it is meant to smooth out.
-- A particle emitter whose rate varies over time takes the rate as a function of each particle's birth time. A rate read at the current `t` re-times every particle from one sub-frame to the next.
-- Shaders that supersample internally (4 rotated-grid taps) take `ssTap: SS_TAP` and `${SS_TAP_GLSL}` and loop `for (int k = ssK0(); k < ssK1(); k++) ... rgss(k)`, weighting by `ssWeight()`. The engine then hands each sub-frame one tap, cycling them (every set is a multiple of 4), which averages to the same image for a quarter of the cost. In the preview and single-sample stills they take all four.
-- Post parameters (shake, flash, zoom, fades) are read at one point of the shutter, 1/8 of it after the frame's time (where the video was tuned, and a point every sample set includes); grain and dither are drawn once per frame.
-- Masked tiles keep what the last sub-frame drew there. That is safe for `out` and the engine's own targets. A scene's own target keeps being drawn in full (and costs full price) unless the scene lists it in `tileMasked`: only a target with a depth buffer whose texels are read back at their own screen position or within a few px of it (`margin: 1` widens the mask by a tile), or, with `moving: true`, one read through a zoom or pan that the scene gives before each sub-frame's draws with `ctx.mapTileMask(rt, map)` (`null` while it is read through a warp). A target read through a warp or a wide blur must not be listed.
-- A draw into a masked target whose material asks for its own depth test (3D with a depth buffer) can't use the mask: the engine draws that sub-frame again unmasked and keeps drawing that scene unmasked.
-
-## The spark (`src/engine/spark.ts`)
-
-A point of light for a pen, fuse or cursor head that moves along a path: `sparkHead(lineBatch, x, y, t, scale, intensity)` (white-hot core, glow and rays, drawn with a 2D additive `LineBatch` after the line it drags), `sparkParticles(lineBatch, t, headAt, opts)` (sputtering particles from a head whose position over time is `headAt(t)`; deterministic, born on a fixed clock with hashed velocities), and `sparkHead2D(ctx, x, y, t, scale)` for Canvas2D layers. Coloured from the palette's `accent` and `accentHi`; the HDR core blooms under the `film` grade.
-
-## Music data (`tools/analyze.py`)
-
-Narration timing (`reel narrate`, `reel align`) gives a silent 100 BPM grid and empty envelopes, so `f.a` reads 0. `reel analyze <song>` fills them from a song: a constant-tempo grid on the kicks, downbeats, envelopes (`rms`, `low`, `mid`, `high` from the mix; `drums`, `other`, `bass`, `vocal` from a harmonic/percussive split, proxies rather than separated stems), `kick`/`snare`/`hat` onsets and `vocal` onsets (from the same harmonic band, so also a proxy). To cut on the beat, snap clip starts in the config's `timeline(src)`: `src.audio.beatBefore(src.words.get('first words').words[0].start)`, or `src.audio.nearestDownbeat(t)` at the end of a line.
+The warm renderer (`cli/daemon.ts`, `cli/renderer.ts`) keeps pages open across requests. What that asks of the page: render errors are per request (`beginRequest`), a lost WebGL context is reported (`contextLost`) so the page is replaced, and nothing in the engine may depend on how many frames were rendered before (the same rule motion blur imposes on scenes).

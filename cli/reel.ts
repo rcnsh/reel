@@ -86,6 +86,15 @@ if (mode === 'mcp') {
   await new Promise(() => {});
 }
 
+if (mode === 'skills') {
+  if (P.positionals[0] !== 'update') fail(`skills ${P.positionals[0]}: expected update`);
+  let project = '';
+  try { project = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail((e as Error).message); }
+  const { installSkills, skillNames } = await import('./init');
+  const files = installSkills(project);
+  finish({ ok: true, errors: [], logs: [], warnings: [], skills: skillNames(), files }, () => console.log(`${skillNames().join(', ')} -> ${path.join(project, '.claude/skills')} (${files.length} files)`));
+}
+
 if (mode === 'daemon') {
   const sub = P.positionals[0];
   const d = await import('./daemon');

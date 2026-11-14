@@ -1,0 +1,72 @@
+---
+name: reel-review-loop
+description: The render-look-fix loop for reel videos - render stills, motion strips and contact sheets, run reel check, read the images, fix and re-render until the video is right; then export. Use after writing or changing a reel scene or config, when asked to review, verify or polish a reel video, or before reporting reel work as done.
+---
+
+# Reviewing a reel video
+
+A reel video is code, so the only proof a change worked is a rendered frame you have looked at. Typechecking proves nothing about layout, timing or colour. The loop is: render a little, look, fix, repeat; widen to the whole video; export last.
+
+Commands are `reel <command>` (in a project made by `reel init`: `bun run reel <command>`; elsewhere `bun <engine>/cli/reel.ts`). Each has `--project <folder>` and `--json`, and exits 1 on a scene error. The same tools exist over MCP (`render_still`, `motion_strip`, `contact_sheet`, `check_video`, `diff_images`, `video_start`) and return the images inline.
+
+## The loop
+
+1. **Know the timeline.** `reel info`: size, fps, duration, every clip's id, start, end and track. Times for everything below come from here.
+2. **Typecheck** (`bun run typecheck`). A type error found by a render costs more.
+3. **Stills of the clip you touched**: its first frame, its middle, its last frame, and the moments its animation changes (`reel still --t 4.20,6,9.98 --only title`). `--only` loads just that clip: faster, and errors elsewhere cannot hide yours. Then read every PNG with your image-reading tool. A still you have not looked at has not been checked.
+4. **Motion**: `reel strip --from 4.2 --to 5.2 --n 8 --only title` lays eight frames side by side; `--frames 6` gives consecutive frames. Read it for the motion's direction, spacing (is the easing what you meant: fast in, slow out?), overshoot, and whether anything pops, jumps or flickers between neighbours.
+5. **`reel check`**: sweeps the whole video (denser at clip starts and ends) and prints findings, each with a crop image in `out/check/`. Read the crops of the errors and warnings, fix, run it again. It exits 1 while any finding is an error.
+6. **Other formats**: `reel check --size 1080x1920` (and `1080x1080`) when the video may be cut vertical or square; text laid out for 16:9 runs off a vertical frame.
+7. **Cuts and the whole**: `reel sheet --cuts` (four frames around every cut) for transitions; `reel sheet --n 24` for an overview of pacing and consistency.
+8. **Export** (below) once stills, strips and check are clean.
+
+Repeat 3 to 5 after every edit. The warm renderer reloads changed files by itself, so a still takes a fraction of a second; there is no server to restart.
+
+## What to look for in a frame
+
+- **Layout**: text inside the frame and its safe margin, nothing clipped, nothing colliding, alignment consistent between clips, a clear hierarchy (one thing to read first). Layout derived from `W` and `H`, not from 1920 by 1080.
+- **Type**: sizes readable on a phone (24 px at 1080 is the floor), kerning even, typographic quotes and dashes, no widows of one short word, line breaks where a reader pauses.
+- **Colour and contrast**: text clearly separated from what is behind it, in the theme's palette. Faint text in a held frame is a bug, not a style, unless it is fading.
+- **The first and last frame of each clip**: elements fully in (or deliberately out), nothing half-drawn at a cut, no one-frame flash of a default state. Fade-ins that start late leave a blank first frame.
+- **Timing against words** (narrated videos): the line or object appears as the word is said. `reel still` at the word's time from `data/words.json` and a few frames either side.
+- **Rendering faults**: black or dark-red frames (a scene threw: the command lists the error), banding in gradients, aliased hairlines, flicker between consecutive frames (state, or `Math.floor(t * FPS)` instead of `frameIdx`), moiré in fine patterns.
+- **4K** (if delivering it): `reel still --scale 2` of the finest details: hairlines must keep their weight and text its sharpness.
+
+## Reading `reel check`
+
+Each finding has a `kind`, a `severity`, the time span it was seen (`t` to `until`, over `frames` sampled frames), the `clip`, a `rect` in logical px, a `message` that says how to fix it, and an `image` (a crop of the worst frame, the box outlined in magenta).
+
+- `sceneError` (error): a scene threw or a shader failed to compile; the message names the clip and the source line. Fix first: everything else in that clip is suspect.
+- `offFrame` (error for text partly outside; info for things wholly outside or for images and shapes): size text from `W` with `fitSize`, or break it into lines.
+- `contrast` (error under 3:1, warning under 4.5:1 for body text): measured on the rendered pixels behind the text, after post. The message suggests a palette colour that reads; or change what is behind the text.
+- `safeArea`, `overlap`, `minSize` (warnings): fix unless the design means it.
+- `blank` (a flat frame) and `frozen` (nothing moved for seconds) (warnings): a scene drawing nothing, a fade held too long, a still held without intent.
+- Check only sees text that scenes report: after every `fillText`, `reportText(c, text, x, y)`; for other drawn text, `report({ … })`. A scene that reports nothing passes check while broken. If check is silent about text you can see, add the reports.
+- When a rule is broken on purpose, mark it in the scene (`exempt: ['offFrame']` on the box) or on the clip (`check: { exempt: ['blank'] }`) rather than ignoring the finding, so the next check is clean.
+
+`--step 0.25` samples more densely; `--from/--to` checks a range; `--safe`, `--min-text`, `--frozen` change the thresholds.
+
+## Comparing
+
+`reel diff --t 6 out/stills/title_6.000s.png` renders t now and compares it with an earlier still: changed pixels, max and mean difference, the box around the change, and a diff image. Use it to confirm a refactor changed nothing (expect `identical`) or that a fix touched only what it should. Grain changes from frame to frame, so compare the same time; `--tol 8` ignores grain-level noise. `reel diff a.png b.png` compares any two images.
+
+## When to render video
+
+Stills and strips settle layout and most motion. Render video when you need to judge rhythm and timing against the audio, motion blur, or the final pass:
+
+- Draft: `reel video --from 20 --to 26 --only title --preset veryfast --out out/draft.mp4` (one sample: no motion blur).
+- Motion blur and final: `--samples auto` (adaptive; stateful scenes need a fixed `--samples 8`). Slower: export once the stills are right.
+- Narrated or scored: then `reel events` and `reel mix out/raw.mp4 out/final.mp4` lay the music and cue sounds (a partial render mixes with the same `--from`).
+
+You cannot watch a video file; judge its frames with `reel strip` at the same times, and use the video for the person you are working with.
+
+## Cheap looking
+
+- `--max-size 800` writes smaller images (cheaper to read) for stills, sheets and strips; MCP image tools return at most 1280 px unless asked for full size.
+- `--only` a clip; a short `--from/--to` range.
+- Stills are never overwritten (`hello_2.500s.png`, then `-2`, `-3`): compare before and after by name. Clean `out/` now and then; it is not committed.
+- `reel daemon status` shows the warm renderer; `--no-daemon` renders in a fresh browser (when you suspect the warm one, which is rare).
+
+## Before you report work done
+
+Every touched clip: stills at its first, middle and last frame and a strip of its main motion, read. `reel check` clean of errors (and of warnings you did not choose), at every delivery format. Typecheck clean. Say which times you looked at and what check reported, and name anything you could not verify.
