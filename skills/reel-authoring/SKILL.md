@@ -47,7 +47,24 @@ export default defineVideo({
 
 ## A scene
 
-Text and layout go in an **HTML layer** (HTML and CSS rendered to a texture, theme colours as CSS variables, fonts by family name, reported to `reel check` by itself): see reference/html.md. GL (`FSPass`, three.js) and Canvas2D (`Layer2D`) are for pictures, shaders, particles and drawn strokes. A scene mixing both:
+Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
+
+```ts
+import type * as THREE from 'three';
+import { Scene, type Frame, TitleCard, Captions, clearRT, LIN } from 'reel';
+
+export default class Opening extends Scene {
+  card = new TitleCard({ kicker: 'Chapter one', title: 'How a frame is made', at: [0.3, 4] });
+  captions = new Captions({ words: this.ctx.words });
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    this.card.draw(this.ctx.renderer, out, f);
+    this.captions.draw(this.ctx.renderer, out, f);
+  }
+}
+```
+
+Other text and layout go in an **HTML layer** (HTML and CSS rendered to a texture, theme colours as CSS variables, fonts by family name, reported to `reel check` by itself): see reference/html.md. GL (`FSPass`, three.js) and Canvas2D (`Layer2D`) are for pictures, shaders, particles and drawn strokes. A scene mixing both:
 
 ```ts
 import type * as THREE from 'three';
@@ -132,6 +149,7 @@ Aim under 25 ms a frame (`reel perf --from a --to b`). Precompute in `init()`. A
 
 ## Where to look next
 
+- `reference/kit.md`: the component kit, one example per component: options, layout, motion, timing.
 - `reference/html.md`: HTML layers: markup, CSS, per-frame updates, CSS animations on the clip's clock, theme variables, fonts, images, what check sees.
 - `reference/toolbox.md`: FSPass, Compositor, Layer2D, render targets, the GLSL helpers (noise, SDFs, hatching, `pxLine`), LineBatch, fonts and type layout, stroke fonts, easing and keyframes, the spark, the HUD scene.
 - `reference/sampling.md`: motion blur, adaptive sampling and what it asks of scenes; 4K output scale; stateful scenes; supersampling shaders.

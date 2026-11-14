@@ -46,6 +46,23 @@ export class Words {
     return new Words({ lines: [] });
   }
 
+  /**
+   * Timed words from lines with their times, for a video without a voice (captions of a silent explainer): each
+   * line's words share its time in proportion to their length. `pace` (0..1, default 0.85) is the share of the
+   * line's time the words take; the rest is a pause at its end.
+   */
+  static timed(lines: { text: string; start: number; end: number }[], pace = 0.85): Words {
+    return new Words({
+      lines: lines.map((l) => {
+        const toks = l.text.split(/\s+/).filter(Boolean), total = toks.reduce((a, w) => a + w.length + 1, 0);
+        const span = (l.end - l.start) * pace;
+        let t = l.start;
+        const words = toks.map((w) => { const d = (span * (w.length + 1)) / total, o = { w, start: t, end: t + d }; t += d; return o; });
+        return { text: l.text, start: l.start, end: l.end, words };
+      }),
+    });
+  }
+
   /** The line being sung at t (or null in gaps). */
   lineAt(t: number): Line | null {
     return this.lines.find((l) => t >= l.start && t < l.end) ?? null;

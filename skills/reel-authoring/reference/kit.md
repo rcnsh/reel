@@ -1,0 +1,157 @@
+# The component kit
+
+Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+
+## How every component works
+
+```ts
+import type * as THREE from 'three';
+import { Scene, type Frame, TextBlock, clearRT, LIN } from 'reel';
+
+export default class Point extends Scene {
+  text = new TextBlock({ text: 'One idea per clip', at: [0.5, 4], motion: { from: 'left' } });   // made once, as a field
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    this.text.draw(this.ctx.renderer, out, f);           // draws nothing outside its window
+  }
+}
+```
+
+- Make components as fields of a scene (they belong to its clip) and call `draw(renderer, out, f, { opacity? })` in `render()`, in back-to-front order. On a track above 0, clear to transparent first.
+- Options every component takes:
+  - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side.
+  - `at: [from, to]`: the seconds of the clip it shows in (default the whole clip).
+  - `motion`: its entrance and exit, `{ from: 'up' | 'down' | 'left' | 'right' | 'fade' | 'scale' | 'none', in: 0.6, out: 0.4, delay: 0, distance }`, or `false` for none. Motion is drawn in GL per sub-frame, so it gets motion blur under `--samples auto`.
+  - `css`: CSS added to its layer, to restyle it (each component lists its classes below).
+  - `label`: its name in `reel check` findings.
+- Values marked *Anim* take a value or a function of the frame, `(f) => …`, evaluated once per output frame: `text: (f) => f.lt < 2 ? 'Before' : 'After'`.
+- Colours are palette keys (`'accent'`, `'accentHi'`, `'muted'`) or CSS colours.
+- Content changes once per output frame; keep what is shown a function of `f` (`f.lt`, `f.t`, word times), never of what was shown before.
+
+## Text
+
+### TextBlock
+
+Wraps, aligns, and shrinks until the text fits its box and `maxLines`.
+
+```ts
+body = new TextBlock({
+  text: 'Colours mix in linear light and are encoded once, at the end.',
+  box: { x: W * 0.08, y: H * 0.3, w: W * 0.4, h: H * 0.4 },
+  size: 44, minSize: 26, maxLines: 4, align: 'left', valign: 'top', weight: 400, color: 'muted',
+});
+```
+
+`text` or `html` (*Anim*), `size` (largest, default 7% of the short side), `minSize` (default 2.6%), `fit` (default true), `maxLines`, `align`, `valign`, `font` (a CSS family, default Archivo), `weight` (700), `lineHeight` (1.15), `color` (fg). Text that cannot fit even at `minSize` runs out of the box and `reel check` reports it. To reveal text as it is spoken without it reflowing, keep the unsaid part laid out but hidden: `html: (f) => esc(said) + '<span style="visibility: hidden">' + esc(rest) + '</span>'`. Class: `.tb`.
+
+### TitleCard
+
+```ts
+card = new TitleCard({ kicker: 'Part two', title: 'Where the time goes', subtitle: 'Render minutes, measured', align: 'center' });
+```
+
+`title`, `subtitle`, `kicker` (*Anim*), `align` (`center` | `left`), `font`, `weight` (800), `rule` (the accent bar, default true). The title shrinks (to three lines at most) until the whole card fits its box, by default the safe area. Classes: `.kicker`, `.title`, `.rule`, `.subtitle`.
+
+### LowerThird
+
+```ts
+who = new LowerThird({ name: 'Ada Lovelace', role: 'Analyst', at: [1, 6], side: 'left' });
+```
+
+`name`, `role` (*Anim*), `side`. A panel in the lower left (or right) of the safe area that slides in from its side. Give it room: a narrow `box` wraps the name, and lines past the box are cut off (check reports them as `clipped`). Classes: `.lt`, `.bar`, `.name`, `.role`.
+
+## Captions
+
+```ts
+captions = new Captions({ words: this.ctx.words, style: 'highlight', position: 'bottom' });
+```
+
+- `words`: the project's timed words (`this.ctx.words`), or for a video without a voice `Words.timed([{ text, start, end }, …], pace)`, which spreads each line's words over its time by length.
+- `style`: `'highlight'` (the page's words dimmed until said, the word being said in the accent), `'line'` (the page fades in whole), `'word'` (one word at a time, large).
+- `position` (`bottom` | `top` | `middle`, inside the safe area), `size`, `lines` per page (2), `panel` and `panelOpacity` (a panel in the background colour behind the text), `hold` (seconds a page stays after its last word), `color`, `accent`, `font`, `weight`.
+- Pages are runs of whole words that fit `lines` lines of the box; each shows from its first word to the next page. `captions.pages` lists them, `captionPages(words, maxChars)` makes them.
+- Captions run on video time: put them in a clip that spans the narration, usually on a track above the scenes. Classes: `.cap` (the page), `.w` (a word), `.said`, `.now`.
+
+## ImageBox
+
+```ts
+photo = new ImageBox({ src: 'assets/ridge.jpg', alt: 'ridge', box: { x: W * 0.5, y: H * 0.15, w: W * 0.42, h: H * 0.6 }, radius: 18,
+  kenBurns: { from: { zoom: 1 }, to: { zoom: 1.15, x: 0.4, y: 0.2 } } });
+```
+
+`src` (a path in the project), `fit` (`cover`, the default, fills and crops; `contain` shows all of it), `radius`, `kenBurns` (`true` for a slow push in, or a move from one framing to another across the window: `zoom` 1 is fitted, `x` and `y` pan from -1 to 1 across the room the zoom leaves), `alt`. Drawn in GL from the source file, so the pan is smooth and motion blurred; it loads before the first frame, and a file that does not load is an error. Default motion: a fade.
+
+## Charts and numbers
+
+Charts grow as their `progress` runs from 0 to 1: by default over 1.4 s from the start of their window, eased; give `progress: (f) => …` to drive it yourself.
+
+### BarChart
+
+```ts
+chart = new BarChart({
+  title: 'Samples per frame',
+  data: [{ label: 'Still', value: 1 }, { label: 'Pan', value: 9 }, { label: 'Whip', value: 24 }],
+  highlight: 2, format: (v) => v.toFixed(0),
+});
+```
+
+`data`, `max` (a full bar; default the largest value), `format`, `color` (accent), `highlight` (a bar's index, drawn in fg), `title`. Bars grow one after another. Classes: `.title`, `.bars`, `.bar`, `.fill`, `.value`, `.label`.
+
+### LineChart
+
+```ts
+trend = new LineChart({
+  title: 'Minutes to render one minute', series: [1, 1.2, 1.6, 2.4, 3.6, 5.2, 7.4, 10],
+  labels: ['Nothing moves', 'Everything moves'], format: (v) => `${v.toFixed(1)} min`,
+});
+```
+
+`series` (values evenly spaced along x, or several: `[{ values, color, label }]`), `labels` (the first and last are shown under the axis), `min`, `max`, `format`, `title`. The line is revealed left to right, with a dot and the value at its head (on the first series). Classes: `.title`, `.plot`, `.lines`, `.line`, `.head`, `.value`, `.axis`.
+
+### Counter
+
+```ts
+count = new Counter({ to: 7.8, digits: 1, suffix: '×', caption: 'faster than a fixed 24 samples' });
+```
+
+`to`, `from` (0), `digits` or `format`, `prefix`, `suffix`, `caption`, `size`, `color`. Tabular figures, so the number does not jitter as it counts. Classes: `.num`, `.cap`.
+
+### ProgressBar and Timer
+
+```ts
+bar = new ProgressBar({ box: { x: W * 0.08, y: H * 0.06, w: W * 0.7, h: 40 } });               // the clip's progress, f.p
+timer = new Timer({ format: 'm:ss', from: 30, to: 0 });                                          // counts down over the window
+```
+
+ProgressBar: `progress` (*Anim*, default `f.p`), `text` (*Anim*, beside the bar), `color`; along the bottom of the safe area by default. Timer: `from` and `to` (seconds shown at the start and end of the window; default counts up from 0), `format` (`'m:ss'`, `'mm:ss'`, `'ss'`, `'m:ss.t'`), `size`, `color`; top right of the safe area by default. Neither moves in or out unless given `motion`. `clock(s, format)` and `formatNumber(x, digits)` are the formatting they use. Classes: `.track`, `.fill`, `.label`; `.clock`.
+
+## CodeBlock
+
+```ts
+code = new CodeBlock({
+  code: SOURCE, lang: 'typescript', title: 'scenes/hello.ts', lineNumbers: true,
+  reveal: (f) => (f.lt - 0.5) * 6,                     // lines shown: six a second
+  highlight: (f) => (f.lt > 3 ? [6, 7, 8] : []),       // the rest dimmed
+});
+```
+
+`code`, `lang` (one of `CODE_LANGUAGES`: bash, cpp, css, diff, glsl, go, javascript, json, python, rust, sql, typescript, xml, yaml, and their aliases ts, js, py, sh, html, c, rs, yml; an unknown language is an error), `size` (largest; the font shrinks so the longest line and every line fit, no line wraps), `lineNumbers`, `highlight` (1-based lines, *Anim*), `reveal` (how many lines show, *Anim*), `title` (a file name bar), `panel`. Highlighted by highlight.js in the theme's colours: keywords in the accent, strings between the accent and fg, comments dimmed. Classes: `.code`, `.ln`, `.no`, `.on`, `.hljs-*`.
+
+## Your own component
+
+`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`:
+
+```ts
+import { HtmlComponent, type ComponentOptions, safeBox, type Frame } from 'reel';
+
+class Badge extends HtmlComponent {
+  constructor(private text: string, o: ComponentOptions = {}) {
+    super(o, { box: safeBox(0.1), label: 'badge', html: '<span class="b"></span>', css: '.b { font: 700 40px Archivo; color: var(--accent); }' });
+  }
+  protected update(f: Frame) { this.layer.text('.b', this.text); }
+}
+```
+
+## Checking a layout
+
+Every component reports its text to `reel check`: boxes, sizes, colours, overflow and clipping. Parts of one run of text (the words of a caption) never count as overlapping each other. Run `reel check` and `reel check --size 1080x1920` after laying out a scene.

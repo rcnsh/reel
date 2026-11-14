@@ -11,6 +11,7 @@ export * from './engine/post';
 export { HtmlLayer, HTML_TEXEL_GLSL, THEME_CSS_VARS, awaitBeforeFirstFrame, type HtmlLayerOptions, type HtmlDraw, type HtmlUpdate } from './engine/html';
 export * from './engine/words';
 export * from './engine/audio';
+export * from './kit';
 export { report, reportText, reporting, CHECK_RULES, type CheckRule, type DrawnBox } from './engine/report';
 export { GLSL_COMMON } from './engine/glsl/common';
 export { themes, extendTheme } from './themes';

@@ -1,6 +1,6 @@
 # HTML layers
 
-The default way to put text and layout in a scene: write HTML and CSS, and reel renders it into a texture at the output resolution (sharp at `--scale 2`), in the theme's colours, with fonts you name in CSS, and reports every text element to `reel check`. GL and Canvas2D stay for shaders, particles, geometry and drawn strokes.
+The default way to put text and layout in a scene: write HTML and CSS, and reel renders it into a texture at the output resolution (sharp at `--scale 2`), in the theme's colours, with fonts you name in CSS, and reports every text element to `reel check`. GL and Canvas2D stay for shaders, particles, geometry and drawn strokes. The component kit (reference/kit.md) is built on HTML layers.
 
 ```ts
 import type * as THREE from 'three';
