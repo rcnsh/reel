@@ -113,6 +113,8 @@ export class Engine {
   errors: string[] = [];
 
   timeline: TimelineEntry[] = [];
+  /** The clip whose scene is being initialised or drawn (names errors that surface inside three.js). */
+  private drawing = '';
 
   constructor(public canvas: HTMLCanvasElement, private config: VideoConfig) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
@@ -120,9 +122,19 @@ export class Engine {
     this.renderer.setSize(PW, PH, false);
     this.renderer.autoClear = false;
     // a shader that does not compile (a palette key the theme lacks, a typo) is an error, not a black draw
+    // (named after the clip drawing when it compiled, with the source line each error points at: the line
+    // numbers count the engine's GLSL prepended to the scene's)
     this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
-      const log = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vs), gl.getShaderInfoLog(fs)].map((x) => x?.trim()).filter(Boolean).join('\n');
-      const msg = `shader failed to compile: ${log}`;
+      const quote = (sh: WebGLShader, log: string | null) => {
+        const src = (gl.getShaderSource(sh) ?? '').split('\n');
+        return (log ?? '').trim().split('\n').filter(Boolean).map((l) => {
+          const m = /^ERROR: \d+:(\d+):/.exec(l);
+          const line = m ? src[Number(m[1]) - 1]?.trim() : undefined;
+          return line ? `${l}\n    in: ${line}` : l;
+        }).join('\n');
+      };
+      const log = [gl.getProgramInfoLog(program)?.trim(), quote(vs, gl.getShaderInfoLog(vs)), quote(fs, gl.getShaderInfoLog(fs))].filter(Boolean).join('\n');
+      const msg = `${this.drawing ? `[${this.drawing}] ` : ''}shader failed to compile: ${log}`;
       if (!this.errors.includes(msg)) { this.errors.push(msg); console.error(msg); }
     };
     this.blit = new FSPass(`uniform sampler2D src; void main(){ fragColor = texture(src, vUv); }`, { src: { value: null } });
@@ -623,6 +635,7 @@ export class Engine {
         }
       }
       let ov: PostOverrides | void = undefined;
+      this.drawing = e.id;
       try {
         ov = s.render(this.frameFor(e, t, sceneSeeked ? 0 : dt, sceneSeeked && !s.stateful, false, idx > 0 ? under : null, tin, tout), rt);
       } catch (err) {
@@ -630,6 +643,7 @@ export class Engine {
         if (!rec.renderError) { rec.renderError = msg; this.errors.push(msg); console.error(msg); }
         clearRT(r, rt, [0.25, 0.0, 0.0]);
       }
+      this.drawing = '';
       rec.lastT = t;
       post = { ...post, ...(e.post ?? {}), ...(ov ?? {}) };
       if (idx > 0 && !s.handlesTransition && under) {
