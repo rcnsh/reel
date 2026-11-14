@@ -82,7 +82,7 @@ or, for a client configured with JSON:
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `align-words.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` + `mix-graph.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
 - `skills/`: agent skills (Agent Skills format) that `reel init` copies into a project's `.claude/skills` and `reel skills update` refreshes: `reel-authoring` (the config, the Scene API, determinism and sampling rules, themes, the toolbox, timing; reference files beside it) and `reel-review-loop` (render, look, check, fix; when to export).
-- `tests/`: `bun test`: unit tests of the pure modules, and tests that render through Chrome: golden frames of the examples (`tests/golden/`, rewritten by `reel golden update`) and the MCP client.
+- `tests/`: `bun test`: unit tests of the pure modules, and tests that render through Chrome: golden frames of the examples (`tests/golden/`, rewritten by `reel golden update`) the CLI end to end, and the MCP client.
 - `docs/ENGINE.md`: the engine's internals, for changing it: the page, a frame's pipeline, adaptive sampling, readback and export, reporting.
 
 ## Running
