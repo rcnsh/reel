@@ -26,10 +26,13 @@ const [inp, out] = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.st
 if (!inp || !out) { console.error('usage: bun tools/mix.ts <in.mp4> <out.mp4> [--from 0]'); process.exit(1); }
 const FROM = +opt('from', '0');
 
+const die = (msg: string): never => { console.error(`reel mix: ${msg}`); process.exit(1); };
+if (!existsSync(inp)) die(`${inp}: no such file (the rendered video to mix under)`);
+const cuesPath = path.join(ROOT, 'data/cues.json');
+if (!existsSync(cuesPath)) die(`${cuesPath} is missing: run \`reel events\` first (it writes the clips and the scenes' cues)`);
 const cfgPath = path.join(ROOT, 'mix.json');
 const cfg: MixConfig = existsSync(cfgPath) ? await Bun.file(cfgPath).json() : {};
-const ev: Events =
-  await Bun.file(path.join(ROOT, 'data/cues.json')).json();
+const ev: Events = await Bun.file(cuesPath).json();
 const dur = +(await $`ffprobe -v error -show_entries format=duration -of csv=p=0 ${inp}`.text()).trim();
 const g = buildMix(cfg, ev, dur, FROM, ROOT);
 for (const w of g.warnings) console.warn(w);
