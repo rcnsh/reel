@@ -26,6 +26,7 @@ test('a window shifts cues to the render and drops the rest; SRT and VTT stamps'
   const w = window(cues, 2, 5);
   expect(w).toEqual([{ start: 0, end: 0.5, lines: ['a'] }, { start: 1, end: 2, lines: ['b', 'c'] }]);
   expect(toSrt(w)).toBe('1\n00:00:00,000 --> 00:00:00,500\na\n\n2\n00:00:01,000 --> 00:00:02,000\nb\nc\n');
+  expect(() => window(cues, 5, 2)).toThrow('empty range');
   expect(toVtt([{ start: 3725.5, end: 3726, lines: ['x'] }])).toBe('WEBVTT\n\n01:02:05.500 --> 01:02:06.000\nx\n');
 });
 

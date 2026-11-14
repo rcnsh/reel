@@ -61,6 +61,7 @@ export function buildCues(lines: { words: W[] }[], o = LIMITS): Cue[] {
 
 /** Cues of a render from `from` to `to`: shifted to its start, cut at its ends. */
 export function window(cues: Cue[], from = 0, to = Infinity): Cue[] {
+  if (!(to > from)) throw new Error(`--from ${from} --to ${to}: an empty range, nothing to subtitle`);
   return cues.filter((c) => c.end > from && c.start < to).map((c) => ({ ...c, start: Math.max(0, c.start - from), end: Math.min(to, c.end) - from }));
 }
 
