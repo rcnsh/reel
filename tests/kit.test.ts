@@ -2,7 +2,7 @@
 // the same frame after a seek backwards, and whose faults (text cut off at a layer's edge, text overflowing a
 // block that does not fit it) check names.
 import { afterAll, describe, expect, test } from 'bun:test';
-import { captionPages, clock, cssColor, esc, formatNumber, motionAt, splitHighlighted } from '../src/kit';
+import { captionPages, clock, textWidth, cssColor, esc, formatNumber, motionAt, splitHighlighted } from '../src/kit';
 import { Words } from '../src/engine/words';
 import { fixture, hasChrome, reel } from './helpers';
 
@@ -18,6 +18,21 @@ describe('helpers', () => {
     expect(pages.map((p) => p.text)).toEqual(['one two', 'three', 'four five', 'six', 'seven']);
     for (let i = 0; i + 1 < pages.length; i++) expect(pages[i]!.end).toBeLessThanOrEqual(pages[i + 1]!.start);
     expect(pages.at(-2)!.end).toBeCloseTo(6.5); // held half a second after its last word
+  });
+
+  test('captionPages counts CJK and emoji twice and splits a line of CJK, which has no spaces, into pages', () => {
+    expect(textWidth('abc')).toBe(3);
+    expect(textWidth('日本語')).toBe(6);
+    expect(textWidth('🎬a')).toBe(3);
+    const cjk = 'これは日本語の字幕です。スペースがないので一つの単語として扱われます。';
+    const pages = captionPages(Words.timed([{ text: cjk, start: 0, end: 7 }], 1), 20);
+    expect(pages.map((p) => p.text).join('')).toBe(cjk);
+    for (const p of pages) expect(textWidth(p.text)).toBeLessThanOrEqual(20);
+    expect(pages[0]!.start).toBe(0);
+    expect(pages.at(-1)!.words.at(-1)!.end).toBeCloseTo(7);
+    // a word that fits keeps its space; split pieces join without one
+    const mixed = captionPages(Words.timed([{ text: 'Say 日本語日本語日本語日本語 now', start: 0, end: 3 }], 1), 12);
+    expect(mixed.map((p) => p.text)).toEqual(['Say', '日本語日本語', '日本語日本語', 'now']);
   });
 
   test('clock and formatNumber are the same on every machine', () => {

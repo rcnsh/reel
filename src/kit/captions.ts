@@ -31,25 +31,57 @@ export interface CaptionsOptions extends ComponentOptions {
   weight?: number;
 }
 
-/** A page of captions: its words and when it shows. */
-export interface CaptionPage { text: string; words: Word[]; start: number; end: number }
+/** A page of captions: its words and when it shows; `joined[k]`: word k follows the one before without a space. */
+export interface CaptionPage { text: string; words: Word[]; joined: boolean[]; start: number; end: number }
+
+/** East Asian wide and fullwidth characters and emoji: about twice the width of a Latin letter. */
+const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
+const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
+/** A text's width in Latin characters: wide characters (CJK, Hangul, fullwidth forms, emoji) count twice. */
+export const textWidth = (s: string) => graphemes(s).reduce((a, g) => a + (WIDE.test(g) ? 2 : 1), 0);
 
 /**
- * Split timed words into caption pages: each line of the words into runs of whole words of at most `maxChars`
- * characters, each shown from its first word until the next page or `hold` after its last word.
+ * A word wider than `max` (a run of CJK text has no spaces, so it arrives as one word) as pieces of at most `max`,
+ * its time shared between them by width; the pieces after the first join it without a space.
+ */
+function splitWide(w: Word, max: number): { w: Word; joined: boolean }[] {
+  const total = textWidth(w.w);
+  if (total <= max) return [{ w, joined: false }];
+  const pieces: string[] = [];
+  let cur = '', cw = 0;
+  for (const g of graphemes(w.w)) {
+    const gw = WIDE.test(g) ? 2 : 1;
+    if (cur && cw + gw > max) { pieces.push(cur); cur = ''; cw = 0; }
+    cur += g; cw += gw;
+  }
+  if (cur) pieces.push(cur);
+  let t = w.start, done = 0;
+  return pieces.map((x, i) => {
+    done += textWidth(x);
+    const end = w.start + ((w.end - w.start) * done) / total, piece = { ...w, w: x, start: t, end };
+    t = end;
+    return { w: piece, joined: i > 0 };
+  });
+}
+
+/**
+ * Split timed words into caption pages: each line of the words into runs of whole words at most `maxChars`
+ * Latin characters wide (CJK and emoji count twice; a word wider than that is split), each shown from its first
+ * word until the next page or `hold` after its last word.
  */
 export function captionPages(words: Words, maxChars: number, hold = 0.5): CaptionPage[] {
   const pages: CaptionPage[] = [];
   for (const line of words.lines) {
-    let cur: Word[] = [];
-    const runs: Word[][] = [];
-    for (const w of line.words) {
-      const len = cur.reduce((a, x) => a + x.w.length + 1, 0) + w.w.length;
-      if (cur.length && len > maxChars) { runs.push(cur); cur = []; }
-      cur.push(w);
+    let cur: { w: Word; joined: boolean }[] = [], width = 0;
+    const runs: (typeof cur)[] = [];
+    for (const x of line.words.flatMap((w) => splitWide(w, maxChars))) {
+      const ww = textWidth(x.w.w) + (cur.length && !x.joined ? 1 : 0);
+      if (cur.length && width + ww > maxChars) { runs.push(cur); cur = []; width = 0; }
+      cur.push(cur.length ? x : { ...x, joined: false });
+      width += textWidth(x.w.w) + (cur.length > 1 && !x.joined ? 1 : 0);
     }
     if (cur.length) runs.push(cur);
-    for (const r of runs) pages.push({ text: r.map((w) => w.w).join(' '), words: r, start: r[0]!.start, end: r.at(-1)!.end + hold });
+    for (const r of runs) pages.push({ text: r.map((x, k) => (k && !x.joined ? ' ' : '') + x.w.w).join(''), words: r.map((x) => x.w), joined: r.map((x) => x.joined), start: r[0]!.w.start, end: r.at(-1)!.w.end + hold });
   }
   pages.sort((a, b) => a.start - b.start);
   for (let i = 0; i + 1 < pages.length; i++) pages[i]!.end = Math.min(pages[i]!.end, pages[i + 1]!.start);
@@ -88,7 +120,7 @@ export class Captions extends HtmlComponent {
     this.o = o;
     // characters per page: as many as `lines` lines of the box hold at this size (about half an em a character)
     const perLine = Math.max(8, Math.floor(this.box.w / (size * 0.52)));
-    this.pages = style === 'word' ? o.words.words.map((w, i, a) => ({ text: w.w, words: [w], start: w.start, end: Math.min(w.end + (o.hold ?? 0.25), a[i + 1]?.start ?? Infinity) })) : captionPages(o.words, perLine * lines, o.hold ?? 0.5);
+    this.pages = style === 'word' ? o.words.words.map((w, i, a) => ({ text: w.w, words: [w], joined: [false], start: w.start, end: Math.min(w.end + (o.hold ?? 0.25), a[i + 1]?.start ?? Infinity) })) : captionPages(o.words, perLine * lines, o.hold ?? 0.5);
   }
 
   /** The page on screen at video time t, or -1. */
@@ -103,7 +135,7 @@ export class Captions extends HtmlComponent {
       this.shown = i;
       const p = this.pages[i];
       page.className = `page ${style}`;
-      page.innerHTML = p ? `<span class="cap" data-at="${(p.start - f.start).toFixed(4)}">${p.words.map((w, k) => `<span class="w" data-k="${k}">${esc(w.w)}</span>`).join(' ')}</span>` : '';
+      page.innerHTML = p ? `<span class="cap" data-at="${(p.start - f.start).toFixed(4)}">${p.words.map((w, k) => `${k && !p.joined[k] ? ' ' : ''}<span class="w" data-k="${k}">${esc(w.w)}</span>`).join('')}</span>` : '';
     }
     const p = this.pages[i];
     if (!p || style !== 'highlight') return;

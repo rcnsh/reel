@@ -69,7 +69,7 @@ captions = new Captions({ words: this.ctx.words, style: 'highlight', position: '
 - `words`: the project's timed words (`this.ctx.words`), or for a video without a voice `Words.timed([{ text, start, end }, …], pace)`, which spreads each line's words over its time by length.
 - `style`: `'highlight'` (the page's words dimmed until said, the word being said in the accent), `'line'` (the page fades in whole), `'word'` (one word at a time, large).
 - `position` (`bottom` | `top` | `middle`, inside the safe area), `size`, `lines` per page (2), `panel` and `panelOpacity` (a panel in the background colour behind the text), `hold` (seconds a page stays after its last word), `color`, `accent`, `font`, `weight`.
-- Pages are runs of whole words that fit `lines` lines of the box; each shows from its first word to the next page. `captions.pages` lists them, `captionPages(words, maxChars)` makes them.
+- Pages are runs of whole words that fit `lines` lines of the box (CJK and emoji count as two Latin characters; a run of CJK, which has no spaces, is split between pages); each shows from its first word to the next page. `captions.pages` lists them, `captionPages(words, maxChars)` makes them.
 - Captions run on video time: put them in a clip that spans the narration, usually on a track above the scenes. Classes: `.cap` (the page), `.w` (a word), `.said`, `.now`.
 
 ## ImageBox
