@@ -48,7 +48,7 @@ export default defineVideo({
 
 ## A scene
 
-Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
+Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
 
 ```ts
 import type * as THREE from 'three';
@@ -125,7 +125,7 @@ export default class Title extends Scene {
 What a scene gets:
 
 - `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `id`, `start`, `end`, `W`, `H`.
-- `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt`, `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
+- `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt`, `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), `exposure` (the span of time the frame's sub-frames cover: 0 in previews and stills), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
 - Lifecycle: `init()` once (async; load and precompute here), `prepare(f)` once per output frame before its sub-frames (optional, may be async; HTML layers update then), `render()` per frame and per motion-blur sub-frame (synchronous), `reset()` for stateful scenes, `dispose()`.
 - Flags: `stateful = true` for simulation state, `handlesTransition = true` to composite `f.under` with `f.tin` yourself, `tileMasked` (see reference/sampling.md).
 
@@ -150,7 +150,7 @@ Aim under 25 ms a frame (`reel perf --from a --to b`). Precompute in `init()`. A
 
 ## Where to look next
 
-- `reference/kit.md`: the component kit, one example per component: options, layout, motion, timing.
+- `reference/kit.md`: the component kit, one example per component: options, layout, motion, timing. Media (images in any colour profile, 16-bit PNG, SVG, video files, Lottie) is there too.
 - `reference/html.md`: HTML layers: markup, CSS, per-frame updates, CSS animations on the clip's clock, theme variables, fonts, images, what check sees.
 - `reference/toolbox.md`: FSPass, Compositor, Layer2D, render targets, the GLSL helpers (noise, SDFs, hatching, `pxLine`), LineBatch, fonts and type layout, stroke fonts, easing and keyframes, the spark, the HUD scene.
 - `reference/sampling.md`: motion blur, adaptive sampling and what it asks of scenes; 4K output scale; stateful scenes; supersampling shaders.

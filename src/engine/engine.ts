@@ -6,7 +6,7 @@ import { Words } from './words';
 import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT } from './gl';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
 import { THEME } from './palette';
-import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene';
+import { LOADING, type Frame, type Scene, type SceneClass, type SceneCtx, type PostOverrides } from './scene';
 import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
@@ -132,6 +132,8 @@ export class Engine {
   timeline: TimelineEntry[] = [];
   /** The config's sounds on the timeline (scenes add theirs with sound(); see sounds()). */
   private configSounds: SoundClip[] = [];
+  /** The span of the frame being prepared or rendered (Frame.exposure). */
+  private exposure = 0;
   /** Every sound on the timeline: the config's, then those scenes put there with sound() in init(), by start time. */
   sounds(): SoundClip[] {
     return [...this.configSounds, ...((globalThis as { __reelSounds?: SoundClip[] }).__reelSounds ?? [])].sort((a, b) => a.at - b.at);
@@ -456,6 +458,7 @@ export class Engine {
     const rec: Loaded = { entry: e, scene: null, lastT: -1 };
     this.loaded.set(e.id, rec);
     htmlLayers.owner(e.id);
+    LOADING.clip = { id: e.id, start: e.start, end: e.end };
     try {
       const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
       if (!m.m) throw m.err;
@@ -465,7 +468,7 @@ export class Engine {
       for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
     } catch (err) {
       this.fail(e.id, String((err as Error)?.stack ?? err));
-    } finally { htmlLayers.owner(''); }
+    } finally { htmlLayers.owner(''); LOADING.clip = null; }
   }
 
   /** Hot-swap a scene module (used by Vite HMR in preview). */
@@ -490,6 +493,7 @@ export class Engine {
    */
   async prepare(t: number, dt = 1 / FPS, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
     const w = samples === 1 ? 0 : dt * shutter;
+    this.exposure = w;
     const frames = new Map<string, Frame>();
     for (const e of this.timeline) {
       if (!(t + w / 2 >= e.start && t - w / 2 < e.end)) continue;
@@ -523,7 +527,7 @@ export class Engine {
   private frameFor(e: TimelineEntry, t: number, dt: number, seeked: boolean, preroll: boolean, under: THREE.Texture | null, tin: number, tout: number): Frame {
     const beat = this.audio.beatAt(t), bar = this.audio.barAt(t);
     return {
-      t, dt, lt: t - e.start, p: (t - e.start) / (e.end - e.start), start: e.start, end: e.end, seeked, preroll,
+      t, dt, lt: t - e.start, p: (t - e.start) / (e.end - e.start), start: e.start, end: e.end, exposure: this.exposure, seeked, preroll,
       beat, bar, beatPhase: beat - Math.floor(beat), barPhase: bar - Math.floor(bar),
       a: this.audio.sample(t), under, tin, tout,
     };
@@ -547,6 +551,7 @@ export class Engine {
     const r = this.renderer;
     const seeked = this.lastT < 0 || t < this.lastT - 1e-6 || t - this.lastT > Math.max(0.25, dt * 4);
     this.lastT = t;
+    this.exposure = samples === 1 ? 0 : dt * shutter;
     let outTex: THREE.Texture;
     let post: PostParams = { ...DEFAULT_POST };
     let n = 1;

@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -82,6 +82,35 @@ photo = new ImageBox({ src: 'assets/ridge.jpg', alt: 'ridge', box: { x: W * 0.5,
 `src` (a path in the project), `fit` (`cover`, the default, fills and crops; `contain` shows all of it), `radius`, `kenBurns` (`true` for a slow push in, or a move from one framing to another across the window: `zoom` 1 is fitted, `x` and `y` pan from -1 to 1 across the room the zoom leaves), `alt`. Drawn in GL from the source file, so the pan is smooth and motion blurred; it loads before the first frame, and a file that does not load is an error, unless `assets.json` declares it as a generated asset not made yet: then a labelled placeholder of its declared size stands in (and `reel check` reports it). Default motion: a fade.
 
 Formats: PNG, JPEG, WebP, AVIF, GIF (its first frame) and SVG. An image with a colour profile (Display P3 from a phone, Adobe RGB) is converted to sRGB, so its colours match the file in any viewer. A 16-bit PNG keeps its 16 bits (a dark gradient or a sky stays smooth under the theme's grade). An SVG is rasterised at the size it is shown times `--scale` and the furthest Ken Burns zoom, so it is sharp at 4K; give it a `viewBox`.
+
+## VideoClip
+
+```ts
+shot = new VideoClip({ src: 'assets/shot.mp4', box: { x: 0, y: 0, w: W, h: H }, trim: [2, 6.5], speed: 0.5, frames: 'blend' });
+override async prepare(f: Frame) { await this.shot.prepare(f, this.ctx.renderer); }   // decodes what the frame shows
+render(f: Frame, out: THREE.WebGLRenderTarget) { this.shot.draw(this.ctx.renderer, out, f); }
+override dispose() { this.shot.dispose(); }
+```
+
+- A video file in a box, decoded frame by frame with WebCodecs from the file's own samples (never a `<video>` element's clock): every frame is decoded from the keyframe before it, so the frame at a time is the same whether reached by playing, by a seek or out of order. The scene must call `await clip.prepare(f, this.ctx.renderer)` in its `prepare(f)`; `draw` throws on a frame that was not prepared.
+- `src`: an MP4 or MOV of H.264, HEVC, VP9 or AV1 (re-encode anything else, WebM included: `ffmpeg -i in.webm -c:v libx264 -crf 18 -g 30 -pix_fmt yuv420p -c:a aac out.mp4`). A keyframe every second or so (`-g` at the frame rate) keeps seeks quick. A phone video's rotation flag is not applied (an ffmpeg re-encode applies it).
+- `trim: [from, to]` (source seconds; default all of it), `speed` (source seconds per clip second: 0.5 is slow motion), `loop` (play the trim again from its start; else hold its last frame), `fit`, `radius`, `kenBurns` (as ImageBox), `at` (its window in the clip; it starts at the window's start).
+- `frames`: `'nearest'` (default) shows the frame on display at each output frame, as a player does: every sub-frame of an export shows that one frame (the source's own motion blur is in it), while the box's motion still blurs. `'blend'` mixes each frame into the next by how far the moment is between them: smooth slow motion from a low frame rate.
+- `alpha: 'below' | 'right'`: stacked alpha, the colour in one half of the frame and a grey matte (white opaque) in the other, for transparent overlays (no codec WebCodecs decodes carries alpha).
+- Sound: the file's own sound goes into the mix (`reel mix`, `reel video --mix`) under the clip, trimmed, at its speed (pitch kept), once per pass of a loop; `sound: false` leaves it out, `sound: { db: -6 }` sets its gain. The preview plays the project's track only.
+- Memory: decoded frames stay on the GPU as textures with mipmaps, the least recently used dropped beyond `cacheMB` (default 384: about 35 frames of 1080p). A frame is 4 bytes a pixel (8 MB at 1080p, 33 MB at 4K).
+- A file that is missing, not an MP4, or in a codec the browser cannot decode is an error of the clip that `reel check` reports. `clip.duration` is the file's length once loaded. Default motion: a fade.
+
+## LottieBox
+
+```ts
+badge = new LottieBox({ src: 'assets/badge.json', box: { x: W / 2 - 200, y: 300, w: 400, h: 400 }, at: [1, 5] });
+```
+
+- A Lottie animation (JSON from After Effects through Bodymovin, or any tool that writes Lottie) drawn by lottie-web's canvas renderer at the exact moment each sub-frame asks for, so it is a pure function of time and gets motion blur. Its canvas is the animation's size on screen times `--scale`, so it is sharp at 4K.
+- `trim: [from, to]` (animation seconds), `speed`, `loop` (else it holds its last frame), `fit` (`contain`, the default, or `cover`), `at` (its window; the animation starts at its start). Images the animation names are fetched beside its JSON; embedded (data URI) images work too.
+- The light player has no expressions: an animation that uses them plays as if they were off. Text layers need their glyphs in the file.
+- A missing or malformed file is an error of the clip. `badge.duration` is its length once loaded. Default motion: none.
 
 ## Charts and numbers
 

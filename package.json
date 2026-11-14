@@ -19,6 +19,8 @@
     "@puppeteer/browsers": "^3.2.7",
     "fontkit": "2.0.4",
     "highlight.js": "11.11.1",
+    "lottie-web": "5.13.0",
+    "mp4box": "2.3.0",
     "opentype.js": "^2.0.0",
     "pngjs": "7.0.0",
     "three": "^0.186.0",

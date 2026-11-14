@@ -96,7 +96,7 @@ export async function startServer(project: string, opts: { port?: number; strict
       // (a project outside this repo has no node_modules of its own: its scenes get the engine's three.js)
       dedupe: ['three'],
     },
-    optimizeDeps: { include: ['three', 'opentype.js'] },
+    optimizeDeps: { include: ['three', 'opentype.js', 'mp4box', 'lottie-web/build/player/esm/lottie_light_canvas.min.js'] },
     // (a render server keeps the page's console to itself: the CLI reports it per request)
     server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project] } },
     build: { target: 'esnext' },

@@ -1,9 +1,10 @@
 // Media inputs: the 16-bit PNG decoder (every row filter, grey and alpha, sRGB, gamma and Display P3 by cICP, what it
-// leaves to the browser) and an SVG's own size.
+// leaves to the browser), an SVG's own size, and a video clip's time (trim, speed, loop, held and blended frames, its
+// sound).
 import { describe, expect, test } from 'bun:test';
 import { deflateSync } from 'node:zlib';
 import { decodePng16, pngDepth } from '../src/engine/png16';
-import { svgSize } from '../src/kit';
+import { svgSize, sourceTime, frameAt, framesAt, trimFrames, videoSounds, type FrameSpan, type VideoTiming } from '../src/kit';
 
 function crc32(b: Uint8Array) {
   let c = ~0;
@@ -84,4 +85,45 @@ test('svgSize: absolute width and height, else the viewBox, else 300 x 150', () 
   expect(svgSize('<svg viewBox="0 0 400 100" width="100%">')).toEqual([400, 100]);
   expect(svgSize("<svg viewBox='0,0,400,100' height='50'>")).toEqual([200, 50]);
   expect(svgSize('<?xml version="1.0"?><svg>')).toEqual([300, 150]);
+});
+
+describe('video time', () => {
+  // a 2 s source at 10 fps: frame k shows from k / 10
+  const frames: FrameSpan[] = Array.from({ length: 20 }, (_, k) => ({ pts: k / 10, dur: 0.1 }));
+  const T = (o: Partial<VideoTiming> = {}): VideoTiming => ({ at: [0, 4], trim: [0, 2], speed: 1, loop: false, ...o });
+
+  test('trim, speed and window map clip time to source time; a clip holds its last frame or loops', () => {
+    expect(sourceTime(0.5, T())).toBe(0.5);
+    expect(sourceTime(3, T())).toBe(2);
+    expect(sourceTime(1, T({ at: [0.5, 4], trim: [1, 1.8], speed: 0.5 }))).toBeCloseTo(1.25, 12);
+    expect(sourceTime(0, T({ at: [0.5, 4], trim: [1, 1.8] }))).toBe(1);
+    expect(sourceTime(2.5, T({ loop: true }))).toBeCloseTo(0.5, 12);
+    expect(sourceTime(1.3, T({ trim: [0.5, 1], speed: 2, loop: true }))).toBeCloseTo(0.6, 12);
+  });
+
+  test('the frame on display: exact frame times land on their frame; a held clip shows the trim\'s last frame', () => {
+    expect(frameAt(frames, 0)).toBe(0);
+    expect(frameAt(frames, 0.3)).toBe(3);
+    expect(frameAt(frames, 3 * (1 / 10))).toBe(3);
+    expect(frameAt(frames, 0.2999)).toBe(2);
+    expect(frameAt(frames, -1)).toBe(0);
+    expect(framesAt(frames, 9, T(), false)).toEqual({ a: 19, b: 19, w: 0 });
+    // a trim ending exactly on frame 10's start does not show frame 10
+    expect(trimFrames(frames, T({ trim: [0.25, 1] }))).toEqual([2, 9]);
+    expect(framesAt(frames, 5, T({ trim: [0.25, 1] }), false).a).toBe(9);
+  });
+
+  test('blending mixes each frame into the next by how far the moment is between them; a loop blends into its start', () => {
+    const f = framesAt(frames, 0.325, T(), true);
+    expect([f.a, f.b]).toEqual([3, 4]);
+    expect(f.w).toBeCloseTo(0.25, 9);
+    expect(framesAt(frames, 1.95, T({ loop: true }), true)).toMatchObject({ a: 19, b: 0 });
+    expect(framesAt(frames, 2.95, T(), true)).toEqual({ a: 19, b: 19, w: 0 });
+  });
+
+  test('the clip\'s sound: one piece per pass through a looped trim, at its speed, in video time', () => {
+    const s = videoSounds('assets/a.mp4', 10, T({ at: [1, 4], trim: [0.5, 1.5], speed: 0.5, loop: true }), -3);
+    expect(s.map((x) => [x.at, x.duration, x.from, x.speed, x.db])).toEqual([[11, 2, 0.5, 0.5, -3], [13, 1, 0.5, 0.5, -3]]);
+    expect(videoSounds('a.mp4', 0, T({ at: [0, 9] }))).toHaveLength(1);
+  });
 });

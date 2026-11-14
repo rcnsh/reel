@@ -36,6 +36,12 @@ export interface SceneCtx {
   maskDepth(rt: THREE.WebGLRenderTarget): void;
 }
 
+/**
+ * The clip whose scene is being constructed and initialised (null at any other time): what a component made as a
+ * scene's field reads to place things in video time, such as a video's own sound.
+ */
+export const LOADING: { clip: { id: string; start: number; end: number } | null } = { clip: null };
+
 export interface Frame {
   /** Time in the video (s). */
   t: number;
@@ -46,6 +52,11 @@ export interface Frame {
   p: number;
   start: number;
   end: number;
+  /**
+   * The span of video time this frame's sub-frames cover, centred on t (s): 0 in a one-sample render (previews,
+   * stills, check), dt x shutter in an export with --samples. What prepare() must have ready for render().
+   */
+  exposure: number;
   /** True when time jumped (scrub/seek) — stateful scenes should reset. */
   seeked: boolean;
   /** True while the engine fast-forwards a stateful scene after a seek (skip non-essential work). */
