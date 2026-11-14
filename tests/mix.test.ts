@@ -96,6 +96,14 @@ test('sounds on the timeline: trimmed to the render, faded at their own ends, at
   expect(g.counts).toEqual(['3 sounds on the timeline']);
 });
 
+test('a sound slower or faster than atempo takes in one step is a chain of atempo filters', () => {
+  const sounds = [{ file: 'slow.mp4', at: 0, speed: 0.25, duration: 4 }, { file: 'fast.mp4', at: 0, speed: 6, duration: 1 }];
+  const g = buildMix({}, { ...ev, cues: [], sounds }, 6, 0, null, snd, () => 60);
+  const [slow, fast] = g.filter.split(';');
+  expect(slow).toContain('atempo=0.5,atempo=0.5,atrim');
+  expect(fast).toContain('atempo=2,atempo=2,atempo=1.5,atrim');
+});
+
 test('a sound names a file of the project, of its audio folder, or a bundled sound', () => {
   const root = mkdtempSync(path.join(tmpdir(), 'reel-snd-'));
   expect([...bundledSounds()].sort()).toEqual([...BUNDLED_SOUNDS].sort());

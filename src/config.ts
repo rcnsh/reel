@@ -75,7 +75,7 @@ export interface SoundClip {
   duration?: number;
   /** Repeat the file to fill `duration`. */
   loop?: boolean;
-  /** Playback rate, its pitch kept (default 1; 0.5 to 4). */
+  /** Playback rate, its pitch kept (default 1; 0.1 to 10). */
   speed?: number;
   /** Gain in dB (default 0), and fades in and out in seconds (default 0.02: no click). */
   db?: number;

@@ -439,7 +439,7 @@ export class Engine {
   /** Sounds on the timeline must name a file of the project or a bundled sound: one that is missing is a load error. */
   private async checkSounds() {
     for (const s of this.sounds()) {
-      const bad = !(typeof s.file === 'string' && s.file) ? 'has no file' : !Number.isFinite(s.at) || s.at < 0 ? `starts at ${s.at}` : s.speed !== undefined && !(s.speed >= 0.5 && s.speed <= 4) ? `has speed ${s.speed} (0.5 to 4)` : '';
+      const bad = !(typeof s.file === 'string' && s.file) ? 'has no file' : !Number.isFinite(s.at) || s.at < 0 ? `starts at ${s.at}` : s.speed !== undefined && !(s.speed >= 0.1 && s.speed <= 10) ? `has speed ${s.speed} (0.1 to 10)` : '';
       if (bad) { this.loadErrors.push(`[sounds] the sound ${JSON.stringify(s.file)} ${bad}`); continue; }
       if (BUNDLED_SOUNDS.includes(s.file.replace(/\.wav$/, ''))) continue;
       const r = await fetch(s.file, { method: 'HEAD', cache: 'no-store' }).catch(() => null);
