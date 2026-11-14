@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Lyrics } from './lyrics';
-import { Compositor, FSPass, W, H, PW, PH, SCALE, SS_TAP, makeRT, clearRT } from './gl';
+import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, makeRT, clearRT } from './gl';
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
 import { Hud, type Caption } from './hud';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene';
@@ -376,7 +376,7 @@ export class Engine {
    * continuous instead of stepped copies.
    * Returns the number of sub-frames used.
    */
-  render(t: number, dt = 1 / 60, toScreen = true, samples: number | AdaptiveSampling = 1, shutter = 0.5): number {
+  render(t: number, dt = 1 / FPS, toScreen = true, samples: number | AdaptiveSampling = 1, shutter = 0.5): number {
     const r = this.renderer;
     const seeked = this.lastT < 0 || t < this.lastT - 1e-6 || t - this.lastT > Math.max(0.25, dt * 4);
     this.lastT = t;
@@ -572,7 +572,7 @@ export class Engine {
       if (s.stateful && sceneSeeked) {
         s.reset();
         const from = Math.max(e.start, t - s.prerollMax);
-        const step = 1 / 60;
+        const step = 1 / FPS;
         let first = true;
         for (let pt = from; pt < t - step * 0.5; pt += step) {
           s.render(this.frameFor(e, pt, first ? 0 : step, first, true, null, 1, 0), rt);
@@ -612,7 +612,7 @@ export class Engine {
 
   /**
    * Same pixels as readPixels(), read through a pixel-pack buffer and a fence instead of a blocking
-   * readPixels: several times faster in Chrome (~15 ms instead of ~40 ms at 1080p, ~150 ms at 4K).
+   * readPixels: several times faster in Chrome (~15 ms instead of ~40 ms at 1920x1080, ~150 ms at 3840x2160).
    */
   async readPixelsAsync(buf?: Uint8Array) {
     const out = buf ?? new Uint8Array(PW * PH * 4);

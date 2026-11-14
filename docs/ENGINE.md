@@ -2,7 +2,7 @@
 
 Adapted from the upstream engine guide (mexicat/pdoom-video). Paths are relative to the project root.
 
-The video is a web app (TypeScript + three.js, run with bun + Vite) that renders any time `t` deterministically at 1920×1080 (or at 2× that, 3840×2160, with `?scale=2`; see "Output scale" below). The same code drives the live preview and the offline 60 fps export.
+The video is a web app (TypeScript + three.js, run with bun + Vite) that renders any time `t` deterministically at the frame size and rate the render asks for (`--size 1080x1920 --fps 30`; default 1920×1080 at 60 fps), optionally at 2× the pixels (`--scale 2`; see "Output scale" below). The same code drives the live preview and the offline export. Lay scenes out from `W` and `H` (`gl.ts`) and step frames by `1 / FPS`, so a scene holds at any format.
 
 ## Running things
 
@@ -13,7 +13,7 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 - `--only a,b` loads only those timeline entries (fast, and isolates you from other people's broken scenes). Without a matching entry nothing renders (black), so the entry must exist in the timeline (a narration plate with a scene of the same name, see `src/timeline.ts`).
 - Typecheck just your files: `bunx tsc --noEmit -p tsconfig.json 2>&1 | grep scenes/yourscene`.
 - The render script prints `SCENE ERRORS` and browser console errors — read them.
-- 4K: add `--scale 2` to any mode (`stills` then saves full-resolution 3840×2160 PNGs). Check your scene at both scales: downscaled, the 4K frame should look like the 1080p one, only sharper.
+- Format: `--size WxH` and `--fps N` on any mode (the preview takes `?w=1080&h=1920&fps=30`). 4K: add `--scale 2` to any mode. Stills are the pixels the video export reads, at full resolution. Check your scene at both scales: downscaled, the 4K frame should look like the 1080p one, only sharper.
 - Renders while files are being edited: run a server without live reload (`REEL_NO_HMR=1 bunx vite --port 5190`) and pass `--url http://localhost:5190`; a live-reloading server reloads the page mid-render. The private server that `render.ts` starts when none is reachable already runs without it.
 
 ## Data
@@ -59,7 +59,7 @@ Rules:
 
 ## Toolbox
 
-- `gl.ts`: `FSPass(frag, uniforms)` fullscreen GLSL3 pass (has `vUv`, writes `fragColor`, gets `GLSL_COMMON`), `Compositor` via `this.ctx.comp.draw(renderer, tex, target, {mode:'normal'|'add'|'screen'|'multiply'|'max', opacity, tint, scale, offset})`, `Layer2D` (1920×1080 logical Canvas2D → sRGB texture), `makeRT()` (screen-sized HDR target; `makeRT(w, h)` takes logical px), `clearRT(renderer, rt, [r,g,b])`, `SCALE`/`PW`/`PH` (output scale and physical size).
+- `gl.ts`: `FSPass(frag, uniforms)` fullscreen GLSL3 pass (has `vUv`, writes `fragColor`, gets `GLSL_COMMON`), `Compositor` via `this.ctx.comp.draw(renderer, tex, target, {mode:'normal'|'add'|'screen'|'multiply'|'max', opacity, tint, scale, offset})`, `Layer2D` (frame-sized logical Canvas2D → sRGB texture), `makeRT()` (screen-sized HDR target; `makeRT(w, h)` takes logical px), `clearRT(renderer, rt, [r,g,b])`, `W`/`H`/`FPS` (the format), `SCALE`/`PW`/`PH` (output scale and physical size).
 - `glsl/common.ts` (`GLSL_COMMON`, prepended to FSPass; import it into your own ShaderMaterials): palette consts, `hash*`, `snoise(vec2|vec3)`, `fbm`, `curl2`, 2D/3D SDFs, `smin`, `aaFill`, `aaStroke`, **`hatch(u, darkness)` and `engrave(uv, darkness, freq, angle)`** for engraving-style shading (`hatchD(u, darkness, du)` takes the derivative of `u` from the caller, for a coordinate whose `fwidth` lies, such as an angle that wraps), `heat(x)` orange ramp, `toSRGB/toLinear`.
 - `lines.ts`: `LineBatch(capacity, {screen2D, worldWidth, blend})` — GPU capsule segments, 2D pixels (y down) or 3D with a camera. `seg2`, `seg`, `polyline`, `render(renderer, out, camera?)`. Colours linear, can exceed 1 for glow. Good for 10k–200k segments.
 - `type.ts`: fonts. `F.archivo(width 62–125, weight 300–900)` (grotesk with width steps 62/75/87.5/100/112.5/125), `F.archivoItalic()`, `F.serif(weight, italic)` (Cormorant Garamond), `F.mono(weight, italic)` (IBM Plex Mono). `font(family, px)` → CSS font string. `layout(text, family, size, tracking)` → per-glyph x/advance with the font's kerning (draw glyph i at `glyphs[i].x`). `glyphX(text, i, family, size)` → where to start drawing `text[i..]` when a word is drawn in pieces (sung/unsung colours, wipes); never offset a piece by `measure(text.slice(0, i))`, which drops the kern between the pieces. `fitSize`, `measure`, `textPath2D` (opentype outline as Path2D), `textPathCommands`, `textPoints(text, family, size, step)` (points filling the glyphs — "text made of atoms"). `smart(s)` / `plain(s)`: typewriter quotes → typographic (’ “ ” …) and back.
@@ -75,7 +75,7 @@ Rules:
 
 ## Output scale (4K)
 
-`?scale=2` (render.ts `--scale 2`) renders a true 3840×2160 frame. Scenes keep laying out in logical 1920×1080 px (`W`, `H`, `ctx.W`, `ctx.H` never change); the engine handles the rest:
+`?scale=2` (render.ts `--scale 2`) renders every logical px as 2×2 physical px: a true 3840×2160 frame from the default size. Scenes keep laying out in logical px (`W`, `H`, `ctx.W`, `ctx.H` do not change with the scale); the engine handles the rest:
 
 - Render targets: `out`, the engine's targets and `makeRT()` are physical (`PW`×`PH`). `makeRT(w, h)` takes logical px and allocates `w*SCALE`×`h*SCALE`; pass `{ pxScale: 1 }` for a data-sized target whose resolution must not follow the output.
 - `Layer2D`: the backing canvas is `SCALE`× larger and its context is pre-scaled, so drawing code works in logical px. `setTransform`/`resetTransform`/`getTransform`, `shadowBlur`, `shadowOffsetX/Y` and `filter` px lengths are patched to stay logical. Not patched: `canvas.width/height` and `getImageData`/`putImageData` are physical px, and `drawImage(layer.canvas, x, y)` needs an explicit size. `new Layer2D(w, h, 1)` makes a deliberately low-res layer (e.g. a soft glow). `scaleContext2D(ctx, SCALE)` applies the same patch to your own canvas.
@@ -97,7 +97,7 @@ The export renders every frame as the average of many sub-frames spread over the
 What this asks of scenes:
 
 - Sub-frames are rendered out of time order and in any number: a scene's output must depend on `f.t` only. `stateful` scenes can't be sampled adaptively (the engine refuses); nothing may count `render()` calls.
-- Per-frame flicker and jitter keyed to 60 fps must use `frameIdx(t)` (`util.ts`), not `Math.floor(t * 60)`. `frameIdx` is constant over the frame's shutter; `floor` switches at the frame's own time and double-exposes two states in every frame.
+- Per-frame flicker and jitter must use `frameIdx(t)` (`util.ts`), not `Math.floor(t * FPS)`. `frameIdx` is constant over the frame's shutter; `floor` switches at the frame's own time and double-exposes two states in every frame.
 - Noise that changes with continuous `t` (a hash seeded by time) is resampled in every sub-frame: it averages out, but slowly, and makes the adaptive sampler work harder. Seed it with `frameIdx(t)` unless it is meant to smooth out.
 - A particle emitter whose rate varies over time takes the rate as a function of each particle's birth time. A rate read at the current `t` re-times every particle from one sub-frame to the next.
 - Shaders that supersample internally (4 rotated-grid taps) take `ssTap: SS_TAP` and `${SS_TAP_GLSL}` and loop `for (int k = ssK0(); k < ssK1(); k++) ... rgss(k)`, weighting by `ssWeight()`. The engine then hands each sub-frame one tap, cycling them (every set is a multiple of 4), which averages to the same image for a quarter of the cost. In the preview and single-sample stills they take all four.

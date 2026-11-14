@@ -11,7 +11,7 @@ export default class Hello extends Scene {
   bg = new FSPass(/* glsl */ `
     uniform float t;
     void main() {
-      vec2 p = FRAG_PX / 1080.0;
+      vec2 p = FRAG_PX / 1080.0; // (a fixed unit, so the texture keeps its size at any frame size)
       float shade = 0.18 + 0.12 * snoise(vec3(p * 2.0, t * 0.1));
       vec3 col = mix(C_PAPER, C_INK, hatch(p.x * 90.0 + p.y * 40.0, shade) * 0.35);
       fragColor = vec4(col, 1.0);

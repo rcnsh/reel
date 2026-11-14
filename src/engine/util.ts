@@ -1,5 +1,6 @@
 // Small math / animation helpers shared by every scene. Everything must be a
 // pure function of time (or seeded), so frames render identically on export.
+import { FPS } from './format';
 
 export const clamp = (x: number, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -73,11 +74,11 @@ export function mulberry32(seed: number) {
   };
 }
 /**
- * Index of the 60 fps output frame nearest t, for per-frame jitter/flicker. Constant over a frame's
- * whole motion-blur shutter, so each frame shows one state (Math.floor(t * 60) switches at the frame's
- * own time, blending two states in every frame).
+ * Index of the output frame nearest t, for per-frame jitter/flicker. Constant over a frame's whole
+ * motion-blur shutter, so each frame shows one state (Math.floor(t * FPS) switches at the frame's own time,
+ * blending two states in every frame).
  */
-export const frameIdx = (t: number) => Math.round(t * 60);
+export const frameIdx = (t: number) => Math.round(t * FPS);
 
 /** Stateless hash of integers/floats to [0,1). */
 export function hash(...xs: number[]) {

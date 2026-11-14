@@ -2,13 +2,10 @@
 // a texture compositor and Canvas2D layers uploaded as textures.
 import * as THREE from 'three';
 import { GLSL_COMMON } from './glsl/common';
-import { SCALE } from './scale';
+import { W, H, FPS, SCALE } from './format';
 
-export { SCALE };
-/** Logical canvas: scenes lay out in these px at every output scale. */
-export const W = 1920;
-export const H = 1080;
-/** Physical (output) size: the logical canvas times SCALE (`?scale=2` → 3840x2160). */
+export { W, H, FPS, SCALE };
+/** Physical (output) size: the logical frame times SCALE (1920x1080 at `?scale=2` → 3840x2160). */
 export const PW = W * SCALE;
 export const PH = H * SCALE;
 
@@ -179,7 +176,7 @@ export function scaleContext2D(c: CanvasRenderingContext2D, s: number) {
 }
 
 /**
- * A 1920x1080 (logical) Canvas2D surface uploaded as an sRGB texture (decoded to linear when sampled).
+ * A frame-sized (logical px) Canvas2D surface uploaded as an sRGB texture (decoded to linear when sampled).
  * Draw in CSS pixels with origin top-left. Call `upload()` after drawing each frame.
  * The backing canvas is SCALE times larger (`canvas.width` = w*SCALE); the context is pre-scaled
  * (see scaleContext2D), so drawing code works in logical px at every output scale.

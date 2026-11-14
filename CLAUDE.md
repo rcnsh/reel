@@ -1,6 +1,6 @@
 # reel
 
-A deterministic WebGL video engine. Every frame is a pure function of the time `t`, so the browser preview and the offline export (headless Chrome streaming frames over a WebSocket into ffmpeg) produce the same image, at 1080p or true 4K, with adaptive motion blur. A video is narration (or a song) plus one scene per plate. Stack: TypeScript, three.js, opentype.js, bun, Vite, playwright-core, ffmpeg; Python tools run through uv.
+A deterministic WebGL video engine. Every frame is a pure function of the time `t`, so the browser preview and the offline export (headless Chrome streaming frames over a WebSocket into ffmpeg) produce the same image, at any frame size and frame rate (16:9, vertical, square; `--scale 2` for true 4K), with adaptive motion blur. A video is narration (or a song) plus one scene per plate. Stack: TypeScript, three.js, opentype.js, bun, Vite, playwright-core, ffmpeg; Python tools run through uv.
 
 It is a personal tool, extracted from the singapore-dementia-2050 group video (whose repo keeps its own copy in `06_video/engine/`) and adapted from [mexicat/pdoom-video](https://github.com/mexicat/pdoom-video). Build to that bar: working, tested, documented, no ceremony.
 
@@ -31,9 +31,9 @@ render.ts events ─▶ data/cues.json ─▶ tools/mix.ts + mix.json ─▶ mus
 
 ## Rules
 
-- **Deterministic.** A scene's output depends on `f.t` only. Randomness comes from `hash`/`mulberry32` with fixed seeds; per-frame jitter uses `frameIdx(t)`, which holds across a frame's shutter. `--samples auto` renders sub-frames out of order and in any number, so nothing may count `render()` calls. Simulation state means `stateful = true`, and the engine then refuses adaptive sampling (render such a video with a fixed `--samples N`).
+- **Deterministic.** A scene's output depends on `f.t` only. Randomness comes from `hash`/`mulberry32` with fixed seeds; per-frame jitter uses `frameIdx(t)`, which holds across a frame's shutter, and a frame step is `1 / FPS`, never `1 / 60`. `--samples auto` renders sub-frames out of order and in any number, so nothing may count `render()` calls. Simulation state means `stateful = true`, and the engine then refuses adaptive sampling (render such a video with a fixed `--samples N`).
 - **Anchored to words.** Scenes find timing by text: `ctx.lyrics.get('some words')` (throws when the line is missing, so a script edit fails loudly) and its word times. Times typed as numbers break the moment the voice is re-timed.
-- **Logical pixels.** Scenes lay out in 1920×1080 logical px at every output scale; `PW`/`PH`, `gl_FragCoord`, `fwidth` and canvas backing sizes are physical. GLSL uses `FRAG_PX`, `PX_SCALE` and `pxLine` (`docs/ENGINE.md`, "Output scale").
+- **Logical pixels.** Scenes lay out in logical px, `W`×`H` (the `--size`, default 1920×1080), at every output scale; `PW`/`PH`, `gl_FragCoord`, `fwidth` and canvas backing sizes are physical. GLSL uses `FRAG_PX`, `PX_SCALE` and `pxLine` (`docs/ENGINE.md`, "Output scale").
 - **Linear colour.** Render targets are HalfFloat linear HDR. Colours come from `src/engine/palette.ts`: `LIN.<key>` for GL, `C_<KEY>` in GLSL, `rgba('<key>', a)` for Canvas2D.
 - **Project-neutral engine.** `src/engine/` holds only what any video could use. A video's own colours, story helpers, data and motifs live in `src/scenes/` (shared helpers as `scenes/_<name>.ts`, which the timeline's glob skips because no section is named `_…`).
 - **Sound by cue.** A scene that wants a sound calls `cue(kind, t)` in `init()`; `mix.json` maps kinds to files in `audio/`. Scenes never play audio.
@@ -73,6 +73,7 @@ No test suite exists; these renders are the tests.
 - **Scene errors** do not stop a render: they print as `SCENE ERRORS` and `BROWSER LOG` lines. Read them.
 - **Partial renders and the mix.** `tools/mix.ts --from <s>` must match the render's `--from`, or cues and music land in the wrong place.
 - **analyze.py** copies the song into `audio/` under a URL-safe name (the preview fetches it by URL). Its drum and vocal measurements come from a harmonic/percussive split and band filters of the mix, not separated stems: kick, snare and hat are reliable on produced music, `bass`, `vocal` and vocal onsets are rough. `--onset-delta` tunes the peak-picking per drum band.
+- **Frame size.** `--size WxH` wants a width that is a multiple of 4 and an even height (the packed readback and yuv420). A scene written for one aspect does not reflow by itself: lay out from `W` and `H`, not from 1920 and 1080.
 - **Disk.** `out/` fills fast (a 4K render is gigabytes), and the video mode spools up to `--spool-gb` (default 20) of frames to the system temp folder while x264 catches up.
 - Bun 1.4, TypeScript 7 (`tsc` comes from the `typescript` peer dependency), three.js 0.186. Python tools pin their dependencies inline (PEP 723); `uv run` fetches them on first use.
 

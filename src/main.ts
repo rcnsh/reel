@@ -1,6 +1,6 @@
 // Entry: preview player (default) or export mode (?export=1, driven by scripts/render.ts).
 import { Engine, type AdaptiveSampling } from './engine/engine';
-import { PW, PH, SCALE } from './engine/gl';
+import { W, H, PW, PH, SCALE, FPS } from './engine/gl';
 import { makeTimeline } from './timeline';
 
 const params = new URLSearchParams(location.search);
@@ -9,9 +9,11 @@ const ONLY = params.get('only'); // comma-separated scene ids to load (faster st
 const FROM = params.get('t') ? parseFloat(params.get('t')!) : null;
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
-// physical size: 1920x1080 times ?scale= (the page CSS keeps showing it at 1920x1080)
+// physical size: the logical frame times ?scale= (the page CSS shows it at the logical size)
 canvas.width = PW;
 canvas.height = PH;
+canvas.style.aspectRatio = W + ' / ' + H;
+if (EXPORT) { canvas.style.width = W + 'px'; canvas.style.height = H + 'px'; }
 
 const engine = new Engine(canvas, makeTimeline);
 
@@ -93,15 +95,16 @@ function setupExport() {
     engine,
     duration: engine.duration,
     errors: engine.errors,
-    /** Output size in px (1920x1080 times scale); stream() sends frames of width*height*3 bytes (rgb24). */
+    /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24). */
     scale: SCALE,
     width: PW,
     height: PH,
+    fps: FPS,
     timeline: TIMELINE.map(({ id, start, end }) => ({ id, start, end })),
     /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
     /** Render a single frame at t (seeks as needed). */
-    still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.render(t, 1 / 60, true, samples, shutter); },
+    still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.render(t, 1 / FPS, true, samples, shutter); },
     /** The last rendered frame as a full-resolution (PW x PH) PNG, base64 (for stills at scale > 1). */
     async png() {
       const px = await engine.readPixelsAsync(), row = PW * 4;
@@ -115,7 +118,7 @@ function setupExport() {
       return btoa(s);
     },
     /**
-     * Render [from, to) at fps and stream raw rgb24 frames (bottom-up) over a WebSocket, in order.
+     * Render [from, to) at the frame rate and stream raw rgb24 frames (bottom-up) over a WebSocket, in order.
      * Returns when all frames were handed to the socket, with a histogram of sub-frames per frame. The
      * receiver acknowledges each frame it has taken (a text message with its running count) and at most
      * `inflight` frames are unacknowledged: backpressure from the encoder, so a slow encode (4K) cannot
@@ -123,10 +126,10 @@ function setupExport() {
      * socket is written from a worker thread. Calls with the same `ws` reuse its connection, so a
      * renderer can be handed several ranges; a range that goes on where the last one ended skips the warm-up.
      */
-    async stream(opts: { from: number; to: number; fps: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number }) {
+    async stream(opts: { from: number; to: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number }) {
       const snd = await sender(opts.ws, opts.inflight ?? 4);
-      const dt = 1 / opts.fps;
-      const n0 = Math.round(opts.from * opts.fps), n1 = Math.round(opts.to * opts.fps);
+      const dt = 1 / FPS;
+      const n0 = Math.round(opts.from * FPS), n1 = Math.round(opts.to * FPS);
       const S = opts.samples ?? 1, SH = opts.shutter ?? 0.5;
       // warm-up: render one frame before the range so the first frame is sequential for stateful scenes
       // (adaptive sampling only runs stateless scenes: one sample is enough for the warm-up)
@@ -187,8 +190,8 @@ function setupPlayer() {
     if (ev.key === ' ') { ev.preventDefault(); toggle(); }
     if (ev.key === 'ArrowRight') seek(t + (ev.shiftKey ? 5 : 1));
     if (ev.key === 'ArrowLeft') seek(t - (ev.shiftKey ? 5 : 1));
-    if (ev.key === '.') seek(t + 1 / 60);
-    if (ev.key === ',') seek(t - 1 / 60);
+    if (ev.key === '.') seek(t + 1 / FPS);
+    if (ev.key === ',') seek(t - 1 / FPS);
     if (ev.key === 'l') {
       const e = TIMELINE.find((x) => t >= x.start && t < x.end);
       loop = loop ? null : e ? [e.start, e.end] : null;
@@ -208,7 +211,7 @@ function setupPlayer() {
       if (loop && t >= loop[1]) seek(loop[0]);
       if (audio.ended) playing = false;
     }
-    engine.render(t, 1 / 60);
+    engine.render(t, 1 / FPS);
     scrub.value = String(t);
     frames++;
     const now = performance.now();

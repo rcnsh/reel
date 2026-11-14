@@ -1,6 +1,6 @@
 # reel
 
-A deterministic WebGL video engine. Every frame is computed from the time `t` alone, by scenes written in TypeScript and three.js, so the same code drives a live preview in the browser and an offline 60 fps export (headless Chrome piped into ffmpeg) at 1080p or 4K, with adaptive motion blur. The edit follows a narration: a voice recording is word-timed with Whisper, and each narration plate gets its own scene.
+A deterministic WebGL video engine. Every frame is computed from the time `t` alone, by scenes written in TypeScript and three.js, so the same code drives a live preview in the browser and an offline export (headless Chrome piped into ffmpeg) at any frame size and frame rate, up to 4K, with adaptive motion blur. The edit follows a narration: a voice recording is word-timed with Whisper, and each narration plate gets its own scene.
 
 ## Licence
 
@@ -30,7 +30,7 @@ Lyrics for a sung track still go through `tools/align.ts` (Whisper word times), 
 
 - `src/engine/`: the engine: renderer, adaptive sampling and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing with `print` and `film` looks (`post.ts`), HUD, type and single-stroke fonts, GPU lines, the spark (`spark.ts`), palette, shared GLSL.
 - `src/scenes/`: one scene per plate. `src/timeline.ts`: plates to scenes. `src/main.ts`: the preview player and the export API (`window.__reel`).
-- `scripts/render.ts`: stills, contact sheets, plate thumbnails, sound cues, perf and the video.
+- `scripts/render.ts`: stills, contact sheets, sound cues, perf and the video.
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `audio/`, `data/`: the narration and its timing (written by the tools), music and sound files, `data/cues.json` (written by `render.ts events`).
 - `docs/ENGINE.md`: the scene author's guide: the Scene API, rules for determinism and sampling, the toolbox, 4K.
@@ -53,4 +53,4 @@ bun scripts/render.ts events                   # data/cues.json for the mix
 bun tools/mix.ts out/raw.mp4 out/final.mp4
 ```
 
-`--only a,b` loads only those plates, `--scale 2` renders 4K, `--from/--to` render part of the video. `scripts/render.ts` lists every mode and flag at the top.
+`--only a,b` loads only those plates, `--size 1080x1920` and `--fps 30` set the format (default 1920x1080 at 60), `--scale 2` renders 4K, `--from/--to` render part of the video. `scripts/render.ts` lists every mode and flag at the top.

@@ -2,19 +2,20 @@
 // Offline renderer. Drives the app in headless Chrome (?export=1) and either
 //   stills:  bun scripts/render.ts stills --t 1.5,23,40.2 [--only id1,id2] [--out dir]
 //   sheet:   bun scripts/render.ts sheet --from 20 --to 35 [--n 12] [--cols 4] [--only ids] [--out file.png]   (or --times a,b,c | --cuts)
-//   plates:  bun scripts/render.ts plates   (one JPEG per timeline entry into public/plates/, HUD off: at the entry's midpoint or the time plates.json gives its id)
 //   events:  bun scripts/render.ts events [--out data/cues.json]   (sound-mix cues: the timeline and every cue() scenes recorded)
 //   perf:    bun scripts/render.ts perf --from 20 --to 25 [--only ids] [--samples 1] [--shutter 0.5]   (avg ms per frame incl. GPU sync and the export's pixel readback)
-//   video:   bun scripts/render.ts video [--from 0] [--to <duration>] [--fps 60] [--crf 16] [--x264 aq-mode=3] [--samples 1] [--shutter 0.5] [--out out/video.mp4] [--noaudio]
+//   video:   bun scripts/render.ts video [--from 0] [--to <duration>] [--crf 16] [--x264 aq-mode=3] [--samples 1] [--shutter 0.5] [--out out/video.mp4] [--noaudio]
 //            [--workers 2] [--chunk 8] [--mem-gb 1] [--spool-gb 20]
 //            --samples N averages N sub-frames per frame over shutter×(1/fps): motion blur + temporal AA;
 //            --samples auto picks the count per 32x32 tile (12, 36, 108 or 324, see Engine.render; --refine frame: per frame)
 //            --workers N headless Chromes render chunks of --chunk frames into one ffmpeg, in order (see video())
-//   --scale N (all modes): render at N× the 1920x1080 layout (--scale 2 = true 3840x2160); stills are then saved
-//            full-res from the pixel buffer, videos are encoded at the physical size.
+//   --size WxH (all modes): the logical frame scenes lay out in (default 1920x1080; 1080x1920 for vertical).
+//   --fps N (all modes): the output frame rate (default 60).
+//   --scale N (all modes): render at N× the frame size (1920x1080 at --scale 2 = true 3840x2160). Stills and
+//            videos are written at that physical size.
 // Uses the Vite dev server at --url (default http://localhost:5173); starts a private one if unreachable.
 import { chromium, type Page } from 'playwright-core';
-import { mkdirSync, existsSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -24,7 +25,12 @@ const opt = (k: string, d?: string) => { const i = argv.indexOf(`--${k}`); retur
 const flag = (k: string) => argv.includes(`--${k}`);
 const APP = path.resolve(import.meta.dir, '..');
 const SCALE = Math.max(1, Math.round(+opt('scale', '1')!));
-const OW = 1920 * SCALE, OH = 1080 * SCALE; // output size
+const [LW, LH] = opt('size', '1920x1080')!.split('x').map(Number) as [number, number]; // logical frame
+if (!(LW > 0 && LH > 0)) throw new Error(`--size ${opt('size')}: expected WxH, e.g. 1080x1920`);
+if (LW % 4 || LH % 2) throw new Error(`--size ${LW}x${LH}: the width must be a multiple of 4 and the height even`);
+if (!(+opt('fps', '60')! > 0)) throw new Error(`--fps ${opt('fps')}: expected a frame rate`);
+const FPS = +opt('fps', '60')!;
+const OW = LW * SCALE, OH = LH * SCALE; // output size
 // --samples N (fixed) or --samples auto [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
 // (adaptive, see Engine.render)
 const SAMPLES = opt('samples', '1') === 'auto'
@@ -55,17 +61,17 @@ async function openPage(url: string) {
     headless: !flag('headed'),
     args: ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
   });
-  const page = await browser.newPage({ viewport: { width: 1920, height: 1080 }, deviceScaleFactor: 1 });
+  const page = await browser.newPage({ viewport: { width: LW, height: LH }, deviceScaleFactor: 1 });
   const logs: string[] = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') logs.push(`[${m.type()}] ${m.text()}`); });
   page.on('pageerror', (e) => logs.push(`[pageerror] ${e.message}`));
   const only = opt('only');
-  await page.goto(`${url}/?export=1${only ? `&only=${only}` : ''}${SCALE !== 1 ? `&scale=${SCALE}` : ''}`);
+  await page.goto(`${url}/?export=1&w=${LW}&h=${LH}&fps=${FPS}&scale=${SCALE}${only ? `&only=${only}` : ''}`);
   await page.waitForFunction(() => (window as any).__reel?.ready || (window as any).__reel?.error, null, { timeout: 120000 });
   const err = await page.evaluate(() => (window as any).__reel.error);
   if (err) throw new Error(`app failed to boot:\n${err}\n${logs.join('\n')}`);
-  const size: [number, number] = await page.evaluate(() => [(window as any).__reel.width ?? 1920, (window as any).__reel.height ?? 1080]);
-  if (size[0] !== OW || size[1] !== OH) throw new Error(`app renders ${size[0]}x${size[1]}, expected ${OW}x${OH} (--scale ${SCALE})`);
+  const size: [number, number] = await page.evaluate(() => [(window as any).__reel.width, (window as any).__reel.height]);
+  if (size[0] !== OW || size[1] !== OH) throw new Error(`app renders ${size[0]}x${size[1]}, expected ${OW}x${OH}`);
   const sceneErrors: string[] = await page.evaluate(() => (window as any).__reel.errors);
   if (sceneErrors.length) console.error('SCENE ERRORS:\n' + sceneErrors.join('\n'));
   return { browser, page, logs };
@@ -76,11 +82,10 @@ async function stills(page: Page, times: number[], outDir: string) {
   const files: string[] = [];
   for (const t of times) {
     const k: number = await page.evaluate(([t, s, sh]) => (window as any).__reel.still(t, s, sh), [t, SAMPLES, +opt('shutter', '0.5')!] as const);
-    const f = path.join(outDir, `f_${t.toFixed(2).padStart(7, '0')}.png`);
+    const f = path.join(outDir, `f_${t.toFixed(3).padStart(8, '0')}.png`);
     if (typeof SAMPLES !== 'number') console.log(`t=${t}: ${k} sub-frames`);
-    // at scale > 1 the canvas is shown downscaled on the page: save the full-res pixel buffer instead
-    if (SCALE !== 1) await Bun.write(f, Buffer.from(await page.evaluate(() => (window as any).__reel.png()), 'base64'));
-    else await page.screenshot({ path: f, clip: { x: 0, y: 0, width: 1920, height: 1080 } });
+    // (the pixel buffer the video export reads, not a screenshot of the page)
+    await Bun.write(f, Buffer.from(await page.evaluate(() => (window as any).__reel.png()), 'base64'));
     files.push(f);
   }
   return files;
@@ -89,7 +94,7 @@ async function stills(page: Page, times: number[], outDir: string) {
 async function sheet(page: Page, times: number[], cols: number, out: string) {
   const dataUrl: string = await page.evaluate(async ({ times, cols }) => {
     const P = (window as any).__reel;
-    const cw = 480, ch = 270, pad = 4, lab = 18;
+    const cw = P.width >= P.height ? 480 : Math.round((270 * P.width) / P.height), ch = Math.round((cw * P.height) / P.width), pad = 4, lab = 18;
     const rows = Math.ceil(times.length / cols);
     const cv = document.createElement('canvas');
     cv.width = cols * (cw + pad) + pad; cv.height = rows * (ch + lab + pad) + pad;
@@ -116,7 +121,8 @@ async function sheet(page: Page, times: number[], cols: number, out: string) {
  * bounded at 4K. One worker already keeps the GPU busy in the heavy scenes; a second one fills the gaps in the
  * light ones (2D drawing, readback, transfer).
  */
-async function video(url: string, from: number, to: number, fps: number, out: string) {
+async function video(url: string, from: number, to: number, out: string) {
+  const fps = FPS;
   mkdirSync(path.dirname(out), { recursive: true });
   const crf = opt('crf', '16')!;
   // the sound named by data/audio.json (tools/analyze.py sets it to the song), else the narration
@@ -251,7 +257,7 @@ async function video(url: string, from: number, to: number, fps: number, out: st
       for (let r = take(); r && !failure; r = take()) {
         for (let n = r[0]; n < r[1]; n++) queue[k]!.push(n);
         const h: Record<string, number> = await page.evaluate((o) => (window as any).__reel.stream(o), {
-          from: r[0] / fps, to: r[1] / fps, fps, ws: `ws://localhost:${server.port}/?w=${k}`, samples: SAMPLES, shutter: +opt('shutter', '0.5')!, inflight: 4,
+          from: r[0] / fps, to: r[1] / fps, ws: `ws://localhost:${server.port}/?w=${k}`, samples: SAMPLES, shutter: +opt('shutter', '0.5')!, inflight: 4,
         });
         for (const [c, m] of Object.entries(h)) used[c] = (used[c] ?? 0) + m;
       }
@@ -285,7 +291,7 @@ if (mode === 'video') {
     const { browser, page } = await openPage(url);
     const dur: number = await page.evaluate(() => (window as any).__reel.duration);
     await browser.close();
-    await video(url, +opt('from', '0')!, +opt('to', String(dur))!, +opt('fps', '60')!, path.resolve(opt('out', path.join(ROOT, 'out/video.mp4'))!));
+    await video(url, +opt('from', '0')!, +opt('to', String(dur))!, path.resolve(opt('out', path.join(ROOT, 'out/video.mp4'))!));
   } finally { stop(); }
   process.exit(0);
 }
@@ -308,24 +314,11 @@ try {
     if (flag('cuts')) {
       // 4 frames around every timeline boundary: 2 frames before, 2 after
       const tl: { id: string; start: number }[] = await page.evaluate(() => (window as any).__reel.timeline);
-      times = tl.slice(1).flatMap((e) => [e.start - 0.1, e.start - 1 / 60, e.start + 1 / 60, e.start + 0.1]);
+      times = tl.slice(1).flatMap((e) => [e.start - 0.1, e.start - 1 / FPS, e.start + 1 / FPS, e.start + 0.1]);
     }
     const out = opt('out', path.join(ROOT, `out/sheets/sheet_${from}-${to}.png`))!;
     await sheet(page, times, +opt('cols', '4')!, out);
     console.log(out);
-  } else if (mode === 'plates') {
-    const tl: { id: string; start: number; end: number }[] = await page.evaluate(() => (window as any).__reel.timeline);
-    const overrides: Record<string, number> = existsSync(path.join(APP, 'plates.json')) ? await Bun.file(path.join(APP, 'plates.json')).json() : {};
-    const dir = path.join(APP, 'public/plates');
-    mkdirSync(dir, { recursive: true });
-    await page.evaluate(() => { (window as any).__reel.engine.hudOff = true; });
-    for (const [i, e] of tl.entries()) {
-      const t = overrides[e.id] ?? (e.start + e.end) / 2;
-      await page.evaluate((t) => (window as any).__reel.still(t, 4, 0.2), t);
-      const f = path.join(dir, `fig${String(i + 1).padStart(2, '0')}.jpg`);
-      await page.screenshot({ path: f, type: 'jpeg', quality: 90, clip: { x: 0, y: 0, width: 1920, height: 1080 } });
-      console.log(f, t.toFixed(2));
-    }
   } else if (mode === 'events') {
     // sound-mix cues: the timeline (entry starts) and every cue() a scene recorded
     const ev = await page.evaluate(() => ({ duration: (window as any).__reel.duration, timeline: (window as any).__reel.timeline, cues: (window as any).__reel.cues }));
@@ -335,14 +328,14 @@ try {
   } else if (mode === 'perf') {
     const from = +opt('from', '0')!, to = +opt('to', '5')!;
     const r = await page.evaluate(async ({ from, to, samples, shutter }) => {
-      const P = (window as any).__reel;
+      const P = (window as any).__reel, dt = 1 / P.fps;
       const ms: number[] = [];
       const buf = new Uint8Array(P.width * P.height * 4);
       P.still(from);
       const used: Record<number, number> = {};
-      for (let t = from; t < to; t += 1 / 60) {
+      for (let t = from; t < to; t += dt) {
         const a = performance.now();
-        const k = P.engine.render(t, 1 / 60, false, samples, shutter);
+        const k = P.engine.render(t, dt, false, samples, shutter);
         used[k] = (used[k] ?? 0) + 1;
         await P.engine.readPixelsAsync(buf);
         ms.push(performance.now() - a);
