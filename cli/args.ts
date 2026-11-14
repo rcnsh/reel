@@ -45,6 +45,8 @@ Working on a project
                              .claude/skills; refuses a folder that holds anything
                              [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
   skills update              copy this engine's skills into the project's .claude/skills
+  font add "<family>"        download a Google Fonts family (its font files and licence) into the
+                             project's fonts/, where HTML layers find it by its family name
   chrome install             download the Chrome for Testing build reel renders with into its cache
                              folder (used whenever CHROME_PATH is unset)
   chrome path                the Chrome binary renders would use, and its version
@@ -104,6 +106,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
   golden: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
   chrome: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
+  font: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [2, 2] },
   mcp: { render: false, opts: { help: bool } },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };

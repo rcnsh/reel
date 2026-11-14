@@ -120,6 +120,16 @@ if (mode === 'chrome') {
   fail(`chrome ${sub}: expected install or path`);
 }
 
+if (mode === 'font') {
+  if (P.positionals[0] !== 'add') fail(`font ${P.positionals[0]}: expected add`);
+  let project = '';
+  try { project = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail((e as Error).message); }
+  const { addGoogleFont } = await import('./fonts');
+  const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
+  try { Object.assign(res, await addGoogleFont(project, P.positionals[1]!)); } catch (e) { res.ok = false; res.errors.push((e as Error).message); }
+  finish(res, (r) => console.log(`${(r.files as string[]).map((f) => path.relative(process.cwd(), f)).join('\n')}\nHTML layers can use font-family: ${(r.families as string[]).map((f) => `'${f}'`).join(', ')}`));
+}
+
 if (mode === 'skills') {
   if (P.positionals[0] !== 'update') fail(`skills ${P.positionals[0]}: expected update`);
   let project = '';

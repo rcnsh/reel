@@ -69,7 +69,7 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 
 **Skills.** `skills/<name>/SKILL.md` (YAML `name` and `description`) plus files beside it, each under about 300 lines; long reference goes in the files. They are written for a capable agent that has never seen reel and carry knowledge, not process. Projects hold copies (`reel init`, `reel skills update`), so a skill must make sense without this repo.
 
-**Fonts.** `uv run tools/make_fonts.py` cuts the static instances from `public/fonts/src/`. Its instance lists and `src/engine/type.ts` (`ARCHIVO_WIDTHS`, `ARCHIVO_WEIGHTS`, `DEFS`) must match. Regenerated files differ from the committed ones only in the `head` table, so an unchanged rebuild needs no commit.
+**Fonts.** A project's fonts are the files in its `fonts/` folder (`cli/fonts.ts` describes them with fontkit; `reel font add "<family>"` fetches a Google Fonts family there with its licence). The engine's own: `uv run tools/make_fonts.py` cuts the static instances from `public/fonts/src/`. Its instance lists and `src/engine/type.ts` (`ARCHIVO_WIDTHS`, `ARCHIVO_WEIGHTS`, `DEFS`) must match. Regenerated files differ from the committed ones only in the `head` table, so an unchanged rebuild needs no commit.
 
 ## Checks
 

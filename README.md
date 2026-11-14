@@ -11,6 +11,8 @@ Fonts in `public/fonts/`:
 - Archivo, Cormorant Garamond and IBM Plex Mono are under the SIL Open Font License; the licence text for each is in `OFL-*.txt`.
 - The single-stroke SVG fonts in `stroke/` (EMS under the OFL, plus the Hershey fonts) carry their own licence and attribution in each file's header.
 
+A project's own fonts live in its `fonts/` folder with their licences: `reel font add "<family>"` downloads a Google Fonts family from the google/fonts repository with its licence file (`OFL.txt`, `LICENSE.txt` or `UFL.txt`) beside the font files.
+
 ## How a video is made
 
 A video is a project: a folder with a `reel.config.ts`, a `scenes/` folder and whatever audio and data it uses. The config sets the frame size, frame rate and theme and returns the timeline, a list of clips: each names a scene module, a time window and a track. Tracks stack, so a caption or a title can sit over whatever runs below; clips that overlap on one track crossfade.
@@ -29,7 +31,7 @@ export default defineVideo({
 });
 ```
 
-Scenes put text and layout on screen with HTML and CSS: an `HtmlLayer` renders markup into a texture at the output resolution (through Chrome's HTML-in-Canvas), with the theme's colours as CSS variables, the engine's and the project's fonts by family name (a project's `fonts/` folder), CSS animations played on the clip's clock, and every text element reported to `reel check`. Its content changes once per output frame; where it is drawn is evaluated per motion-blur sub-frame, so it moves with motion blur. Shaders, three.js and Canvas2D do the rest.
+Scenes put text and layout on screen with HTML and CSS: an `HtmlLayer` renders markup into a texture at the output resolution (through Chrome's HTML-in-Canvas), with the theme's colours as CSS variables, the engine's and the project's fonts by family name (any font file in a project's `fonts/` folder; `reel font add "Space Grotesk"` fetches a Google Fonts family there), CSS animations played on the clip's clock, and every text element reported to `reel check`. Its content changes once per output frame; where it is drawn is evaluated per motion-blur sub-frame, so it moves with motion blur. Shaders, three.js and Canvas2D do the rest.
 
 The theme is the look, and the engine itself has none: `print` (ink on paper, faint grain), `film` (a dark grade with bloom, halation, heavy grain and crop marks) or `neutral` (clean greys and one accent, the default), or a theme of your own. It supplies the palette scenes colour with (`bg`, `fg`, `accent` and its own named colours), the default post-processing, and optionally an overlay drawn over every clip. The `reel-authoring` skill has the details.
 
