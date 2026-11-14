@@ -120,54 +120,56 @@ ${head(o)}
 `;
 }
 
-/** The shared body of both scenes: a background, a line of type rising in, an accent rule drawn under it. */
-const sceneBody = (textExpr: string, comment: string) => `import type * as THREE from 'three';
-import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, fitSize, rgba, ease, prog, window01, reportText${textExpr.includes('Words') ? ', Words' : ''} } from 'reel';
-
-export default class Intro extends Scene {
-  // the theme's background, a touch lighter at the top
+const BG = `  // the theme's background, a touch lighter at the top
   bg = new FSPass(/* glsl */ \`
     void main() {
       fragColor = vec4(mix(C_BG, C_BG * 0.9, smoothstep(1.0, 0.0, vUv.y)), 1.0);
-    }\`);
-  text = new Layer2D();
+    }\`);`;
+
+function silentScene() {
+  return `// The opening title: the clip's \`text\` param as a title card over the theme's background. The card comes from
+// the component kit (title, kicker, subtitle, accent rule), lays itself out from the frame and rises in.
+import type * as THREE from 'three';
+import { Scene, type Frame, FSPass, TitleCard } from 'reel';
+
+export default class Intro extends Scene {
+${BG}
+  // (params come from the clip in reel.config.ts)
+  card = new TitleCard({ title: String(this.ctx.params.text ?? ''), motion: { from: 'up', in: 0.9 } });
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
-    const { renderer, comp } = this.ctx;
-    this.bg.render(renderer, out);
-    ${comment}
-    ${textExpr}
-    const fam = F.archivo(87.5, 800);
-    // laid out from W and H, so it holds in any frame size
-    const size = fitSize(full, fam, W * 0.8, Math.min(W, H) * 0.1);
-    const a = window01(f.t, f.start, f.end, 0.4, 0.6), rise = prog(f.lt, 0, 0.9, ease.outExpo);
-    const c = this.text.ctx;
-    this.text.clear();
-    c.font = font(fam, size);
-    // (drawn from the full line's left edge, so a line revealed letter by letter stays put)
-    const width = c.measureText(full).width;
-    c.fillStyle = rgba('fg', a);
-    c.fillText(shown, W / 2 - width / 2, H / 2 + (1 - rise) * size * 0.4);
-    // what \`reel check\` sees of it (its box, size and colour); free outside a check
-    reportText(c, shown, W / 2 - width / 2, H / 2 + (1 - rise) * size * 0.4, { label: 'title' });
-    c.fillStyle = rgba('accent', a);
-    const rule = width * prog(f.lt, 0.3, 1.3, ease.inOutCubic);
-    c.fillRect(W / 2 - rule / 2, H / 2 + size * 0.45, rule, Math.max(2, size * 0.06));
-    comp.draw(renderer, this.text.upload(), out);
+    this.bg.render(this.ctx.renderer, out);
+    this.card.draw(this.ctx.renderer, out, f);
   }
 }
 `;
-
-function silentScene() {
-  return `// The opening title: the clip's \`text\` param over the theme's background, with an accent rule drawn under it.\n` +
-    sceneBody(`const full = String(this.ctx.params.text ?? ''), shown = full;`, '// (params come from the clip in reel.config.ts)');
 }
 
 function narratedScene() {
-  return `// The intro plate: its line of narration set in type as it is spoken, with an accent rule drawn under it.\n` +
-    sceneBody(`const line = this.ctx.words.get('where the video begins');
-    const full = line.text, shown = full.slice(0, Math.ceil(Words.lineCharProgress(line, f.t)));`,
-    '// found by its words, not by a time: re-timing the voice moves it along');
+  return `// The intro plate: its line of narration typed as it is spoken, in a text block from the component kit that wraps
+// and fits it to the frame.
+import type * as THREE from 'three';
+import { Scene, type Frame, FSPass, TextBlock, Words, esc } from 'reel';
+
+export default class Intro extends Scene {
+${BG}
+  // found by its words, not by a time: re-timing the voice moves it along
+  line = this.ctx.words.get('where the video begins');
+  text = new TextBlock({
+    // the part not yet said is laid out but hidden, so the text never reflows as it is typed
+    html: (f) => {
+      const n = Math.ceil(Words.lineCharProgress(this.line, f.t));
+      return esc(this.line.text.slice(0, n)) + '<span style="visibility: hidden">' + esc(this.line.text.slice(n)) + '</span>';
+    },
+    align: 'center', size: 96, maxLines: 3, motion: { from: 'up', in: 0.9 },
+  });
+
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    this.bg.render(this.ctx.renderer, out);
+    this.text.draw(this.ctx.renderer, out, f);
+  }
+}
+`;
 }
 
 function claudeMd(title: string, o: InitOptions) {
