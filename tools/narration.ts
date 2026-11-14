@@ -80,6 +80,7 @@ await $`ffmpeg -loglevel error -y -f concat -safe 0 -i ${path.join(tmp, 'list.tx
 const bpm = 100, period = 60 / bpm;
 const beats: number[] = [];
 for (let b = 0; b * period < duration; b++) beats.push(+(b * period).toFixed(3));
+mkdirSync(path.join(ROOT, 'data'), { recursive: true });
 writeFileSync(path.join(ROOT, 'data/words.json'), JSON.stringify({ lines, notes: `scratch track: say -v ${VOICE} -r ${RATE}; proportional word timing` }, null, 1));
 writeFileSync(path.join(ROOT, 'data/audio.json'), JSON.stringify({
   duration, bpm, beat_period: period, time_signature: 4, beats, downbeats: beats.filter((_, i) => i % 4 === 0),

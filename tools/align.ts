@@ -254,6 +254,7 @@ sections.forEach((s, i) => (s.end = i < sections.length - 1 ? sections[i + 1]!.s
 const bpm = 100, period = 60 / bpm;
 const beats: number[] = [];
 for (let b = 0; b * period < duration; b++) beats.push(r3(b * period));
+mkdirSync(path.join(ROOT, 'data'), { recursive: true });
 writeFileSync(path.join(ROOT, 'data/words.json'), JSON.stringify({ lines, notes: `voice: ${path.basename(src)}; word times from faster-whisper small.en` }, null, 1));
 writeFileSync(path.join(ROOT, 'data/audio.json'), JSON.stringify({
   duration: r3(duration), bpm, beat_period: period, time_signature: 4, beats, downbeats: beats.filter((_, i) => i % 4 === 0),
