@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { alignWords, normWord, type ScriptWord } from '../tools/align-words';
+import { alignWords, normWord, unheardLines, type ScriptWord } from '../tools/align-words';
 
 const script = (text: string): ScriptWord[] => text.split(' ').map((w) => ({ w, line: 0 }));
 
@@ -30,4 +30,14 @@ test('nothing heard: the words share the span by length', () => {
   expect(sw[0]!.s).toBe(1);
   expect(sw[1]!.s).toBeCloseTo(1 + 2.5 / 8, 9); // lengths + 1.5: 2.5 and 5.5
   expect(sw[1]!.e).toBeCloseTo(sw[1]!.s! + (5.5 / 8) * 0.92, 9);
+});
+
+test('unheardLines finds a line the aligner placed on other speech (a skipped line)', () => {
+  // the take says line 0, then line 2 twice; the aligner put line 1 on the first reading of line 2
+  const at = (text: string, line: number, t0: number) => text.split(' ').map((w, i) => ({ w, line, start: t0 + i * 0.3, end: t0 + i * 0.3 + 0.25 }));
+  const words = [...at('The river runs north', 0, 0), ...at('It carries snow down', 1, 2), ...at('Farmers wait for floods', 2, 4)];
+  const heard = [...at('the river runs north', 0, 0), ...at('farmers wait for floods', 0, 2), ...at('farmers wait for floods', 0, 4)].map((x) => ({ w: x.w, s: x.start, e: x.end }));
+  const bad = unheardLines(words, heard);
+  expect(bad.map((b) => b.line)).toEqual([1]);
+  expect(bad[0]!.share).toBe(0);
 });

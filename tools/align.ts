@@ -7,6 +7,7 @@ import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } fr
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { forcedAlign, refine } from './aligner';
+import { unheardLines } from './align-words';
 import { decode, levels, normalize, SR, trimSilence, writeAudio } from './audio-io';
 import { report, writeNarration, type PlateAudio } from './narration-files';
 import { parseScript, plateWords, type Plate, type TimedWord } from './script';
@@ -28,6 +29,9 @@ data/audio.json, like reel narrate.
   --hold ${DEFAULTS.hold}             seconds at least between plates (silence is added at a quiet point)
   --tail ${DEFAULTS.tail}              seconds after the last word
   --language English      the script's language (qwen)
+  --no-verify             skip the check that each line's words are heard where they were placed (qwen:
+                          a faster-whisper transcription; a take that skips, repeats or rewords a line is
+                          aligned anyway, so a line heard elsewhere is a warning and the command exits 1)
   --project <folder>      the project (default: the current folder)
 
 Settings also come from \`narration\` in reel.config.ts.`;
@@ -38,14 +42,17 @@ const LOUDNESS = { integrated: -16, truePeak: -1.5 };
 if (import.meta.main) {
   let a;
   try {
-    a = parseArgs({ args: process.argv.slice(2), strict: true, allowPositionals: true, options: { method: { type: 'string' }, lead: { type: 'string' }, hold: { type: 'string' }, tail: { type: 'string' }, language: { type: 'string' }, help: { type: 'boolean', short: 'h' } } });
+    a = parseArgs({ args: process.argv.slice(2), strict: true, allowPositionals: true, options: { method: { type: 'string' }, lead: { type: 'string' }, hold: { type: 'string' }, tail: { type: 'string' }, language: { type: 'string' }, 'no-verify': { type: 'boolean' }, help: { type: 'boolean', short: 'h' } } });
   } catch (e) { console.error(`reel align: ${(e as Error).message} (reel align --help)`); process.exit(2); }
   if (a.values.help) { console.log(ALIGN_HELP); process.exit(0); }
   if (a.positionals.length !== 1) { console.error('reel align: expected one recording or folder (reel align --help)'); process.exit(2); }
   const method = a.values.method ?? 'qwen';
   if (method !== 'qwen' && method !== 'whisper') { console.error(`reel align: --method ${method}: expected qwen or whisper`); process.exit(2); }
   try {
-    console.log(await align(path.resolve(process.env.REEL_PROJECT ?? '.'), path.resolve(a.positionals[0]!), method, a.values));
+    const r = await align(path.resolve(process.env.REEL_PROJECT ?? '.'), path.resolve(a.positionals[0]!), method, a.values);
+    console.log(r.summary);
+    for (const w of r.warnings) console.error(`warning: ${w}`);
+    if (r.warnings.length) process.exit(1);
   } catch (e) { console.error(`reel align: ${(e as Error).message}`); process.exit(1); }
 }
 
@@ -66,6 +73,14 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
   };
 
   let parts: PlateAudio[];
+  const warnings: string[] = [];
+  const verify = async (pcm: Float32Array, words: TimedWord[], k: number, ps: Plate[]) => {
+    if (method !== 'qwen' || flags['no-verify']) return;
+    const lines = ps.flatMap((p) => p.lines.map((_, li) => `${p.name}:${li}`));
+    const sw = ps.flatMap((p) => plateWords(p).map((w) => lines.indexOf(`${p.name}:${w.line}`)));
+    const bad = unheardLines(words.map((w, i) => ({ ...w, line: sw[i]! })), (await transcribe(pcm, work, `v${k}`, '')).map((h) => ({ w: h.w, s: h.start, e: h.end })));
+    for (const b of bad) warnings.push(`'${b.text}' (${b.start.toFixed(2)} to ${b.end.toFixed(2)} s${ps.length > 1 ? ' of the take' : ` of ${ps[0]!.name}`}): only ${Math.round(b.share * 100)}% of its words are heard there. The recording may skip, repeat or reword it; fix the recording or narration.txt and align again (--method whisper follows a reading that departs from the script)`);
+  };
   if (statSync(src).isDirectory()) {
     const files = readdirSync(src);
     const pcms = await Promise.all(plates.map(async (p, k) => {
@@ -75,30 +90,34 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
     }));
     const timed = await timeWords(pcms.map((pcm, k) => ({ pcm, words: plateWords(plates[k]!) })), method, work, s.language);
     parts = pcms.map((pcm, k) => ({ pcm, words: timed[k]! }));
+    for (const [k, p] of parts.entries()) await verify(p.pcm, p.words, k, [plates[k]!]);
   } else {
     const pcm = await load(src, 'take');
     const all = plates.flatMap((p) => plateWords(p));
     const [words] = await timeWords([{ pcm, words: all }], method, work, s.language);
+    await verify(pcm, words!, 0, plates);
     parts = splitPlates(plates, pcm, words!);
   }
   rmSync(work, { recursive: true, force: true });
   const how = method === 'qwen' ? 'Qwen3-ForcedAligner' : 'faster-whisper small.en matched to the script';
   const r = await writeNarration(root, plates, parts, s, `recording ${path.basename(src)}; word times from ${how}, snapped to pauses`);
-  return report(r);
+  return { summary: report(r), warnings };
 }
 
 /** Times of each passage's script words: force-aligned, or transcribed with Whisper and matched. */
 async function timeWords(passages: { pcm: Float32Array; words: { w: string }[] }[], method: 'qwen' | 'whisper', work: string, language: string): Promise<TimedWord[][]> {
   if (method === 'qwen') return forcedAlign(passages, path.join(work, 'fa'), language);
-  return Promise.all(passages.map(async (p, i) => {
-    const w48 = path.join(work, `wh${i}.f32.wav`), w16 = path.join(work, `wh${i}.wav`), out = path.join(work, `wh${i}.json`);
-    await writeAudio(p.pcm, w48);
-    await $`ffmpeg -nostdin -loglevel error -y -i ${w48} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
-    const script = p.words.map((x) => x.w).join(' ');
-    const r = await $`uv run -q --with faster-whisper==1.2.1 --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${w16} ${out} ${script}`.nothrow();
-    if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.toString().slice(-1500)}`);
-    return refine(p.words, joinFigures(JSON.parse(readFileSync(out, 'utf8'))), p.pcm);
-  }));
+  return Promise.all(passages.map(async (p, i) => refine(p.words, await transcribe(p.pcm, work, `wh${i}`, p.words.map((x) => x.w).join(' ')), p.pcm)));
+}
+
+/** What faster-whisper (small.en) hears in the samples, figures joined; `script` primes its vocabulary. */
+async function transcribe(pcm: Float32Array, work: string, name: string, script: string): Promise<TimedWord[]> {
+  const w48 = path.join(work, `${name}.f32.wav`), w16 = path.join(work, `${name}.wav`), out = path.join(work, `${name}.json`);
+  await writeAudio(pcm, w48);
+  await $`ffmpeg -nostdin -loglevel error -y -i ${w48} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
+  const r = await $`uv run -q --with faster-whisper==1.2.1 --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${w16} ${out} ${script}`.nothrow();
+  if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.toString().slice(-1500)}`);
+  return joinFigures(JSON.parse(readFileSync(out, 'utf8')));
 }
 
 /** Whisper splits figures ("152" ",000", "2" ".06"): join them back into one word. */

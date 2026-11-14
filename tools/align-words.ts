@@ -104,3 +104,25 @@ export function snapToPauses(words: { w: string; start: number; end: number }[],
   }
   return out;
 }
+
+/**
+ * Lines whose aligned times hold few of their words in what a transcriber heard there: a forced aligner places
+ * every script word somewhere, so a take that skips, repeats or rewords a line shifts words onto the wrong speech
+ * without failing. `words` are the script words with the aligner's times (`line` groups them), `heard` a
+ * transcription of the same audio. A line is reported when under `min` of its words are heard within `pad` s of its
+ * span (lines of fewer than two words are not judged).
+ */
+export function unheardLines(words: { w: string; line: number; start: number; end: number }[], heard: HeardWord[], min = 0.5, pad = 0.4): { line: number; text: string; share: number; start: number; end: number }[] {
+  const out: { line: number; text: string; share: number; start: number; end: number }[] = [];
+  for (const line of [...new Set(words.map((w) => w.line))]) {
+    const ws = words.filter((w) => w.line === line), toks = ws.map((w) => normWord(w.w)).filter(Boolean);
+    if (toks.length < 2) continue;
+    const a = ws[0]!.start - pad, b = ws.at(-1)!.end + pad;
+    const there = heard.filter((h) => (h.s + h.e) / 2 >= a && (h.s + h.e) / 2 <= b).map((h) => normWord(h.w));
+    let found = 0;
+    for (const t of toks) { const i = there.indexOf(t); if (i >= 0) { found++; there.splice(i, 1); } }
+    const share = found / toks.length;
+    if (share < min) out.push({ line, text: ws.map((w) => w.w).join(' '), share, start: ws[0]!.start, end: ws.at(-1)!.end });
+  }
+  return out;
+}

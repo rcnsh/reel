@@ -46,7 +46,10 @@ if a voice reads a figure oddly.
 The script is known, so its words are force-aligned to the audio (Qwen3-ForcedAligner): word starts land within
 about 15 ms of where they are spoken (80 ms worst) at phrase edges. A folder holds one file per plate named after
 it (`intro.m4a`); one file is a single take of the whole script, cut between plates at the quietest point. The take
-is high-passed and brought to -16 LUFS; `--lead/--hold/--tail` lay it out like narrate. `--method whisper`
+is high-passed and brought to -16 LUFS; `--lead/--hold/--tail` lay it out like narrate. A forced aligner places
+every word even when the take skips, repeats or rewords a line, so align then transcribes the take (faster-whisper)
+and warns, exiting 1, about each line whose words are not heard where they were placed: fix the take or the script
+(`--no-verify` skips the check). `--method whisper`
 transcribes and matches instead, for a reading that departs from the script (about 100 ms off, worse on figures).
 Sung lyrics: `reel align <vocal-stem-or-song> --method whisper`.
 
