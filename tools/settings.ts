@@ -27,7 +27,10 @@ export function resolveSettings(config: NarrationSettings | undefined, flags: Re
   return r;
 }
 
-/** What makes a voiced plate reusable: the voice, its rate and model, and the text (not the pauses, applied later). */
+/**
+ * What makes a voiced plate reusable: the voice, its rate and model, the text, and the language (the forced aligner
+ * times a voice without timestamps in it); not the pauses, applied later.
+ */
 export function plateKey(voice: string, s: Resolved, text: string) {
-  return createHash('sha256').update(JSON.stringify({ v: 1, voice, speed: s.speed, model: s.model ?? null, text })).digest('hex').slice(0, 16);
+  return createHash('sha256').update(JSON.stringify({ v: 1, voice, speed: s.speed, model: s.model ?? null, language: s.language, text })).digest('hex').slice(0, 16);
 }

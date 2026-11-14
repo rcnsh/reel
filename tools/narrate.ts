@@ -16,7 +16,7 @@ import { loadConfig } from '../cli/server';
 export const NARRATE_HELP = `reel narrate [flags]: voice narration.txt and time every word
 
 Each plate (a '# name' header and its lines) is voiced as one passage and cached: a plate whose text, voice,
-speed and model are unchanged is not voiced again. Writes audio/narration.flac (the track), data/words.json
+speed, model and language are unchanged is not voiced again. Writes audio/narration.flac (the track), data/words.json
 (every word with its time) and data/audio.json (one section per plate). Settings come from \`narration\` in
 reel.config.ts, overridden by these flags.
 

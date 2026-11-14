@@ -30,7 +30,7 @@ it; `//` lines are comments. `reel narrate` voices each plate as one passage and
 - Settings: `--speed 1`, `--lead 0.6` (s before the first word), `--hold 0.85` (s at least between plates),
   `--tail 1.6` (s after the last word), `--model`, `--language English`. Put the project's choice in the config so
   every run agrees: `narration: { voice: 'kokoro:bm_george', speed: 1.05, tail: 3 }` in `reel.config.ts`.
-- Plates are cached in `audio/.narration/` by text, voice, speed and model: after editing one line only that plate
+- Plates are cached in `audio/.narration/` by text, voice, speed, model and language: after editing one line only that plate
   is voiced again (with a hosted voice, the others cost nothing). Pauses are applied afterwards, so changing them
   voices nothing. `--force` voices everything again.
 - Each plate is trimmed and brought to -16 LUFS; word edges are snapped to the pauses in the audio.

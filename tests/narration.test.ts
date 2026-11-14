@@ -59,6 +59,7 @@ describe('settings', () => {
     expect(plateKey('kokoro:bm_george', s, 'Hello.')).not.toBe(k);
     expect(plateKey('kokoro:af_heart', { ...s, speed: 1.1 }, 'Hello.')).not.toBe(k);
     expect(plateKey('kokoro:af_heart', { ...s, model: 'm' }, 'Hello.')).not.toBe(k);
+    expect(plateKey('kokoro:af_heart', { ...s, language: 'French' }, 'Hello.')).not.toBe(k);
   });
 });
 
