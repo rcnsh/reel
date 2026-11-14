@@ -1,0 +1,15 @@
+# dependencies (bun install)
+node_modules/
+
+# renders, stills and contact sheets
+out/
+dist/
+
+# working files written by tools/align.ts and tools/narration.ts
+audio/.align/
+audio/.work/
+audio/narration.scratch.mp3
+
+.DS_Store
+*.tsbuildinfo
+.env*

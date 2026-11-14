@@ -1,0 +1,5 @@
+# hello
+Every frame is a function of time.
+
+# written
+The pen writes each word while it is spoken.

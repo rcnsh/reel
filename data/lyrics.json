@@ -1,0 +1,103 @@
+{
+ "lines": [
+  {
+   "i": 0,
+   "plate": "hello",
+   "text": "Every frame is a function of time.",
+   "start": 0.6,
+   "end": 2.616,
+   "words": [
+    {
+     "w": "Every",
+     "start": 0.6,
+     "end": 0.922
+    },
+    {
+     "w": "frame",
+     "start": 0.949,
+     "end": 1.271
+    },
+    {
+     "w": "is",
+     "start": 1.299,
+     "end": 1.472
+    },
+    {
+     "w": "a",
+     "start": 1.487,
+     "end": 1.611
+    },
+    {
+     "w": "function",
+     "start": 1.622,
+     "end": 2.091
+    },
+    {
+     "w": "of",
+     "start": 2.132,
+     "end": 2.305
+    },
+    {
+     "w": "time.",
+     "start": 2.32,
+     "end": 2.593
+    }
+   ]
+  },
+  {
+   "i": 1,
+   "plate": "written",
+   "text": "The pen writes each word while it is spoken.",
+   "start": 3.466,
+   "end": 5.76,
+   "words": [
+    {
+     "w": "The",
+     "start": 3.466,
+     "end": 3.662
+    },
+    {
+     "w": "pen",
+     "start": 3.679,
+     "end": 3.875
+    },
+    {
+     "w": "writes",
+     "start": 3.892,
+     "end": 4.218
+    },
+    {
+     "w": "each",
+     "start": 4.246,
+     "end": 4.486
+    },
+    {
+     "w": "word",
+     "start": 4.507,
+     "end": 4.746
+    },
+    {
+     "w": "while",
+     "start": 4.767,
+     "end": 5.049
+    },
+    {
+     "w": "it",
+     "start": 5.074,
+     "end": 5.226
+    },
+    {
+     "w": "is",
+     "start": 5.24,
+     "end": 5.392
+    },
+    {
+     "w": "spoken.",
+     "start": 5.405,
+     "end": 5.731
+    }
+   ]
+  }
+ ],
+ "notes": "scratch track: say -v Daniel -r 172; proportional word timing"
+}

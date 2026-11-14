@@ -1,0 +1,53 @@
+{
+ "duration": 7.36,
+ "timeline": [
+  {
+   "id": "hello",
+   "start": 0,
+   "end": 3.466
+  },
+  {
+   "id": "written",
+   "start": 3.466,
+   "end": 7.36
+  }
+ ],
+ "cues": [
+  {
+   "kind": "tick",
+   "t": 3.466
+  },
+  {
+   "kind": "tick",
+   "t": 3.679
+  },
+  {
+   "kind": "tick",
+   "t": 3.892
+  },
+  {
+   "kind": "tick",
+   "t": 4.246
+  },
+  {
+   "kind": "tick",
+   "t": 4.507
+  },
+  {
+   "kind": "tick",
+   "t": 4.767
+  },
+  {
+   "kind": "tick",
+   "t": 5.074
+  },
+  {
+   "kind": "tick",
+   "t": 5.24
+  },
+  {
+   "kind": "tick",
+   "t": 5.405
+  }
+ ]
+}

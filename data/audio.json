@@ -1,0 +1,50 @@
+{
+ "duration": 7.36,
+ "bpm": 100,
+ "beat_period": 0.6,
+ "time_signature": 4,
+ "beats": [
+  0,
+  0.6,
+  1.2,
+  1.8,
+  2.4,
+  3,
+  3.6,
+  4.2,
+  4.8,
+  5.4,
+  6,
+  6.6,
+  7.2
+ ],
+ "downbeats": [
+  0,
+  2.4,
+  4.8,
+  7.2
+ ],
+ "sections": [
+  {
+   "name": "hello",
+   "start": 0.6,
+   "end": 3.466
+  },
+  {
+   "name": "written",
+   "start": 3.466,
+   "end": 7.36
+  }
+ ],
+ "fps": 100,
+ "rms": [],
+ "low": [],
+ "mid": [],
+ "high": [],
+ "vocal": [],
+ "drums": [],
+ "bass": [],
+ "other": [],
+ "onsets": {},
+ "notes": "synthetic: silent beat grid for the engine helpers; sections = plates"
+}
