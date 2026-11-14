@@ -1,5 +1,9 @@
 import { expect, test } from 'bun:test';
 import { buildMix, type Events } from '../tools/mix-graph';
+import { existsSync, mkdtempSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { bundledSounds, soundFile } from '../tools/mix';
 import { loudnessTarget, loudnormFilter, parseLoudnorm, STREAMING } from '../tools/loudness';
 
 const ev: Events = { duration: 10, timeline: [{ id: 'a', start: 0, end: 4 }, { id: 'b', start: 4, end: 10 }], cues: [{ kind: 'tick', t: 1 }, { kind: 'tick', t: 1.05 }, { kind: 'tick', t: 5 }, { kind: 'boom', t: 2 }] };
@@ -57,4 +61,13 @@ test('loudness: targets from mix.json, the measurement and the second pass', () 
   expect(m).toEqual({ integrated: -23.4, truePeak: -5.1, lra: 6.2, threshold: -33.9, offset: 0.3 });
   expect(loudnormFilter(STREAMING, m)).toBe('loudnorm=I=-14:TP=-1:LRA=11:measured_I=-23.40:measured_TP=-5.10:measured_LRA=6.20:measured_thresh=-33.90:offset=0.30:linear=true,aresample=48000');
   expect(parseLoudnorm('{"input_i":"-inf","input_tp":"-inf","input_lra":"0.00","input_thresh":"-70.00","target_offset":"0.00"}').integrated).toBe(-Infinity);
+});
+
+test('mix.json can name a bundled cue sound; a project file of that name wins', () => {
+  expect(bundledSounds().sort()).toEqual(['click', 'impact', 'pop', 'swell', 'tick', 'whoosh']);
+  const root = mkdtempSync(path.join(tmpdir(), 'reel-snd-'));
+  expect(soundFile(root, 'whoosh')).toEndWith('sounds/whoosh.wav');
+  expect(soundFile(root, 'reel:pop')).toEndWith('sounds/pop.wav');
+  expect(() => soundFile(root, 'nope.wav')).toThrow('nor one of the bundled sounds');
+  expect(existsSync(soundFile(root, 'tick.wav'))).toBe(true);
 });

@@ -43,7 +43,7 @@ A scene that wants a sound calls `cue(kind, t)` in `init()` (a pen tick at each 
 }
 ```
 
-`music` runs from the start of clip `from` to the start of clip `to`, looped, ducked under the track. `"loudness": { "integrated": -14, "truePeak": -1 }` is the default target (two-pass EBU R128), `false` turns it off. `reel video --mix` renders and mixes in one go; to re-mix a render, `reel events` writes `data/cues.json` (the clips and every cue), then `reel mix <render.mp4> <out.mp4>`. A partial render mixes with the same `--from`. The track comes from its lossless file, so the sound is encoded once.
+Sound files are the project's, in `audio/`, or the engine's bundled cue sounds by name: `tick`, `click`, `pop`, `whoosh`, `swell`, `impact` (`"file": "whoosh"`); a `cue('whoosh', t)` with no entry in `mix.json` plays the bundled whoosh. `music` runs from the start of clip `from` to the start of clip `to`, looped, ducked under the track. `"loudness": { "integrated": -14, "truePeak": -1 }` is the default target (two-pass EBU R128), `false` turns it off. `reel video --mix` renders and mixes in one go; to re-mix a render, `reel events` writes `data/cues.json` (the clips and every cue), then `reel mix <render.mp4> <out.mp4>`. A partial render mixes with the same `--from`. The track comes from its lossless file, so the sound is encoded once.
 
 ## Subtitles
 

@@ -12,14 +12,16 @@
 //     "loudness": { "integrated": -14, "truePeak": -1, "lra": 11 },
 //     "voiceDb": 0
 //   }
-// music: files in audio/, looped, from the start of clip `from` (default: the video start) to the start of clip
+// Files are in the project's audio/ folder, or one of the cue sounds the engine ships in sounds/ (tick, click, pop,
+// whoosh, swell, impact) by name: "file": "whoosh". A cue kind named after one of those needs no entry (it plays at
+// -6 dB). music: looped, from the start of clip `from` (default: the video start) to the start of clip
 // `to` (default: the video end), ducked while the track sounds. Fades default to 1.5 s in at the video's start, 3 s
 // out at its end and 0.4 s elsewhere; a render that cuts a segment fades it at the cut. cues: the sound for each cue
 // kind (data/cues.json, from `reel events`, holds the times scenes asked for); cues closer than minGap s share one.
 // entryCues: extra cues of that kind at the start of the listed clips. loudness: the target (false: none, and a
 // limiter at -0.4 dBFS instead). --from is the timeline time the video starts at (the render's --from).
 import { $ } from 'bun';
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { durationOf, measure } from './audio-io';
@@ -61,11 +63,17 @@ export interface MixOptions {
   subtitles?: string;
 }
 
-/** A sound file named in mix.json: the project's audio/ folder. */
+/** The cue sounds the engine ships (tools/make_sounds.ts): tick, click, pop, whoosh, swell, impact. */
+export function bundledDir() { return path.join(import.meta.dir, '..', 'sounds'); }
+export function bundledSounds() { return readdirSync(bundledDir()).filter((f) => f.endsWith('.wav')).map((f) => f.slice(0, -4)); }
+
+/** A sound file named in mix.json: the project's audio/ folder, else one of the engine's bundled sounds by name. */
 export function soundFile(root: string, file: string) {
   const f = path.join(root, 'audio', file);
-  if (!existsSync(f)) throw new Error(`mix.json names ${file}, which is not in ${path.join(root, 'audio')}`);
-  return f;
+  if (existsSync(f)) return f;
+  const name = file.replace(/^reel:/, '').replace(/\.wav$/, '');
+  if (bundledSounds().includes(name)) return path.join(bundledDir(), `${name}.wav`);
+  throw new Error(`mix.json names ${file}, which is not in ${path.join(root, 'audio')} nor one of the bundled sounds (${bundledSounds().join(', ')})`);
 }
 
 /** The project's track (data/audio.json `track`), or null for a silent video. */
@@ -89,6 +97,9 @@ export async function mixVideo(o: MixOptions) {
     if (!existsSync(cuesPath)) throw new Error(`${cuesPath} is missing: run \`reel events\` first (it writes the clips and the scenes' cues)`);
     ev = JSON.parse(readFileSync(cuesPath, 'utf8')) as Events;
   }
+  // (a cue kind named after a bundled sound needs no entry in mix.json)
+  const bundled = bundledSounds();
+  for (const c of ev.cues) if (!cfg.cues?.[c.kind] && bundled.includes(c.kind)) cfg.cues = { ...cfg.cues, [c.kind]: { file: c.kind, db: -6 } };
   const dur = await durationOf(input);
   const track = projectTrack(root);
   const g = buildMix(cfg, ev, dur, from, track, (f) => soundFile(root, f));
