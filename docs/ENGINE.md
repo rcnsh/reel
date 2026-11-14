@@ -6,7 +6,7 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 
 ## Running things
 
-`reel` is `bun <engine>/cli/reel.ts`; run it in the project folder or pass `--project <folder>`. `reel --help` lists everything.
+`reel` is `bun <engine>/cli/reel.ts`; run it in the project folder or pass `--project <folder>`. `reel --help` lists everything. In a project made by `reel init`, `bun run reel …` does the same and `bun run typecheck` checks its scenes against the engine.
 
 - Preview: `reel dev`, then http://localhost:5173/?t=2.0 (space = play/pause, ←/→ = ±1 s, shift = ±5 s, `,`/`.` = ±1 frame, `[`/`]` = previous/next clip, `l` = loop the current clip, `h` = hide the UI).
 - Stills (the main way to check your work — then LOOK at the PNGs with the Read tool): `reel still --t 12.5,13.0,14.2 --only hello --out out/wip/hello`. They are the pixels the video export produces.

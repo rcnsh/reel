@@ -8,6 +8,7 @@ import { tmpdir } from 'node:os';
 import { parseArgs } from 'node:util';
 import path from 'node:path';
 import { ENGINE, projectDir, startServer } from './server';
+import { initOptions, initProject } from './init';
 
 const HELP = `reel <command> [flags]
 
@@ -24,6 +25,8 @@ Rendering (headless Chrome; each exits 1 on a scene error)
   gpu                        the GPU Chrome renders with
 
 Working on a project
+  init <folder>              a new project that renders straight away; refuses a folder that holds anything
+                             [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
   dev                        the preview player with live reload                  [--port 5173]
   narrate                    time narration.txt with a scratch voice (macOS say)
   align <recording|folder>   time narration.txt to a voice recording
@@ -61,6 +64,30 @@ const fail = (msg: string): never => {
   console.error(`reel: ${msg}`);
   process.exit(2);
 };
+if (mode === 'init') {
+  let a;
+  try {
+    a = parseArgs({ args: argv.slice(1), strict: true, allowPositionals: true, options: { size: { type: 'string' }, fps: { type: 'string' }, theme: { type: 'string' }, narrated: { type: 'boolean' }, json: { type: 'boolean' }, help: { type: 'boolean' } } });
+  } catch (e) { fail(`${(e as Error).message} (reel --help)`); }
+  if (a!.values.help) { console.log(HELP); process.exit(0); }
+  if (a!.positionals.length !== 1) fail('init needs one folder: reel init <folder>');
+  const json = !!a!.values.json, out: { ok: boolean; errors: string[]; logs: string[]; project?: string; files?: string[] } = { ok: true, errors: [], logs: [] };
+  let files: string[] = [];
+  try { files = initProject(a!.positionals[0]!, initOptions(a!.values)); } catch (e) { fail((e as Error).message); }
+  const project = path.resolve(a!.positionals[0]!);
+  Object.assign(out, { project, files });
+  if (!json) console.log(files.map((f) => path.relative(process.cwd(), f)).join('\n'));
+  if (a!.values.narrated) {
+    // time the script with a scratch voice, so the project has its words and length before the first render
+    const p = Bun.spawn(['bun', path.join(ENGINE, 'tools/narration.ts')], { stdio: ['ignore', json ? 'pipe' : 'inherit', json ? 'pipe' : 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
+    if (await p.exited !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` (macOS say) or \`reel align <recording>\` there`);
+  }
+  out.ok = !out.errors.length;
+  if (json) console.log(JSON.stringify(out, null, 1));
+  else if (out.ok) console.log(`\n${project} is ready: cd there and run \`bun run reel still --t 1\``);
+  else console.error(out.errors.join('\n'));
+  process.exit(out.ok ? 0 : 1);
+}
 if (TOOLS[mode]) {
   const rest = argv.slice(1);
   let dir = '.';

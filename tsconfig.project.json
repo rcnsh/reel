@@ -1,0 +1,25 @@
+{
+  "//": "The base tsconfig of a video project outside this repo (reel init writes one that extends it by absolute path): the engine, its scenes and three.js's types resolve to this checkout, so a project needs no install to typecheck.",
+  "compilerOptions": {
+    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "target": "ESNext",
+    "module": "ESNext",
+    "moduleDetection": "force",
+    "moduleResolution": "bundler",
+    "allowImportingTsExtensions": true,
+    "noEmit": true,
+    "strict": true,
+    "skipLibCheck": true,
+    "noFallthroughCasesInSwitch": true,
+    "noImplicitOverride": true,
+    "types": [],
+    "paths": {
+      "reel": ["./src/index.ts"],
+      "reel/config": ["./src/config.ts"],
+      "reel/scenes/*": ["./src/scenes/*"],
+      "three": ["./node_modules/@types/three"],
+      "three/*": ["./node_modules/@types/three/*"]
+    }
+  },
+  "files": ["./project.d.ts"]
+}
