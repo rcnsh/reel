@@ -182,7 +182,7 @@ export const HTML_TEXEL_GLSL = /* glsl */ `
 vec4 htmlTexel(sampler2D tex, vec2 uv) { vec4 c = texture(tex, uv); vec3 s = c.a > 0.0 ? c.rgb / c.a : vec3(0.0); return vec4(toLinear(s) * c.a, c.a); }`;
 
 /** A rectangle in layer px, and what to report it as. */
-interface DomBox { kind: DrawnBox['kind']; x: number; y: number; w: number; h: number; text?: string; size?: number; color?: string; alpha: number; label?: string; exempt?: CheckRule[] | true; overflow?: DrawnBox['overflow'] }
+interface DomBox { kind: DrawnBox['kind']; x: number; y: number; w: number; h: number; text?: string; size?: number; color?: string; alpha: number; label?: string; exempt?: CheckRule[] | true; overflow?: DrawnBox['overflow']; flow?: string }
 
 /**
  * An HTML layer: markup and CSS rendered into a texture at the output resolution. Make it in a scene's field
@@ -407,7 +407,7 @@ export class HtmlLayer {
     for (const b of this.boxCache.boxes) {
       const [x, y, w, h] = map(b.x, b.y, b.w, b.h);
       report({
-        kind: b.kind, x, y, w, h, text: b.text, size: b.size === undefined ? undefined : b.size * k, color: b.color, alpha: b.alpha * opacity, label: b.label, exempt: b.exempt,
+        kind: b.kind, x, y, w, h, text: b.text, size: b.size === undefined ? undefined : b.size * k, color: b.color, alpha: b.alpha * opacity, label: b.label, exempt: b.exempt, flow: b.flow,
         overflow: b.overflow && { ...b.overflow, container: map(...b.overflow.container), px: b.overflow.px * k },
       });
     }
@@ -458,6 +458,17 @@ function exemptOf(e: Element): CheckRule[] | true | undefined {
  * its computed size, colour and opacity), images, and text that overflows its element or is clipped by an
  * ancestor's `overflow`. `data-label` names an element; `data-exempt` lists rules it is meant to break.
  */
+const flowIds = new WeakMap<Element, string>();
+let flowCount = 0;
+/** The run of text an element's text belongs to: its nearest ancestor (or itself) that is not `display: inline`. */
+function flowOf(e: Element) {
+  let n: Element = e;
+  while (n.parentElement && /^(inline|contents)$/.test(getComputedStyle(n).display)) n = n.parentElement;
+  let id = flowIds.get(n);
+  if (!id) flowIds.set(n, (id = `html${++flowCount}`));
+  return id;
+}
+
 function domBoxes(l: HtmlLayer): DomBox[] {
   const out: DomBox[] = [];
   const base = l.el.getBoundingClientRect();
@@ -489,7 +500,7 @@ function domBoxes(l: HtmlLayer): DomBox[] {
     }
     if (x1 <= x0) continue;
     const [color, ca] = rgbaOf(cs.color) ?? [undefined, 1];
-    const box: DomBox = { kind: 'text', ...rel({ left: x0, top: y0, width: x1 - x0, height: y1 - y0 }), text: text.replace(/\s+/g, ' ').trim(), size: parseFloat(cs.fontSize), color, alpha: ca * opacityOf(e), label, exempt };
+    const box: DomBox = { kind: 'text', ...rel({ left: x0, top: y0, width: x1 - x0, height: y1 - y0 }), text: text.replace(/\s+/g, ' ').trim(), size: parseFloat(cs.fontSize), color, alpha: ca * opacityOf(e), label, exempt, flow: flowOf(e) };
     // text running out of its own box, or cut off by an ancestor that clips (vertically with some slack: a line
     // box shorter than the font's ascent and descent, as with line-height 1, is not an overflow)
     const own = e.getBoundingClientRect(), size = parseFloat(cs.fontSize), ty = Math.max(2, 0.2 * size);
@@ -505,6 +516,13 @@ function domBoxes(l: HtmlLayer): DomBox[] {
       const c = Math.max(Math.max(r.left - x0, x1 - r.right) - 1, Math.max(r.top - y0, y1 - r.bottom) - ty, n === e ? spill : 0);
       if (c > 0) { clipper = n; cut = c; break; }
     }
+    // (past the shadow root, the layer itself clips at its edges: text that also runs out of its own box is
+    // reported as overflowing it, the cause, below)
+    const ownSpill = spill > 0 && !/hidden|clip|auto|scroll/.test(cs.overflowX + cs.overflowY);
+    if (!clipper && !ownSpill) {
+      const c = Math.max(Math.max(base.left - x0, x1 - base.right) - 1, Math.max(base.top - y0, y1 - base.bottom) - ty);
+      if (c > 0) { clipper = l.el; cut = c; }
+    }
     const rectOf = (r: DOMRect): [number, number, number, number] => { const q = rel(r); return [q.x, q.y, q.w, q.h]; };
     if (clipper) {
       const c = clipper.getBoundingClientRect();
@@ -513,7 +531,7 @@ function domBoxes(l: HtmlLayer): DomBox[] {
       const v = rel({ left: Math.max(x0, c.left), top: Math.max(y0, c.top), width: Math.max(0, Math.min(x1, c.right) - Math.max(x0, c.left)), height: Math.max(0, Math.min(y1, c.bottom) - Math.max(y0, c.top)) });
       Object.assign(box, v);
     }
-    else if (spill > 0 && !/hidden|clip|auto|scroll/.test(cs.overflowX + cs.overflowY)) box.overflow = { clipped: false, container: rectOf(own), px: spill * sx };
+    else if (ownSpill) box.overflow = { clipped: false, container: rectOf(own), px: spill * sx };
     out.push(box);
   }
   return out;

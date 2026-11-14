@@ -59,7 +59,9 @@ CSS transitions jump to their end at once: when a style changed is not a functio
 Every element with text of its own is reported with the box of its text, its computed font size, colour and opacity; `<img>`, `<svg>` and elements with a background image as images. Two more rules apply to HTML text:
 
 - `overflow` (error): text runs out of its own box (a fixed width with an unbreakable word, `white-space: nowrap`).
-- `clipped` (warning): an ancestor with `overflow: hidden` cuts it off; with `text-overflow: ellipsis` or a line clamp it is a note (`info`), since that is deliberate. A clipped element's box is its visible part.
+- `clipped` (warning): an ancestor with `overflow: hidden`, or the edge of the layer itself, cuts it off; with `text-overflow: ellipsis` or a line clamp it is a note (`info`), since that is deliberate. A clipped element's box is its visible part.
+
+The parts of one run of text (a `<span>` in a paragraph, the words of a caption) are reported separately, so each keeps its own colour, and never count as overlapping each other.
 
 `data-label="title"` names an element in findings; `data-exempt="offFrame safeArea"` (or `data-exempt` alone: every rule) marks rules it is meant to break, on the element or an ancestor. The layer's draw transform and opacity apply to the boxes.
 

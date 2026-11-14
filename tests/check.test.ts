@@ -97,6 +97,11 @@ describe('findingsOf', () => {
     expect(findingsOf([sample(1, [one, box({ x: 420, text: 'two', clip: 'b', track: 0 })])], opts)).toHaveLength(0);
     expect(findingsOf([sample(1, [one, box({ x: 420, text: 'two', clip: 'b', track: 1 })])], opts).map((x) => x.kind)).toEqual(['overlap']);
   });
+  test('parts of one run of text (a highlighted word in its line) do not overlap each other', () => {
+    const line = box({ x: 400, w: 400, text: 'a line with a', flow: 'p1' }), word = box({ x: 560, w: 80, index: 1, text: 'word', color: '#FF0000', flow: 'p1' });
+    expect(findingsOf([sample(1, [line, word])], opts)).toHaveLength(0);
+    expect(findingsOf([sample(1, [line, { ...word, flow: 'p2' }])], opts).map((x) => x.kind)).toEqual(['overlap']);
+  });
   test('HTML text that overflows its box is an error; clipped a warning; truncated on purpose a note', () => {
     const over = box({ overflow: { clipped: false, container: [100, 100, 150, 40], px: 50 } });
     const clip = box({ index: 1, x: 100, y: 300, overflow: { clipped: true, container: [100, 300, 200, 40], px: 30 } });

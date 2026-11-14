@@ -32,6 +32,8 @@ export interface DrawnBox {
    * box; `container` is that box in frame px, `px` how far the text passes it.
    */
   overflow?: { clipped: boolean; truncated?: boolean; container: [number, number, number, number]; px: number };
+  /** Boxes with the same flow are parts of one run of text (a word in a span of a paragraph): they never overlap. */
+  flow?: string;
 }
 
 /**
