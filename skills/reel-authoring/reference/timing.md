@@ -44,3 +44,7 @@ A scene that wants a sound calls `cue(kind, t)` in `init()` (a pen tick at each 
 ```
 
 `music` runs from the start of clip `from` to the start of clip `to`, looped, ducked under the voice. `reel events` writes `data/cues.json` (the clips and every cue), then `reel mix <render.mp4> <out.mp4>` lays it all under the render. A partial render mixes with the same `--from`.
+
+## Subtitles
+
+`reel subtitles` writes `out/subtitles/subtitles.srt` and `.vtt` from `data/words.json`: cues of at most two lines of 42 characters and 7 seconds, broken after punctuation where it can, each held 0.4 s after its last word and at least a second long. `reel video --subtitles` adds them to the finished file as a soft track. Burned-in captions are the kit's `Captions`.
