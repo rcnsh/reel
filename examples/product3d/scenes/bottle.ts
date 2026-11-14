@@ -26,9 +26,9 @@ export default class Bottle extends Scene {
     await this.stage.studio({ target: [0, 0.07, 0], radius: 0.12, softness: 0.6 });
     await this.stage.environment('assets/studio.hdr', 0.9);
     this.stage.ground({ opacity: 0.4 });
-    // a card standing on the ground beside the bottle, turned a little towards the camera's path
-    this.label.position.set(0.11, 0.015, 0.075);
-    this.label.rotation.y = -0.3;
+    // a card standing on the ground right of the bottle, level with it, so the orbit never swings it across the bottle
+    this.label.position.set(0.125, 0.015, 0.0);
+    this.label.rotation.y = -0.15;
     this.stage.scene.add(this.label);
   }
 
