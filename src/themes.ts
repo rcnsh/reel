@@ -148,5 +148,19 @@ export function resolveTheme(t: ThemeName | Theme | string): ResolvedTheme {
     const ok = k === 'shake' ? Array.isArray(v) && v.length === 2 && v.every((x) => typeof x === 'number') : typeof v === 'number' && Number.isFinite(v);
     if (!ok) throw new Error(`theme post: ${k} ${JSON.stringify(v)} is not a number`);
   }
+  if (theme.overlay) checkHud(theme.overlay, 'theme overlay');
   return { name, palette: out, post: { ...theme.post }, overlay: theme.overlay ? { ...theme.overlay } : null };
+}
+
+/** Check HUD params (a theme's overlay): a misspelt key or a wrong type is an error, not a missing caption. */
+export function checkHud(p: unknown, where: string): asserts p is HudParams {
+  if (!p || typeof p !== 'object' || Array.isArray(p)) throw new Error(`${where}: expected an object like { marks: true }`);
+  const o = p as Record<string, unknown>;
+  for (const k of Object.keys(o)) if (!['marks', 'fly', 'caption', 'tone'].includes(k)) throw new Error(`${where}: unknown key '${k}' (expected marks, fly, caption, tone)`);
+  if (o.marks !== undefined && typeof o.marks !== 'boolean') throw new Error(`${where}: marks ${JSON.stringify(o.marks)} is not true or false`);
+  if (o.fly !== undefined && !(typeof o.fly === 'number' && o.fly >= 0)) throw new Error(`${where}: fly ${JSON.stringify(o.fly)} is not a number of seconds`);
+  if (o.tone !== undefined && o.tone !== 'light' && o.tone !== 'dark') throw new Error(`${where}: tone ${JSON.stringify(o.tone)} is not 'light' or 'dark'`);
+  const c = o.caption as Record<string, unknown> | undefined;
+  if (c !== undefined && (!c || typeof c !== 'object' || typeof c.text !== 'string' || (c.fig !== undefined && typeof c.fig !== 'string')))
+    throw new Error(`${where}: caption ${JSON.stringify(c)} is not { fig?: string, text: string }`);
 }
