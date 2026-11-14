@@ -79,9 +79,10 @@ or, for a client configured with JSON:
 - `src/themes.ts`: the themes (`print`, `film`, `neutral`), `extendTheme` and the checks a theme goes through. `src/scenes/`: scenes any project can place, imported as `reel/scenes/<name>`: `hud` (crop marks and captions).
 - `src/main.ts`, `index.html`: the page a project runs in: the preview player and the export API (`window.__reel`).
 - `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export; `cli/diff.ts` and `cli/png.ts`: image comparison; `cli/mcp.ts`: the MCP server. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
-- `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
+- `tools/`: `narration.ts` (scratch track), `align.ts` + `align-words.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` + `mix-graph.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
 - `skills/`: agent skills (Agent Skills format) that `reel init` copies into a project's `.claude/skills` and `reel skills update` refreshes: `reel-authoring` (the config, the Scene API, determinism and sampling rules, themes, the toolbox, timing; reference files beside it) and `reel-review-loop` (render, look, check, fix; when to export).
+- `tests/`: `bun test`: unit tests of the pure modules, and tests that render through Chrome (the MCP client).
 - `docs/ENGINE.md`: the engine's internals, for changing it: the page, a frame's pipeline, adaptive sampling, readback and export, reporting.
 
 ## Running

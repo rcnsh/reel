@@ -73,14 +73,14 @@ reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cu
 
 Run all that apply before reporting work done:
 
-1. `bun run typecheck`: one tsconfig over `src/`, `cli/`, `tools/` and `examples/`.
+1. `bun run typecheck`: one tsconfig over `src/`, `cli/`, `tools/`, `examples/` and `tests/`; then `bun test`.
 2. Stills of every clip you touched, looked at with the Read tool: `reel still --project <p> --t <times> --only <clip>`. `reel sheet --cuts` checks every cut at once.
 3. Theme or post changes: the print theme must still render the demo byte for byte as before. Stills before and after (`reel still --project examples/demo --t 0.4,2.5,5,7.3`) compared with a pixel diff.
 4. Export path changes: both examples end to end. `reel video --project examples/demo --samples auto --preset veryfast --out <raw.mp4>`, then `reel events`, then `reel mix <raw.mp4> <out.mp4>`; and `reel video --project examples/layers --samples auto --preset veryfast` (tracks, a crossfade, the film theme's overlay, no audio, vertical, 30 fps).
 5. `reel init`, `tsconfig.project.json` or `project.d.ts` changes: `reel init` a silent and a `--narrated` project under `/tmp`, then in each `bun run typecheck`, `bun run reel still --t 1` and `bun run reel video --samples auto --preset veryfast`.
 6. Python tool changes: run the tool on real input. For `analyze.py`, a synthetic track with a known tempo and first downbeat shows whether the grid and bar phase are right; a lead-in, a break and a non-integer tempo are the cases that have broken it before.
 
-No test suite exists yet; these renders are the tests.
+`bun test` runs the tests in `tests/`: unit tests of the pure modules (words, audio, config, themes, flags, check's measurements, PNG diffing, word alignment, the mix's filter graph) in well under a second, and the slower ones that need Chrome (`CHROME_PATH`; they skip without it): the MCP client test. Run it before every commit; run the unit files alone (`bun test tests/words.test.ts`) while working. A test that pins a behaviour you changed on purpose gets updated in the same commit. The tests prove the parts; the renders above still prove the video.
 
 ## Environment and gotchas
 

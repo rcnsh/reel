@@ -1,0 +1,33 @@
+import { expect, test } from 'bun:test';
+import { alignWords, normWord, type ScriptWord } from '../tools/align-words';
+
+const script = (text: string): ScriptWord[] => text.split(' ').map((w) => ({ w, line: 0 }));
+
+test('normWord', () => {
+  expect(normWord('Don’t,')).toBe('dont');
+  expect(normWord('152,000')).toBe('152000');
+});
+
+test('matched words take the times heard', () => {
+  const sw = script('The pen writes');
+  const m = alignWords(sw, [{ w: 'the', s: 1, e: 1.2 }, { w: 'pen', s: 1.3, e: 1.6 }, { w: 'writes.', s: 1.7, e: 2.2 }], 0.6, 5);
+  expect(m).toEqual([true, true, true]);
+  expect(sw.map((x) => [x.s, x.e])).toEqual([[1, 1.2], [1.3, 1.6], [1.7, 2.2]]);
+});
+
+test('a filler heard and a word misheard: neighbours keep their times, the misheard one shares the gap', () => {
+  const sw = script('one two three');
+  const m = alignWords(sw, [{ w: 'one', s: 1, e: 1.2 }, { w: 'um', s: 1.3, e: 1.4 }, { w: 'too', s: 1.5, e: 1.8 }, { w: 'three', s: 2, e: 2.3 }], 0.6, 5);
+  expect(m).toEqual([true, false, true]);
+  expect(sw[1]!.s).toBe(1.2);
+  expect(sw[1]!.e).toBeCloseTo(1.2 + 0.8 * 0.92, 9); // the whole gap to 'three', 8% left as a pause
+  expect(sw[2]!.s).toBe(2);
+});
+
+test('nothing heard: the words share the span by length', () => {
+  const sw = script('a bbbb');
+  alignWords(sw, [], 1, 2);
+  expect(sw[0]!.s).toBe(1);
+  expect(sw[1]!.s).toBeCloseTo(1 + 2.5 / 8, 9); // lengths + 1.5: 2.5 and 5.5
+  expect(sw[1]!.e).toBeCloseTo(sw[1]!.s! + (5.5 / 8) * 0.92, 9);
+});

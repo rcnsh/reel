@@ -39,6 +39,7 @@
     "src",
     "cli",
     "tools",
-    "examples"
+    "examples",
+    "tests"
   ]
 }
