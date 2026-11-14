@@ -133,6 +133,10 @@ test('glTF animation is sampled at a time: the same pose in any order, after any
   // looping: 3.1 s is 1.1 s into the 2 s clip
   expect(at(3.1)).toEqual(at(1.1));
   expect(() => new Animation(g.scene, g.animations, { play: ['nope'] })).toThrow("animation 'nope' is not in the model");
+  // played once, a clip holds its last pose after its end and starts again from any earlier time
+  const once = new Animation(g.scene, g.animations, { loop: false });
+  const y = (t: number) => { once.at(t); return model.position.y; };
+  expect([y(0.5), y(5), y(0.5), y(1), y(9), y(0)]).toEqual([1, 0, 1, 2, 0, 0]);
 });
 
 describe('check of 3D boxes', () => {

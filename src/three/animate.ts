@@ -38,6 +38,8 @@ export class Animation {
 
   /** Pose the model `t` seconds into its clips (times `speed`, default 1). */
   at(t: number, speed = 1) {
+    // (a clip that played once to its end pauses itself, and setTime would leave it there: every action starts over)
+    for (const a of this.actions) a.reset();
     this.mixer.setTime(Math.max(0, t * speed));
     return this;
   }
