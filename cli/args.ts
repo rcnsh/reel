@@ -5,7 +5,8 @@ import type { AdaptiveSampling } from '../src/engine/engine';
 
 export const HELP = `reel <command> [flags]
 
-Looking at a project (headless Chrome; each exits 1 on a scene error)
+Looking at a project (headless Chrome, through a warm renderer the CLI starts per project and
+reuses; each exits 1 on a scene error)
   info                       the project's format, duration, clips, tracks, cues and theme
   still   --t 1.5,23[,..]    PNG stills, the pixels the video export produces. Named after the clips
                              on screen and the time (hello_1.500s.png); never overwrites a file
@@ -27,7 +28,7 @@ Looking at a project (headless Chrome; each exits 1 on a scene error)
 
 Rendering
   video                      the video: x264 through ffmpeg, with the project's audio track; runs its
-                             own browsers
+                             own browsers, not the warm renderer
                              [--from 0] [--to <duration>] [--out <file.mp4>] [--crf 16] [--preset slow]
                              [--x264 aq-mode=3] [--noaudio] [--workers 2] [--chunk 8] [--mem-gb 1]
                              [--spool-gb 20] [--progress (JSON lines on stderr)]
@@ -35,6 +36,8 @@ Rendering
 Working on a project
   init <folder>              a new project that renders straight away; refuses a folder that holds anything
                              [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
+  daemon status              the warm renderers running, per project
+  daemon stop                stop the project's warm renderer          [--all: every project's]
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
   narrate                    time narration.txt with a scratch voice (macOS say)
   align <recording|folder>   time narration.txt to a voice recording
@@ -50,7 +53,9 @@ Flags for every command that renders
   --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project)
   --size WxH, --fps N  override the project's frame size and rate
   --theme <name>       render with a built-in theme (print, film, neutral) instead of the project's
-  --headed             show the browser
+  --no-daemon          render in a browser of its own, started and stopped by this command
+                       (also REEL_NO_DAEMON=1)
+  --headed             show the browser (implies --no-daemon)
   --json               machine-readable output: one JSON object { ok, errors, logs, ... }
 
 Chrome: $CHROME_PATH, else the installed Google Chrome. Exit codes: 0 done, 1 failed (a scene
@@ -62,7 +67,7 @@ type Opt = typeof str | typeof bool;
 /** Flags of every command that renders through a page. */
 const RENDER: Record<string, Opt> = {
   project: str, json: bool, help: bool, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str,
-  shutter: str, scale: str, size: str, fps: str, theme: str, headed: bool,
+  shutter: str, scale: str, size: str, fps: str, theme: str, headed: bool, 'no-daemon': bool,
 };
 const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
 
@@ -78,6 +83,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   gpu: { render: true, opts: {} },
   video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
+  daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };
 

@@ -17,6 +17,8 @@ canvas.style.aspectRatio = W + ' / ' + H;
 if (EXPORT) { canvas.style.width = W + 'px'; canvas.style.height = H + 'px'; }
 
 const engine = new Engine(canvas, config);
+let contextLost = false;
+canvas.addEventListener('webglcontextlost', () => { contextLost = true; console.error('the WebGL context was lost'); });
 
 declare global {
   interface Window { __reel: any }
@@ -125,8 +127,12 @@ function setupExport() {
     track: engine.audio.track,
     /** Scene and shader errors: the page's load errors and the render errors since beginRequest(). */
     get errors() { return engine.errors; },
-    /** Start a request on a warm page: render errors are reported again from here (once per clip). */
-    beginRequest() { engine.clearRenderErrors(); },
+    /**
+     * Start a request on a warm page: render errors are reported again from here (once per clip). Returns false
+     * when the page can no longer render (its GL context was lost: the GPU process crashed or was reset).
+     */
+    beginRequest() { engine.clearRenderErrors(); return !contextLost; },
+    get contextLost() { return contextLost; },
     /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24). */
     scale: SCALE,
     width: PW,

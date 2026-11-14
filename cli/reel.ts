@@ -80,6 +80,31 @@ if (mode === 'init') {
   });
 }
 
+if (mode === 'daemon') {
+  const sub = P.positionals[0];
+  const d = await import('./daemon');
+  if (sub === 'run') {
+    try { await d.serve(projectDir(typeof A.project === 'string' ? A.project : '.')); } catch (e) { fail((e as Error).message); }
+    await new Promise(() => {});
+  }
+  const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
+  if (sub === 'status') {
+    const list = await d.status();
+    res.daemons = list;
+    finish(res, () => {
+      if (!list.length) console.log('no warm renderer is running');
+      for (const x of list) console.log(`${x.project}\n  pid ${x.pid}, up ${Math.round(x.uptime / 1000)} s, ${x.busy ? 'busy' : `idle ${Math.round(x.idle / 1000)} s`}, ${x.requests} requests, ${x.pages} page${x.pages === 1 ? '' : 's'}${x.stale ? ', stale (the engine changed: the next command restarts it)' : ''}\n  log ${x.log}`);
+    });
+  }
+  if (sub === 'stop') {
+    let project: string | null = null;
+    if (!A.all) try { project = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail(`${(e as Error).message}, or --all`); }
+    res.stopped = await d.stop(project);
+    finish(res, () => console.log((res.stopped as string[]).length ? `stopped ${(res.stopped as string[]).join(', ')}` : 'no warm renderer was running'));
+  }
+  fail(`daemon ${sub}: expected status or stop`);
+}
+
 let PROJECT = '';
 // (diff of two files needs no project)
 const needsProject = !(mode === 'diff' && A.t === undefined);
@@ -153,8 +178,12 @@ function argsOf(v: Values): Record<string, unknown> {
   }
 }
 
-/** Run a request on a renderer of this command's own. */
+/** Run a request on the project's warm renderer, or (--no-daemon, --headed) on a renderer of this command's own. */
 async function render(q: Req): Promise<Result> {
+  if (!A['no-daemon'] && !A.headed && !process.env.REEL_NO_DAEMON) {
+    const { call } = await import('./daemon');
+    return call(q);
+  }
   const { Renderer } = await import('./renderer');
   const { run } = await import('./ops');
   const r = new Renderer(PROJECT, { headed: !!A.headed });

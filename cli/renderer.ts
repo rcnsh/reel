@@ -64,6 +64,10 @@ export class PageHandle {
   logs: string[] = [];
   dead = false;
   constructor(public page: Page, public key: string, public gen: number, public fmt: Format, public used: number) {}
+  /** Whether the page's GL context was lost (the GPU process went away): it cannot render any more. */
+  async lost(): Promise<boolean> {
+    return this.page.evaluate(() => !!(window as any).__reel?.contextLost).catch(() => true);
+  }
   /** Scene and shader errors of this request (the page's load errors and its render errors since begin). */
   async errors(): Promise<string[]> {
     return this.page.evaluate(() => (window as any).__reel.errors as string[]).catch((e) => [`the page stopped answering: ${(e as Error).message}`]);
@@ -150,7 +154,11 @@ export class Renderer {
       h.logs = [];
     }
     h.used = ++this.uses;
-    await h.page.evaluate(() => (window as any).__reel.beginRequest());
+    if (!(await h.page.evaluate(() => (window as any).__reel.beginRequest()))) {
+      // (a warm page whose GL context was lost renders nothing: open a fresh one)
+      await this.drop(h);
+      return this.page(o);
+    }
     return h;
   }
 

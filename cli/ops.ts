@@ -186,7 +186,7 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       res.logs.push(...h.logs);
       break;
     } catch (e) {
-      if (attempt === 0 && (h?.dead || isGone(e))) {
+      if (attempt === 0 && (h?.dead || isGone(e) || (h && await h.lost()))) {
         if (h) await r.drop(h);
         res.warnings.push(`the page went away (${String((e as Error)?.message ?? e).split('\n')[0]}): ran the request again on a new one`);
         continue;
