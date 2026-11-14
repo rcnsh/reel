@@ -10,6 +10,7 @@ export * from './engine/spark';
 export * from './engine/post';
 export * from './engine/words';
 export * from './engine/audio';
+export { report, reportText, reporting, CHECK_RULES, type CheckRule, type DrawnBox } from './engine/report';
 export { GLSL_COMMON } from './engine/glsl/common';
 export { themes, extendTheme } from './themes';
 export type { Theme, ThemeName, HudParams } from './themes';

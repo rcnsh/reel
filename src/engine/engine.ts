@@ -9,6 +9,7 @@ import { THEME } from './palette';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene';
 import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
+import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import type { Clip, VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -124,6 +125,12 @@ export class Engine {
   }
 
   timeline: TimelineEntry[] = [];
+  /**
+   * Collect what scenes report drawing (report(), reportText()) during the next render() into lastBoxes: for
+   * `reel check`. With several sub-frames, the boxes are those of the sub-frame nearest the frame's time.
+   */
+  collectBoxes = false;
+  lastBoxes: ReportedBox[] = [];
   /** The clip whose scene is being initialised or drawn (names errors that surface inside three.js). */
   private drawing = '';
 
@@ -341,6 +348,9 @@ export class Engine {
       if (ids.has(e.id)) throw new Error(`timeline: two clips are called '${e.id}'`);
       ids.add(e.id);
       if (!(e.end > e.start) || e.start < 0) throw new Error(`timeline: clip '${e.id}' runs ${e.start} to ${e.end}`);
+      const ex = e.check?.exempt;
+      if (ex !== undefined && ex !== true && !(Array.isArray(ex) && ex.every((r) => CHECK_RULES.includes(r))))
+        throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
     }
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
@@ -423,9 +433,14 @@ export class Engine {
     let outTex: THREE.Texture;
     let post: PostParams = { ...DEFAULT_POST };
     let n = 1;
+    const collect = this.collectBoxes;
+    let nearestBoxes = Infinity;
+    if (collect) this.lastBoxes = [];
     if (samples === 1) {
       SS_TAP.value = -1;
+      if (collect) boxes.begin();
       ({ outTex, post } = this.composite(t, dt, seeked));
+      if (collect) this.lastBoxes = boxes.end();
     } else {
       const adaptive = typeof samples !== 'number';
       let maxAdaptive = adaptive ? samples.max : 0;
@@ -451,6 +466,7 @@ export class Engine {
         // (clamped at 0: before the video no scene is active, and frame 0 would come out half black)
         const ts = Math.max(0, t + dt * shutter * u);
         let res: ReturnType<Engine['composite']>;
+        if (collect) boxes.begin();
         if (!this.masking) res = this.composite(ts, step, seeked && k === 0);
         else {
           // a scene that depth-tests its own 3D can't draw over the mask: its sub-frames are drawn unmasked
@@ -464,11 +480,13 @@ export class Engine {
           }
           if (own) {
             this.setMasking(false);
+            if (collect) boxes.begin();
             res = this.composite(ts, step, seeked && k === 0);
             this.writeTileMask();
             this.setMasking(true);
           }
         }
+        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; } }
         this.accum.u.src!.value = res!.outTex;
         this.accum.render(r, into);
         const d = Math.abs(u - POST_U);
@@ -635,7 +653,9 @@ export class Engine {
       const s = rec.scene;
       // (sub-frames of one frame may step back within its shutter: not a seek)
       const sceneSeeked = seeked || rec.lastT < 0 || Math.abs(t - rec.lastT) > 0.25;
+      boxes.clip(e.id);
       if (s.stateful && sceneSeeked) {
+        boxes.pause(true);
         s.reset();
         const from = Math.max(e.start, t - s.prerollMax);
         const step = 1 / FPS;
@@ -644,6 +664,7 @@ export class Engine {
           s.render(this.frameFor(e, pt, first ? 0 : step, first, true, null, 1, 0), rt);
           first = false;
         }
+        boxes.pause(false);
       }
       let ov: PostOverrides | void = undefined;
       this.drawing = e.id;

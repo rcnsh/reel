@@ -53,7 +53,7 @@ const abs = (p: unknown) => (typeof p === 'string' ? path.resolve(p) : undefined
 function finish(res: Result, human: (r: Result) => void): never {
   if (json) console.log(JSON.stringify(res, null, 1));
   else {
-    if (res.ok) human(res);
+    if (res.ok || res.findings) human(res);
     for (const w of res.warnings ?? []) console.error(`warning: ${w}`);
     if (res.logs.length) console.error('BROWSER LOG:\n' + res.logs.slice(0, 40).join('\n'));
     if (res.errors.length) console.error('ERRORS:\n' + res.errors.join('\n'));
@@ -120,6 +120,15 @@ if (mode === 'dev') {
   await new Promise(() => {});
 }
 
+function printCheck(x: Result) {
+  const fs = x.findings as import('../src/check').Finding[], sm = x.summary as Record<string, number>;
+  for (const f of fs) {
+    const when = f.until > f.t ? `${f.t.toFixed(2)}-${f.until.toFixed(2)}s` : `${f.t.toFixed(2)}s`;
+    console.log(`${f.severity.toUpperCase().padEnd(7)} ${f.kind.padEnd(10)} ${when.padEnd(12)} ${(f.clip || '-').padEnd(12)} ${f.message}${f.image ? `\n${' '.repeat(44)}${f.image}` : ''}`);
+  }
+  console.log(`${x.frames} frames checked: ${sm.error} errors, ${sm.warning} warnings, ${sm.info} notes`);
+}
+
 const hist = (h: Record<string, number>) => Object.entries(h).sort((a, b) => +a[0] - +b[0]).map(([k, v]) => `${k}:${v}`).join(' ');
 
 let req!: Req;
@@ -172,6 +181,13 @@ function argsOf(v: Values): Record<string, unknown> {
     }
     case 'sheet': return { from: num(v, 'from'), to: num(v, 'to'), n: int(v, 'n', 12), times: list(v, 'times'), cuts: !!v.cuts, cols: int(v, 'cols', 4), cell: int(v, 'cell', 480, 16), out: abs(v.out), maxSize };
     case 'strip': return { from: num(v, 'from'), to: num(v, 'to'), n: int(v, 'n', 8, 2), frames: v.frames === undefined ? undefined : int(v, 'frames', 8, 2), cell: int(v, 'cell', 360, 16), out: abs(v.out), maxSize };
+    case 'check': {
+      const safe = num(v, 'safe', 0.05);
+      if (!(safe >= 0 && safe < 0.5)) throw new UsageError(`--safe ${v.safe}: expected a share of the side from 0 to 0.5`);
+      const step = num(v, 'step', 0.5);
+      if (!(step > 0)) throw new UsageError(`--step ${v.step}: expected seconds over 0`);
+      return { from: num(v, 'from'), to: num(v, 'to'), step, safe, minText: num(v, 'min-text'), frozen: num(v, 'frozen', 3), out: abs(v.out) };
+    }
     case 'events': return { out: abs(v.out) };
     case 'perf': return { from: num(v, 'from', 0), to: num(v, 'to', 5) };
     default: return {};
@@ -238,6 +254,7 @@ finish(res, (x) => {
   } else if (mode === 'still') {
     for (const f of x.frames as { t: number; file: string; subFrames: number }[]) say(typeof req.samples === 'number' ? f.file : `${f.file}  (${f.subFrames} sub-frames)`);
   } else if (mode === 'sheet' || mode === 'strip') say(String(x.file));
+  else if (mode === 'check') printCheck(x);
   else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues`);
   else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
   else if (mode === 'gpu') say(String(x.gpu));

@@ -8,6 +8,7 @@ import { Scene, type Frame } from '../engine/scene';
 import { Layer2D, W, H, clearRT } from '../engine/gl';
 import { rgba, TONE } from '../engine/palette';
 import { F, font } from '../engine/type';
+import { reportText, reporting } from '../engine/report';
 import { clamp, ease, lerp, prog, smoothstep } from '../engine/util';
 import type { HudParams } from '../themes';
 
@@ -31,6 +32,8 @@ export default class Hud extends Scene {
     const chars = cap ? Math.floor(cap.text.length * prog(f.t, f.start, f.start + 0.8)) : 0;
     if (marks <= 0 && capA <= 0) return;
     const key = `${marks}|${capA}|${chars}`;
+    // (the caption sits in the margin by design, and its figure label is small on purpose)
+    if (reporting() && cap && capA > 0) this.reportCaption(cap, capA, chars);
     if (key !== this.drawn) {
       this.drawn = key;
       const c = this.layer.ctx, light = (p.tone ?? (TONE.light === 'bg' ? 'light' : 'dark')) === 'light';
@@ -55,6 +58,21 @@ export default class Hud extends Scene {
       c.moveTo(x + sx * l, y + 0.5 * sy); c.lineTo(x, y + 0.5 * sy); c.lineTo(x, y + sy * l);
     }
     c.stroke();
+    c.restore();
+  }
+
+  private reportCaption(cap: NonNullable<HudParams['caption']>, a: number, chars: number) {
+    const c = this.layer.ctx, x = W - 64, y = H - 66;
+    c.save();
+    c.font = font(F.serif(400, true), 26);
+    c.textAlign = 'left';
+    const full = c.measureText(cap.text).width, light = (this.ctx.params as HudParams).tone ? (this.ctx.params as HudParams).tone === 'light' : TONE.light === 'bg';
+    reportText(c, cap.text.slice(0, chars), x - full, y, { label: 'caption', exempt: ['safeArea'], color: light ? TONE.dark : TONE.light, alpha: a });
+    if (cap.fig) {
+      c.font = font(F.mono(500), 13);
+      c.letterSpacing = '3px';
+      reportText(c, cap.fig, x - full, y - 34, { label: 'caption fig', exempt: ['safeArea', 'minSize'], color: light ? 'accentLo' : 'accent', alpha: a });
+    }
     c.restore();
   }
 

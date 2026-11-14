@@ -8,6 +8,7 @@ import type { Words } from './engine/words';
 import type { AudioData } from './engine/audio';
 import type { BlendMode } from './engine/gl';
 import type { Theme, ThemeName } from './themes';
+import type { CheckRule } from './engine/report';
 
 export { themes, extendTheme, resolveTheme } from './themes';
 export type { Theme, ThemeName, HudParams, ResolvedTheme } from './themes';
@@ -40,6 +41,8 @@ export interface Clip {
   params?: Record<string, unknown>;
   /** Cap on adaptive motion-blur sub-frames while the clip is on screen (for noise that converges slowly). */
   maxSamples?: number;
+  /** `reel check` rules this clip is meant to break (a deliberate black frame: ['blank']); true: all of them. */
+  check?: { exempt?: CheckRule[] | true };
 }
 
 /** What `timeline()` is given: the project's timed words and audio analysis (both empty when it has none). */

@@ -1,6 +1,6 @@
 // Demo plate: a shader background (the theme's bg with engraved hatching in its fg) and the line set in type as it is spoken.
 import type * as THREE from 'three';
-import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, rgba, Words, ease, prog } from 'reel';
+import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, rgba, Words, ease, prog, reportText } from 'reel';
 
 export default class Hello extends Scene {
   bg = new FSPass(/* glsl */ `
@@ -27,6 +27,8 @@ export default class Hello extends Scene {
     c.textAlign = 'center';
     c.fillStyle = rgba('fg', rise);
     c.fillText(shown, W / 2, H / 2 + (1 - rise) * 40);
+    // (what `reel check` sees: the line's box, size and colour; free outside a check)
+    reportText(c, shown, W / 2, H / 2 + (1 - rise) * 40, { label: 'line' });
     comp.draw(renderer, this.text.upload(), out);
   }
 }

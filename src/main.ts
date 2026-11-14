@@ -2,6 +2,7 @@
 import { Engine, type AdaptiveSampling } from './engine/engine';
 import { W, H, PW, PH, SCALE, FPS } from './engine/gl';
 import { THEME } from './engine/palette';
+import { frameStats, hexRgb, measureText } from './check';
 import config from '@project/reel.config';
 
 const params = new URLSearchParams(location.search);
@@ -143,13 +144,27 @@ function setupExport() {
     theme: THEME.name,
     /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
     stateful: [...engine.loaded.values()].some((l) => l.scene?.stateful),
-    timeline: TIMELINE.map(({ id, start, end, track }) => ({ id, start, end, track: track ?? 0 })),
+    timeline: TIMELINE.map(({ id, start, end, track, check }) => ({ id, start, end, track: track ?? 0, ...(check?.exempt ? { exempt: check.exempt } : {}) })),
+    /** The theme's palette, #rrggbb per key. */
+    palette: THEME.palette,
     /** Ids of the clips on screen at t, lowest track first. */
     clipsAt,
     /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
     /** Render a single frame at t (seeks as needed). Returns the sub-frames used. */
     still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.render(t, 1 / FPS, true, samples, shutter); },
+    /**
+     * For `reel check`: render t collecting what the scenes report drawing, then measure the frame (its
+     * brightness grid) and every text box against the pixels behind it. Returns the boxes, the stats and the
+     * scene errors so far.
+     */
+    async inspect(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
+      engine.collectBoxes = true;
+      try { engine.render(t, 1 / FPS, true, samples, shutter); } finally { engine.collectBoxes = false; }
+      const px = { data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE };
+      const boxes = engine.lastBoxes.map((b) => ({ ...b, ...(b.kind === 'text' && b.color && /^#[0-9A-F]{6}$/i.test(b.color) && (b.alpha ?? 1) >= 0.05 ? { m: measureText(px, b, hexRgb(b.color)) } : {}) }));
+      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors };
+    },
     /**
      * The last rendered frame as a PNG (base64): the export's pixels at full resolution, or `crop` (x, y, w, h in
      * logical px) of them, at most `maxSize` px on the long side, with `marks` (logical rectangles) outlined.

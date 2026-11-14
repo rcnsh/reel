@@ -17,6 +17,12 @@ reuses; each exits 1 on a scene error)
   strip                      frames side by side in one row, to judge motion and easing: --n evenly
                              spaced from --from to --to (both included), or --frames N consecutive
                              frames from --from     [--cell 360] [--out <file.png>] [--max-size <px>]
+  check                      sweep the video for problems and print findings: blank or frozen frames,
+                             scene errors, and the boxes scenes report (report(), reportText()): text
+                             off the frame, in the safe margin, overlapping, too small or low in
+                             contrast; each with a cropped image. Exits 1 on an error finding
+                             [--from 0] [--to <duration>] [--step 0.5] [--safe 0.05] [--min-text <px>]
+                             [--frozen 3] [--out <dir>]
   diff    <a.png> <b.png>    compare two images: changed pixels, max and mean difference, the box
           --t <s> <b.png>    around the change and a diff image; --t renders that time (at <b.png>'s
                              size) and compares it; exits 1 when more than --threshold of the pixels
@@ -59,7 +65,7 @@ Flags for every command that renders
   --json               machine-readable output: one JSON object { ok, errors, logs, ... }
 
 Chrome: $CHROME_PATH, else the installed Google Chrome. Exit codes: 0 done, 1 failed (a scene
-error, a diff over its threshold), 2 bad command line or no project.`;
+error, an error finding of check, a diff over its threshold), 2 bad command line or no project.`;
 
 const str = { type: 'string' } as const, bool = { type: 'boolean' } as const;
 type Opt = typeof str | typeof bool;
@@ -76,6 +82,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   info: { render: true, opts: {} },
   still: { render: true, opts: { t: str, ...IMAGE } },
   sheet: { render: true, opts: { from: str, to: str, n: str, times: str, cuts: bool, cols: str, cell: str, ...IMAGE } },
+  check: { render: true, opts: { from: str, to: str, step: str, safe: str, 'min-text': str, frozen: str, out: str } },
   diff: { render: true, opts: { t: str, tol: str, threshold: str, out: str }, positionals: [1, 2] },
   strip: { render: true, opts: { from: str, to: str, n: str, frames: str, cell: str, ...IMAGE } },
   events: { render: true, opts: { out: str } },

@@ -1,7 +1,7 @@
 // Demo plate: a single-stroke font written by a spark in step with the narration's word timings, with a
 // sound cue at the start of every word for the mix.
 import type * as THREE from 'three';
-import { Scene, type Frame, Layer2D, W, H, clearRT, LIN, rgba, strokeText, drawStrokeText, writtenLength, type StrokeText, sparkHead2D, cue } from 'reel';
+import { Scene, type Frame, Layer2D, W, H, clearRT, LIN, rgba, strokeText, drawStrokeText, writtenLength, type StrokeText, sparkHead2D, cue, report, reporting } from 'reel';
 
 export default class Written extends Scene {
   layer = new Layer2D();
@@ -25,14 +25,27 @@ export default class Written extends Scene {
     clearRT(renderer, out, LIN.bg);
     const c = this.layer.ctx;
     this.layer.clear();
+    const ox = (W - this.st.width) / 2, oy = H / 2 + this.st.capHeight / 2, len = writtenLength(this.st, this.charTimes, f.t);
     c.save();
-    c.translate((W - this.st.width) / 2, H / 2 + this.st.capHeight / 2);
+    c.translate(ox, oy);
     c.strokeStyle = rgba('fg');
     c.lineWidth = 3;
     c.lineCap = c.lineJoin = 'round';
-    const head = drawStrokeText(c, this.st, writtenLength(this.st, this.charTimes, f.t));
+    const head = drawStrokeText(c, this.st, len);
     if (head) sparkHead2D(c, head.x, head.y, f.t, 0.5);
     c.restore();
+    if (reporting()) this.reportWritten(ox, oy, len);
     comp.draw(renderer, this.layer.upload(), out);
+  }
+
+  /** For `reel check`: the box around the strokes written so far (stroke text is paths, not fillText). */
+  private reportWritten(ox: number, oy: number, len: number) {
+    let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+    this.st.strokes.forEach((pts, i) => pts.forEach((p, j) => {
+      if (this.st.startLen[i]! + this.st.lens[i]![j]! > len) return;
+      x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+    }));
+    if (x1 < x0) return;
+    report({ kind: 'text', label: 'line', text: this.ctx.words.get('pen writes').text, size: this.st.size, color: 'fg', x: ox + x0 - 1.5, y: oy + y0 - 1.5, w: x1 - x0 + 3, h: y1 - y0 + 3 });
   }
 }

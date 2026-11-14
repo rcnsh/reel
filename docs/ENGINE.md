@@ -65,6 +65,16 @@ Rules:
 - `type.ts`: fonts. `F.archivo(width 62–125, weight 300–900)` (grotesk with width steps 62/75/87.5/100/112.5/125), `F.archivoItalic()`, `F.serif(weight, italic)` (Cormorant Garamond), `F.mono(weight, italic)` (IBM Plex Mono). `font(family, px)` → CSS font string. `layout(text, family, size, tracking)` → per-glyph x/advance with the font's kerning (draw glyph i at `glyphs[i].x`). `glyphX(text, i, family, size)` → where to start drawing `text[i..]` when a word is drawn in pieces (sung/unsung colours, wipes); never offset a piece by `measure(text.slice(0, i))`, which drops the kern between the pieces. `fitSize`, `measure`, `textPath2D` (opentype outline as Path2D), `textPathCommands`, `textPoints(text, family, size, step)` (points filling the glyphs — "text made of atoms"). `smart(s)` / `plain(s)`: typewriter quotes → typographic (’ “ ” …) and back.
 - `stroke.ts`: single-stroke plotter/engraving fonts (`script`, `hscript`, `sans`, `readable`, `tech`, `serif`, `osmotron`, `felix`): `strokeText(text, font, size, tracking, kern)`, `drawStrokeText(ctx2d, st, lengthPx)` → returns pen head position, `writtenLength(st, charTimes, t)` to sync writing to word timings. The fonts have no kerning tables: pairs that leave a hole (To, Yo, We, AV, LT…) are kerned optically from the glyph shapes (off for the connected scripts).
 
+## Reporting what you draw (`reel check`)
+
+`reel check` reads the boxes a scene reports while it draws (`src/engine/report.ts`, exported by `reel`):
+
+- `reportText(c, text, x, y, { label?, exempt? })` right after `c.fillText(text, x, y)`: the box comes from the context's font, alignment, baseline and transform, the size from its font, the colour from `fillStyle` and `globalAlpha`.
+- `report({ kind: 'text' | 'image' | 'shape', x, y, w, h, text?, size?, color?, alpha?, label?, exempt? })` for anything else (stroke fonts, glyph atlases, images), in logical px, origin top left. `color` is `#rrggbb`, `rgb()` or a palette key.
+- Give a `label` when the text changes over time (a line revealed letter by letter), so findings across frames merge. `exempt: ['offFrame']` (or `true`) marks a rule the box breaks on purpose; a clip's `check: { exempt: [...] }` does that for everything it shows. Rules: `blank`, `frozen`, `offFrame`, `safeArea`, `overlap`, `minSize`, `contrast`.
+- Both return at once outside a check (`reportText` does not even measure), so they cost nothing in previews and exports; put any extra work for them behind `if (reporting())`. Boxes drawn under 0.05 opacity are ignored, and contrast is measured only on text at 0.9 opacity or more (a fade is meant to be faint).
+- Contrast is measured in the rendered frame: the text's colour from its box's pixels nearest the reported colour, the background from a ring just outside the box, both after post-processing.
+
 ## Typography
 
 - Proportional text gets the font's kerning: whole strings through Canvas2D get it for free; glyph-by-glyph drawing must use `layout()` / `glyphX()`. Adjacent runs in different fonts or sizes have no kerning between them: set that gap by eye.
