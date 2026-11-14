@@ -15,6 +15,12 @@ export const LIMITS = { max: 42, span: 7, min: 1, hold: 0.4, gap: 0.04 };
 export function breakLines(text: string, max = LIMITS.max): string[] {
   if (text.length <= max) return [text];
   const words = text.split(' ');
+  // (one word: CJK, which has no spaces, breaks between characters; anything else stays whole, never an empty line,
+  // which would end the cue in an SRT file)
+  if (words.length === 1) {
+    const ch = [...text];
+    return CJK.test(text) ? [ch.slice(0, Math.ceil(ch.length / 2)).join(''), ch.slice(Math.ceil(ch.length / 2)).join('')] : [text];
+  }
   let best = 1, score = Infinity;
   for (let i = 1; i < words.length; i++) {
     const a = words.slice(0, i).join(' '), b = words.slice(i).join(' ');
@@ -25,8 +31,12 @@ export function breakLines(text: string, max = LIMITS.max): string[] {
   return [words.slice(0, best).join(' '), words.slice(best).join(' ')];
 }
 
+const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
+/** Whether text breaks into at most two lines of `max` characters. */
+const fits = (text: string, max: number) => breakLines(text, max).every((l) => l.length <= max);
+
 /**
- * Cues from timed lines: each line's words in runs that fit two lines of `max` characters and `span` seconds,
+ * Cues from timed lines: each line's words in runs that break into two lines of `max` characters and last `span` seconds,
  * a run ending early after a word that closes a clause when it is already long; each cue from its first word to
  * `hold` after its last, at least `min` long, ending `gap` before the next one.
  */
@@ -36,7 +46,7 @@ export function buildCues(lines: { words: W[] }[], o = LIMITS): Cue[] {
     let cur: W[] = [];
     for (const w of l.words) {
       const text = [...cur, w].map((x) => x.w).join(' ');
-      if (cur.length && (text.length > o.max * 2 || w.end - cur[0]!.start > o.span)) { runs.push(cur); cur = []; }
+      if (cur.length && (!fits(text, o.max) || w.end - cur[0]!.start > o.span)) { runs.push(cur); cur = []; }
       cur.push(w);
       const len = cur.map((x) => x.w).join(' ').length;
       if (/[,;:.!?]$/.test(w.w) && len > o.max * 1.2 && w !== l.words.at(-1)) { runs.push(cur); cur = []; }
