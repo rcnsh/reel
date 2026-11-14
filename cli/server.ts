@@ -3,7 +3,7 @@
 // `reel` (and its scenes as `reel/scenes/<name>`), and its files (audio/, data/, assets/ ...) are served from the
 // site root. The config's format and theme reach the page as compile-time constants (__REEL_FORMAT__, __REEL_THEME__).
 import type { ViteDevServer } from 'vite';
-import { existsSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf, type VideoConfig } from '../src/config';
 import { resolveTheme, type ResolvedTheme } from '../src/themes';
@@ -17,11 +17,14 @@ const TYPES: Record<string, string> = {
   '.ttf': 'font/ttf', '.otf': 'font/otf', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.hdr': 'application/octet-stream', '.bin': 'application/octet-stream',
 };
 
-/** The folder of the project to work on: `dir`, which must hold a reel.config.ts. */
+/**
+ * The folder of the project to work on: `dir`, which must hold a reel.config.ts. Symlinks are resolved, so one
+ * project reached by two paths (/tmp and /private/tmp on macOS) shares one warm renderer.
+ */
 export function projectDir(dir: string) {
   const p = path.resolve(dir);
   if (!existsSync(path.join(p, 'reel.config.ts'))) throw new Error(`no reel.config.ts in ${p} (pass --project <folder>)`);
-  return p;
+  return realpathSync(p);
 }
 
 /**
