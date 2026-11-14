@@ -86,6 +86,13 @@ if (mode === 'mcp') {
   await new Promise(() => {});
 }
 
+if (mode === 'golden') {
+  if (P.positionals[0] !== 'update') fail(`golden ${P.positionals[0]}: expected update`);
+  const { GOLDEN, renderGoldens } = await import('./golden');
+  const { files, errors } = await renderGoldens(GOLDEN);
+  finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()] }, () => console.log([...files.values()].join('\n')));
+}
+
 if (mode === 'skills') {
   if (P.positionals[0] !== 'update') fail(`skills ${P.positionals[0]}: expected update`);
   let project = '';

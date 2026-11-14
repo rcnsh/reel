@@ -46,6 +46,7 @@ Working on a project
   skills update              copy this engine's skills into the project's .claude/skills
   daemon status              the warm renderers running, per project
   daemon stop                stop the project's warm renderer          [--all: every project's]
+  golden update              re-render the golden frames tests/golden.test.ts compares against
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
@@ -96,6 +97,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
+  golden: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
   mcp: { render: false, opts: { help: bool } },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };

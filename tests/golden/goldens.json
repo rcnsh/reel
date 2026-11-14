@@ -1,0 +1,12 @@
+{
+  "//": "Golden frames: stills of the examples at these times, downscaled to maxSize px on the long side. bun test renders them again and compares (a pixel may differ by tol levels); reel golden update re-renders them.",
+  "maxSize": 192,
+  "tol": 3,
+  "frames": [
+    { "example": "demo", "times": [0.5, 2.5, 7.2] },
+    { "example": "demo", "times": [5], "samples": "auto" },
+    { "example": "demo", "times": [2.5], "size": "1080x1920" },
+    { "example": "layers", "times": [0.2, 3.25] },
+    { "example": "layers", "times": [3.25], "theme": "print" }
+  ]
+}
