@@ -194,6 +194,6 @@ Read before acting (the skills are copied into \`.claude/skills\`; \`bun run ree
 3. \`bun run reel check\` with no errors (and \`--size 1080x1920\` if the video may go vertical).
 4. Motion blur and timing: \`bun run reel video --samples auto --preset veryfast --out out/draft.mp4\`.
 
-\`bun run reel …\` is \`bun ${path.join(ENGINE, 'cli/reel.ts')} …\` in this folder; it starts a warm renderer for the project on first use. Chrome: \`CHROME_PATH\`, else the installed Google Chrome.
+\`bun run reel …\` is \`bun ${path.join(ENGINE, 'cli/reel.ts')} …\` in this folder; it starts a warm renderer for the project on first use. Chrome: \`CHROME_PATH\`, else the Chrome for Testing build \`bun run reel chrome install\` downloads (157 or later).
 `;
 }

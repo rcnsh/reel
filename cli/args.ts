@@ -44,6 +44,9 @@ Working on a project
                              .claude/skills; refuses a folder that holds anything
                              [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
   skills update              copy this engine's skills into the project's .claude/skills
+  chrome install             download the Chrome for Testing build reel renders with into its cache
+                             folder (used whenever CHROME_PATH is unset)
+  chrome path                the Chrome binary renders would use, and its version
   daemon status              the warm renderers running, per project
   daemon stop                stop the project's warm renderer          [--all: every project's]
   golden update              re-render the golden frames tests/golden.test.ts compares against
@@ -69,8 +72,9 @@ Flags for every command that renders
   --headed             show the browser (implies --no-daemon)
   --json               machine-readable output: one JSON object { ok, errors, logs, ... }
 
-Chrome: $CHROME_PATH, else the installed Google Chrome. Exit codes: 0 done, 1 failed (a scene
-error, an error finding of check, a diff over its threshold), 2 bad command line or no project.`;
+Chrome: $CHROME_PATH, else the pinned Chrome for Testing that \`reel chrome install\` fetches; it must
+be Chrome 157 or later. Exit codes: 0 done, 1 failed (a scene error, an error finding of check, a
+diff over its threshold), 2 bad command line or no project.`;
 
 const str = { type: 'string' } as const, bool = { type: 'boolean' } as const;
 type Opt = typeof str | typeof bool;
@@ -98,6 +102,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
   golden: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
+  chrome: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
   mcp: { render: false, opts: { help: bool } },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };

@@ -7,6 +7,7 @@ import { resolveTheme } from '../src/themes';
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { ENGINE, loadConfig, startServer } from './server';
+import { checkChromeVersion, findChrome } from './chrome';
 import type { PageOpts } from './args';
 
 /** Paths in a project whose changes never matter to its pages (renders, tools' working files, the config loader's). */
@@ -15,13 +16,12 @@ export const IGNORED = /^(out|node_modules|\.git|audio\/\.work|audio\/\.align|\.
 /** The flags every Chrome the CLI starts gets. */
 export const CHROME_ARGS = ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];
 
-export function launchChrome(headed = false) {
-  return chromium.launch({
-    // CHROME_PATH (e.g. Playwright's Chrome for Testing), else the installed Google Chrome
-    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
-    headless: !headed,
-    args: CHROME_ARGS,
-  });
+/** Start the Chrome reel renders with (cli/chrome.ts), refusing one too old for HTML layers. */
+export async function launchChrome(headed = false) {
+  const choice = findChrome();
+  const browser = await chromium.launch({ executablePath: choice.path, headless: !headed, args: CHROME_ARGS });
+  try { checkChromeVersion(browser.version(), choice); } catch (e) { await browser.close().catch(() => {}); throw e; }
+  return browser;
 }
 
 /** A page's format: the logical frame size, the frame rate and the output scale. */

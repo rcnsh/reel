@@ -6,12 +6,13 @@
 //
 // It listens on 127.0.0.1 with a random port and token, written with its pid and the engine's version to a
 // state file in the temp folder. A client whose engine version differs (the engine's code, the protocol or
-// CHROME_PATH changed) stops it and starts a fresh one. Requests run one at a time, in arrival order.
+// the Chrome it would launch changed) stops it and starts a fresh one. Requests run one at a time, in arrival order.
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ENGINE } from './server';
+import { findChrome } from './chrome';
 import type { Req, Result } from './ops';
 
 /** Bumped when the request or state format changes. */
@@ -20,7 +21,9 @@ const DIR = path.join(tmpdir(), 'reel-daemons');
 
 /** The engine as the warm renderer sees it: its code (by mtime and size), the protocol and the Chrome it runs. */
 export function engineVersion(): string {
-  const parts: string[] = [`p${PROTOCOL}`, process.env.CHROME_PATH ?? ''];
+  let chrome = '';
+  try { chrome = findChrome().path; } catch {}
+  const parts: string[] = [`p${PROTOCOL}`, chrome];
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const f = path.join(d, e.name);

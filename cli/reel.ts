@@ -93,6 +93,33 @@ if (mode === 'golden') {
   finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()] }, () => console.log([...files.values()].join('\n')));
 }
 
+if (mode === 'chrome') {
+  const sub = P.positionals[0];
+  const c = await import('./chrome');
+  if (sub === 'install') {
+    let last = -1;
+    const file = await c.installChrome((done, total) => {
+      const pc = Math.floor((100 * done) / Math.max(1, total));
+      if (!json && pc !== last && pc % 5 === 0) { last = pc; process.stderr.write(`\rdownloading Chrome for Testing ${c.CHROME_BUILD}: ${pc}%   `); }
+    }).catch((e) => finish({ ok: false, errors: [`reel chrome install: ${(e as Error).message}`], logs: [], warnings: [] }, () => {}));
+    if (!json) process.stderr.write('\n');
+    const warnings = process.env.CHROME_PATH ? [`CHROME_PATH is set (${process.env.CHROME_PATH}), so renders use that instead: unset it to use this one`] : [];
+    finish({ ok: true, errors: [], logs: [], warnings, file, build: c.CHROME_BUILD }, () => console.log(file));
+  }
+  if (sub === 'path') {
+    const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
+    try {
+      const choice = c.findChrome();
+      const { launchChrome } = await import('./renderer');
+      const b = await launchChrome();
+      Object.assign(res, { file: choice.path, source: choice.source, version: b.version() });
+      await b.close();
+    } catch (e) { res.ok = false; res.errors.push((e as Error).message); }
+    finish(res, (r) => console.log(`${r.file}\nChrome ${r.version} (${r.source === 'CHROME_PATH' ? 'from CHROME_PATH' : 'the pinned build'})`));
+  }
+  fail(`chrome ${sub}: expected install or path`);
+}
+
 if (mode === 'skills') {
   if (P.positionals[0] !== 'update') fail(`skills ${P.positionals[0]}: expected update`);
   let project = '';

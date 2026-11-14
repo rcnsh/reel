@@ -50,10 +50,10 @@ Words for a sung track still go through `reel align` (Whisper word times), which
 
 `reel mcp` is a local stdio MCP server over the same warm renderer, for rendering and inspection (an agent authors a video by editing its files): `project_info`, `render_still`, `contact_sheet`, `motion_strip`, `check_video`, `diff_images`, `video_start` / `video_status` / `video_cancel`, and the project tools `narrate`, `align_recording`, `analyze_song` and `mix_audio`. Every tool takes the `project` folder. Image tools return MCP image blocks, at most 1280 px on the long side unless `full_size` is set and a few per call, plus the paths of the full-size files on disk.
 
-Register it with Claude Code (the server needs `CHROME_PATH` when Google Chrome is not installed):
+Register it with Claude Code (after `reel chrome install`; pass `CHROME_PATH` only to render with another Chrome 157+):
 
 ```sh
-claude mcp add reel -e CHROME_PATH="$CHROME_PATH" -- bun <path to reel>/cli/reel.ts mcp
+claude mcp add reel -- bun <path to reel>/cli/reel.ts mcp
 ```
 
 or, for a client configured with JSON:
@@ -63,8 +63,7 @@ or, for a client configured with JSON:
   "mcpServers": {
     "reel": {
       "command": "bun",
-      "args": ["<path to reel>/cli/reel.ts", "mcp"],
-      "env": { "CHROME_PATH": "<path to the Chrome binary>" }
+      "args": ["<path to reel>/cli/reel.ts", "mcp"]
     }
   }
 }
@@ -78,7 +77,7 @@ or, for a client configured with JSON:
 - `src/check.ts`: what `reel check` samples, measures and finds (pure functions, shared by the page and the CLI); `src/engine/report.ts`: the boxes scenes report.
 - `src/themes.ts`: the themes (`print`, `film`, `neutral`), `extendTheme` and the checks a theme goes through. `src/scenes/`: scenes any project can place, imported as `reel/scenes/<name>`: `hud` (crop marks and captions).
 - `src/main.ts`, `index.html`: the page a project runs in: the preview player and the export API (`window.__reel`).
-- `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export; `cli/diff.ts` and `cli/png.ts`: image comparison; `cli/mcp.ts`: the MCP server. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
+- `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/chrome.ts`: which Chrome renders (the pinned build, `reel chrome install`); `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export; `cli/diff.ts` and `cli/png.ts`: image comparison; `cli/mcp.ts`: the MCP server. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `align-words.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` + `mix-graph.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
 - `skills/`: agent skills (Agent Skills format) that `reel init` copies into a project's `.claude/skills` and `reel skills update` refreshes: `reel-authoring` (the config, the Scene API, determinism and sampling rules, themes, the toolbox, timing; reference files beside it) and `reel-review-loop` (render, look, check, fix; when to export).
@@ -87,12 +86,12 @@ or, for a client configured with JSON:
 
 ## Running
 
-You need [bun](https://bun.sh), ffmpeg and Chrome for headless rendering: `CHROME_PATH` names a Chromium build such as Playwright's Chrome for Testing, else the installed Google Chrome is used. The Python tools (`align`'s Whisper step, `analyze`, `make_fonts.py`) need [uv](https://docs.astral.sh/uv/), which fetches their dependencies on first use.
+You need [bun](https://bun.sh), ffmpeg and Chrome 157 or later for headless rendering (HTML layers need its HTML-in-Canvas). `reel chrome install` downloads the Chrome for Testing build reel is pinned to into a cache folder of its own (`~/Library/Caches/reel-chrome` on macOS, `~/.cache/reel-chrome` elsewhere, or `REEL_CHROME_CACHE`), and renders use it whenever `CHROME_PATH` is unset; `CHROME_PATH` names another binary. The installed Google Chrome is never used by default: it updates itself, and a render should not change with it. A Chrome that is missing or too old is an error that says what to run. The Python tools (`align`'s Whisper step, `analyze`, `make_fonts.py`) need [uv](https://docs.astral.sh/uv/), which fetches their dependencies on first use.
 
 ```sh
 bun install
-export CHROME_PATH="<path to the Chrome for Testing binary>"   # optional
 alias reel="bun $PWD/cli/reel.ts"
+reel chrome install                            # the pinned Chrome for Testing, once
 reel init ~/videos/first                       # a new project, ready to render
 cd examples/demo                               # or pass --project <folder> to any command
 

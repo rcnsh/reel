@@ -1,13 +1,14 @@
 // Shared by the tests: whether a Chrome is there to render with, and scratch copies of the examples.
-import { cpSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { cpSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { hasChrome as findChrome } from '../cli/chrome';
 
 export const ENGINE = path.resolve(import.meta.dir, '..');
 export const REEL = path.join(ENGINE, 'cli/reel.ts');
 
-/** A Chrome the renders can use: $CHROME_PATH, else the installed Google Chrome. Tests that render skip without one. */
-export const hasChrome = process.env.CHROME_PATH ? existsSync(process.env.CHROME_PATH) : existsSync('/Applications/Google Chrome.app/Contents/MacOS/Google Chrome');
+/** A Chrome the renders can use: $CHROME_PATH, else the pinned build (`reel chrome install`). Tests that render skip without one. */
+export const hasChrome = findChrome();
 
 /** A copy of an example in a fresh temp folder (its renders and warm renderer stay out of the repo). */
 export function scratchCopy(example: string) {
