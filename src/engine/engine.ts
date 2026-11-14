@@ -119,6 +119,12 @@ export class Engine {
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(PW, PH, false);
     this.renderer.autoClear = false;
+    // a shader that does not compile (a palette key the theme lacks, a typo) is an error, not a black draw
+    this.renderer.debug.onShaderError = (gl, program, vs, fs) => {
+      const log = [gl.getProgramInfoLog(program), gl.getShaderInfoLog(vs), gl.getShaderInfoLog(fs)].map((x) => x?.trim()).filter(Boolean).join('\n');
+      const msg = `shader failed to compile: ${log}`;
+      if (!this.errors.includes(msg)) { this.errors.push(msg); console.error(msg); }
+    };
     this.blit = new FSPass(`uniform sampler2D src; void main(){ fragColor = texture(src, vUv); }`, { src: { value: null } });
     this.xfade = new FSPass(`uniform sampler2D a; uniform sampler2D b; uniform float k;
       void main(){ fragColor = mix(texture(a, vUv), texture(b, vUv), k); }`, { a: { value: null }, b: { value: null }, k: { value: 0 } });
