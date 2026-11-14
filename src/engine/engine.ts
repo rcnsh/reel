@@ -299,6 +299,22 @@ export class Engine {
   }
   private setMasking: (on: boolean) => void = () => {};
 
+  /**
+   * Scene targets read away from the pixel they land on this frame: during a slide or a zoom transition the
+   * transition samples its clips' targets at a moved position, so their tiles cannot be masked in place.
+   */
+  private displaced = new Set<THREE.WebGLRenderTarget>();
+  private displacedAt(t: number, w: number) {
+    this.displaced.clear();
+    const moving = this.timeline.some((e) => {
+      const kind = transitionOf(e.transition, e.id).kind;
+      if (kind !== 'slide' && kind !== 'zoom') return false;
+      // (the transition runs from the clip's start to the end of the clip before it on its track)
+      return this.timeline.some((o) => o !== e && (o.track ?? 0) === (e.track ?? 0) && o.start < e.start && o.end > e.start && o.end > t - w / 2 && e.start < t + w / 2);
+    });
+    if (moving) for (const tr of this.trackRTs) for (const rt of tr.rts) this.displaced.add(rt);
+  }
+
   /** Write tileOn into the depth buffer of the masked targets (1 = still refining, 0 = converged). */
   private writeTileMask() {
     const r = this.renderer, was = this.masking;
@@ -314,7 +330,7 @@ export class Engine {
     }
     this.tileTexWide.needsUpdate = true;
     // (a moving target is drawn whole unless its scene maps the mask, see mapTileMask)
-    for (const [rt, m] of this.maskedRTs) this.drawMask(rt, m.margin, m.moving ? null : new THREE.Vector4(PW / rt.width, PH / rt.height, 0, 0));
+    for (const [rt, m] of this.maskedRTs) this.drawMask(rt, m.margin, m.moving || this.displaced.has(rt) ? null : new THREE.Vector4(PW / rt.width, PH / rt.height, 0, 0));
     if (was) this.setMasking(true);
   }
 
@@ -556,6 +572,7 @@ export class Engine {
         const lg3 = (x: number) => Math.log(x / 4) / Math.log(3);
         const lo = Math.max(0, Math.round(lg3(samples.min))), hi = Math.max(lo, Math.floor(lg3(maxAdaptive) + 1e-9));
         const u = ternaryOffsets(hi);
+        this.displacedAt(t, dt * shutter);
         n = 4 * 3 ** lo;
         this.lastErrors = [];
         this.lastShaded = 1;
