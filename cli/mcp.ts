@@ -69,7 +69,7 @@ function startVideo(a: Record<string, any>): Job {
   const args = ['video', '--project', proj, '--json', '--progress', '--out', out];
   const flag = (k: string, v: unknown) => { if (v !== undefined && v !== false) args.push(`--${k}`, ...(v === true ? [] : [Array.isArray(v) ? v.join(',') : String(v)])); };
   flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme);
-  flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio);
+  flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); flag('mix', a.mix); flag('subtitles', a.subtitles);
   const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
   const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: 'running', progress: null, started: Date.now(), output: '', proc };
   jobs.set(job.id, job);
@@ -194,6 +194,7 @@ export async function serveMcp() {
       ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output .mp4 path.'),
       preset: z.enum(['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow']).optional().describe('x264 preset (default slow).'),
       crf: z.number().min(0).max(51).optional().describe('x264 quality (default 16; lower is better).'), noaudio: z.boolean().optional().describe('Leave the audio track out.'),
+      mix: z.boolean().optional().describe('The finished file: render, then mix the track, music and cues at the loudness target.'), subtitles: z.boolean().optional().describe('Like mix, with the timed words as a soft subtitle track.'),
     },
   }, (a) => guard(async () => {
     reqOf('still', a, {}); // (the flags checked here, before a process is started)
@@ -248,7 +249,7 @@ export async function serveMcp() {
 
   server.registerTool('mix_audio', {
     title: 'Mix music and cues',
-    description: "Lay the project's music beds and cue sounds (mix.json, data/cues.json from the events of a render) under a rendered video's narration into a new MP4. `from` must match the render's start when it was a partial render. Run after video_start finished; data/cues.json comes from `reel events` (the CLI) or an earlier mix.",
+    description: "The finished sound under a rendered video, into a new MP4: the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render. (video_start with mix: true renders and mixes in one job.)",
     inputSchema: { project, input: z.string().describe('The rendered .mp4.'), output: z.string().describe('The mixed .mp4 to write.'), from: z.number().min(0).optional() },
   }, (a) => guard(async () => {
     // (the cues the mix needs, from the project as it is now)

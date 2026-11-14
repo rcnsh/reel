@@ -1,25 +1,36 @@
-// The sound mix's ffmpeg filter graph (tools/mix.ts): pure, so it is unit-tested.
+// The sound mix's ffmpeg inputs and filter graph (tools/mix.ts): pure, so it is unit-tested.
 import path from 'node:path';
 
 export interface Music { file: string; from?: string; to?: string; db?: number; fadeIn?: number; fadeOut?: number }
 export interface CueSound { file: string; db?: number; minGap?: number }
-export interface MixConfig { music?: Music[]; cues?: Record<string, CueSound>; entryCues?: Record<string, string[]> }
+export interface MixConfig {
+  music?: Music[];
+  cues?: Record<string, CueSound>;
+  entryCues?: Record<string, string[]>;
+  /** The finished mix's loudness: false for none, or over the default { integrated: -14, truePeak: -1, lra: 11 }. */
+  loudness?: false | { integrated?: number; truePeak?: number; lra?: number };
+  /** The voice's level in dB (default 0). */
+  voiceDb?: number;
+}
 
 export interface Events { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[] }
 
+/** The working sample rate and layout of the mix. */
+const FMT = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo';
+
 /**
- * The inputs and filter graph that lay `cfg`'s music and cue sounds under a video of `dur` seconds that starts at
- * timeline time `from`, its own audio being input 0 (`inputs` are the ffmpeg arguments after it). Files are in
- * `root`/audio. `counts`: cues laid per kind;
- * `warnings`: cue kinds with no sound in mix.json.
+ * The inputs and filter graph that mix `cfg`'s music and cue sounds with the voice (`voice`: the narration track, or
+ * null for a silent video) for a video of `dur` seconds starting at timeline time `from`. Input 0 is the video (its
+ * picture is copied; its own sound, an encode of the same track, is not used), so `inputs` are the ffmpeg arguments
+ * after it. The graph ends in [mixed], `dur` seconds of 48 kHz stereo before loudness normalisation. `sound(file)`
+ * resolves a file named in mix.json. `counts`: cues laid per kind; `warnings`: cue kinds with no sound.
  */
-export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, root: string) {
-  const FROM = from, ROOT = root;
+export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, voice: string | null, sound: (file: string) => string) {
+  const T0 = from, T1 = from + dur;
   const warnings: string[] = [];
-  const T0 = FROM, T1 = FROM + dur;
   const entryStart = (id: string) => {
     const e = ev.timeline.find((x) => x.id === id);
-    if (!e) throw new Error(`mix.json: no timeline entry '${id}'`);
+    if (!e) throw new Error(`mix.json: no clip '${id}' on the timeline`);
     return e.start;
   };
 
@@ -44,27 +55,34 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
   for (const c of ev.cues) (cueTimes.get(c.kind) ?? cueTimes.set(c.kind, []).get(c.kind)!).push(c.t);
   for (const [kind, ids] of Object.entries(cfg.entryCues ?? {})) for (const id of ids) (cueTimes.get(kind) ?? cueTimes.set(kind, []).get(kind)!).push(entryStart(id));
 
-  const inputs: string[] = []; // (after the video, which is input 0)
+  const inputs: string[] = [];
   const f: string[] = [];
   let n = 1;
+  const parts: string[] = [];
+  if (voice) {
+    // (the track from the render's start, decoded exactly: it is lossless)
+    inputs.push('-ss', T0.toFixed(6), '-t', dur.toFixed(6), '-i', voice);
+    const v = n++;
+    f.push(`[${v}:a]${FMT},asetnsamples=n=1024:p=0${cfg.voiceDb ? `,volume=${cfg.voiceDb}dB` : ''}${segs.length ? ',asplit=2[voice][sc]' : '[voice]'}`);
+    parts.push('[voice]');
+  }
   const mus: string[] = [];
   segs.forEach(([s, e, file, db, fi, fo], k) => {
-    inputs.push('-stream_loop', '-1', '-i', path.join(ROOT, 'audio', file));
+    inputs.push('-stream_loop', '-1', '-i', sound(file));
     const L = e - s;
-    let c = `[${n}:a]atrim=0:${L.toFixed(3)},asetpts=PTS-STARTPTS,volume=${db}dB`;
+    let c = `[${n}:a]${FMT},atrim=0:${L.toFixed(3)},asetpts=PTS-STARTPTS,volume=${db}dB`;
     if (fi) c += `,afade=t=in:d=${fi}`;
     if (fo) c += `,afade=t=out:st=${(L - fo).toFixed(3)}:d=${fo}`;
-    c += `,adelay=${Math.round(s * 1000)}:all=1[m${k}]`;
+    c += `,adelay=${Math.round(s * 1000)}:all=1,asetnsamples=n=1024:p=0[m${k}]`;
     f.push(c); mus.push(`[m${k}]`); n++;
   });
-  // the voice also drives the music's ducking (sidechain), so it is split only when there is music
-  f.push(mus.length ? `[0:a]asplit=2[voice][sc]` : `[0:a]anull[voice]`);
   if (mus.length) {
-    f.push(`${mus.join('')}amix=inputs=${mus.length}:normalize=0:duration=longest[mraw]`);
-    f.push(`[mraw][sc]sidechaincompress=threshold=0.03:ratio=4:attack=80:release=600[music]`);
+    const m = mus.length > 1 ? `${mus.join('')}amix=inputs=${mus.length}:normalize=0:duration=longest` : `${mus[0]}anull`;
+    // the voice drives the music's ducking (sidechain)
+    if (voice) f.push(`${m}[mraw]`, `[mraw][sc]sidechaincompress=threshold=0.03:ratio=4:attack=80:release=600[music]`);
+    else f.push(`${m}[music]`);
+    parts.push('[music]');
   }
-  const parts: string[] = ['[voice]'];
-  if (mus.length) parts.push('[music]');
   const counts: string[] = [];
   let tag = 0;
   for (const [kind, raw] of cueTimes) {
@@ -76,14 +94,17 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     counts.push(`${v.length} ${kind}`);
     if (!v.length) continue;
     const id = `c${tag++}`;
-    inputs.push('-i', path.join(ROOT, 'audio', snd.file));
+    inputs.push('-i', sound(snd.file));
     const outs = v.map((_, i) => `[${id}_${i}]`);
-    f.push(`[${n}:a]volume=${snd.db ?? 0}dB,asplit=${v.length}${outs.join('')}`);
+    f.push(`[${n}:a]${FMT},volume=${snd.db ?? 0}dB${v.length > 1 ? `,asplit=${v.length}${outs.join('')}` : outs[0]}`);
     v.forEach((t, i) => f.push(`[${id}_${i}]adelay=${Math.round(t * 1000)}:all=1[${id}d${i}]`));
-    f.push(`${v.map((_, i) => `[${id}d${i}]`).join('')}amix=inputs=${v.length}:normalize=0:duration=longest[${id}]`);
+    f.push(v.length > 1 ? `${v.map((_, i) => `[${id}d${i}]`).join('')}amix=inputs=${v.length}:normalize=0:duration=longest[${id}]` : `[${id}d0]anull[${id}]`);
     parts.push(`[${id}]`);
     n++;
   }
-  f.push(`${parts.join('')}amix=inputs=${parts.length}:normalize=0:duration=first,alimiter=limit=0.95[a]`);
-  return { inputs, filter: f.join(';'), segments: segs.length, counts, warnings };
+  // everything summed, padded or cut to the video's length
+  const end = `apad,atrim=0:${dur.toFixed(6)},asetpts=PTS-STARTPTS[mixed]`;
+  if (!parts.length) f.push(`anullsrc=r=48000:cl=stereo,${end}`);
+  else f.push(`${parts.join('')}${parts.length > 1 ? `amix=inputs=${parts.length}:normalize=0:duration=longest,` : ''}${end}`);
+  return { inputs, filter: f.join(';'), silent: !parts.length, segments: segs.length, counts, warnings };
 }

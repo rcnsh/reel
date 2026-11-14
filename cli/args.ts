@@ -39,6 +39,9 @@ Rendering
                              [--from 0] [--to <duration>] [--out <file.mp4>] [--crf 16] [--preset slow]
                              [--x264 aq-mode=3] [--noaudio] [--workers 2] [--chunk 8] [--mem-gb 1]
                              [--spool-gb 20] [--progress (JSON lines on stderr)]
+                             --mix: the finished file in one go: the render, then reel mix (the
+                             track, music and cues of mix.json, at the loudness target)
+                             --subtitles: as --mix, with the timed words as a soft subtitle track
 
 Working on a project
   init <folder>              a new project that renders straight away, with the reel skills in
@@ -61,7 +64,9 @@ Working on a project
   align <recording|folder>   time narration.txt to a voice recording (forced alignment; --method
                              whisper for a reading that departs from it)  (flags: reel align --help)
   analyze <song> [...]       beats, envelopes and sections of a song (flags: reel analyze --help)
-  mix <in.mp4> <out.mp4>     lay music and cue sounds under a render             [--from 0]
+  mix <in.mp4> <out.mp4>     the finished sound under a render: the track, music and cue sounds
+                             (mix.json), at -14 LUFS; re-mix without re-rendering   [--from 0]
+  subtitles                  SRT and VTT of the timed words      [--out out/subtitles] [--from] [--to]
 
 Flags for every command that renders
   --project <folder>   the project (default: the current folder)
@@ -102,7 +107,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   events: { render: true, opts: { out: str } },
   perf: { render: true, opts: { from: str, to: str } },
   gpu: { render: true, opts: {} },
-  video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
+  video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },

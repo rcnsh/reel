@@ -44,7 +44,11 @@ The theme is the look, and the engine itself has none: `print` (ink on paper, fa
 1. Write `narration.txt`: plates, each a `# name` header followed by its lines.
 2. Voice and time it with `reel narrate`: Kokoro, a local model, by default (`--voice kokoro:bm_george`), macOS `say` for an instant scratch track, or a hosted voice (`--voice elevenlabs:<voice-id>`, `fish:<voice-id>`) when its API key is in the environment. Each plate is voiced once and cached, so re-running after editing one line voices only that plate. It writes `audio/narration.flac` (lossless), `data/words.json` (every word with its time) and `data/audio.json` (one section per plate). A real recording replaces it later with `reel align <recording>`, which writes the same files.
 3. Write a scene per plate, `scenes/<plate>.ts`. The config's `clipsFromSections` shows each plate with the scene of the same name and skips plates without one. Find words by their text (`ctx.words.get('…')`), never by hard-coded times, so re-timing the voice moves everything with it.
-4. Preview, check stills, render, mix.
+4. Preview, check stills, then `reel video --samples auto --mix` for the finished file.
+
+### Sound and subtitles
+
+The audio stays lossless until the last step: the narration is FLAC, `reel analyze` copies the song as it is, and `reel mix <render.mp4> <out.mp4>` reads the project's track from that file (not from the render's AAC), lays the music beds and cue sounds of `mix.json` under it (music ducked while the track sounds), brings the sum to a loudness target in two passes (EBU R128: measure, then a linear gain under a true-peak ceiling; -14 LUFS integrated and -1 dBTP unless `mix.json` says `"loudness": { … }` or `false`) and encodes AAC once, copying the picture. It works on a silent render too, and the same project mixes to the same bytes every time (the filters run on one thread with fixed frame sizes). `reel video --mix` renders and mixes in one command; `reel mix` stays for re-mixing without re-rendering. `reel subtitles` writes SRT and VTT from the timed words, and `reel video --subtitles` adds them to the finished file as a soft track.
 
 ### Cutting to music
 
@@ -84,7 +88,7 @@ or, for a client configured with JSON:
 - `src/themes.ts`: the themes (`print`, `film`, `neutral`), `extendTheme` and the checks a theme goes through. `src/scenes/`: scenes any project can place, imported as `reel/scenes/<name>`: `hud` (crop marks and captions).
 - `src/main.ts`, `index.html`: the page a project runs in: the preview player and the export API (`window.__reel`).
 - `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/chrome.ts`: which Chrome renders (the pinned build, `reel chrome install`); `cli/daemon.ts`: the warm renderer that keeps one per project; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export; `cli/diff.ts` and `cli/png.ts`: image comparison; `cli/mcp.ts`: the MCP server. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
-- `tools/`: `narrate.ts` (script to voice and word times; `voices/` holds one file per voice source: `say`, `kokoro` + `kokoro.py`, `elevenlabs`, `fish`; `settings.ts` the narration settings and cache keys), `align.ts` (time a recording), shared by both: `script.ts` (the plate parser and timing data), `narration-files.ts` (the track and data files), `aligner.ts` + `forced_align.py` (Qwen3-ForcedAligner on MLX), `align-words.ts` (matching timed tokens to the script, snapping edges to pauses), `audio-io.ts` and `loudness.ts`; `whisper_words.py` (`align --method whisper`), `analyze.py` (time a song), `mix.ts` + `mix-graph.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
+- `tools/`: `narrate.ts` (script to voice and word times; `voices/` holds one file per voice source: `say`, `kokoro` + `kokoro.py`, `elevenlabs`, `fish`; `settings.ts` the narration settings and cache keys), `align.ts` (time a recording), shared by both: `script.ts` (the plate parser and timing data), `narration-files.ts` (the track and data files), `aligner.ts` + `forced_align.py` (Qwen3-ForcedAligner on MLX), `align-words.ts` (matching timed tokens to the script, snapping edges to pauses), `audio-io.ts` and `loudness.ts`; `whisper_words.py` (`align --method whisper`), `analyze.py` (time a song), `mix.ts` + `mix-graph.ts` (the finished sound under a render, configured by the project's `mix.json`), `subtitles.ts` (SRT and VTT), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
 - `skills/`: agent skills (Agent Skills format) that `reel init` copies into a project's `.claude/skills` and `reel skills update` refreshes: `reel-authoring` (the config, the Scene API, determinism and sampling rules, themes, the toolbox, timing; reference files beside it) and `reel-review-loop` (render, look, check, fix; when to export).
 - `tests/`: `bun test`: unit tests of the pure modules, and tests that render through Chrome: golden frames of the examples (`tests/golden/`, rewritten by `reel golden update`) the CLI end to end, and the MCP client.
@@ -107,8 +111,8 @@ reel still --t 2.5,6                           # out/stills/hello_2.500s.png …
 reel strip --from 1 --to 2 --n 8                # frames side by side: motion and easing in one image
 reel diff --t 2.5 out/stills/hello_2.500s.png   # changed pixels, the box around them, a diff image
 reel check                                     # findings with crops; exits 1 on an error
-reel video --samples auto --shutter 0.2 --out out/raw.mp4
-reel events                                    # data/cues.json for the mix
+reel video --samples auto --mix --out out/final.mp4   # render, then the mix at -14 LUFS
+reel events                                    # data/cues.json, for re-mixing a render:
 reel mix out/raw.mp4 out/final.mp4
 ```
 

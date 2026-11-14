@@ -30,7 +30,7 @@ Engine.init ─▶ load the clips' scenes (+ the theme's overlay clip) ─▶ ea
 src/main.ts: preview player (reel dev) or export API window.__reel (?export=1)
 cli/reel.ts (flags: cli/args.ts) drives window.__reel through cli/renderer.ts + cli/ops.ts: info | still | sheet | strip | check | events | perf | gpu;
             cli/video.ts: the video export
-reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cue sounds under the video
+reel video --mix (or reel events ─▶ data/cues.json ─▶ reel mix) + mix.json ─▶ the track (lossless), music and cues, two-pass loudness, one AAC encode
 ```
 
 - The config is the edit. `size`, `fps` and `theme` are read by the CLI outside the browser (so a config's top level is plain data: scenes are lazy imports, engine calls live inside `timeline()`), and reach the page as the compile-time constants `__REEL_FORMAT__` and `__REEL_THEME__` (the theme resolved by `src/themes.ts`). Being constants, they are in place before any module runs, which is what lets `glsl/common.ts` bake the palette into shader strings at import time.
@@ -78,7 +78,7 @@ Run all that apply before reporting work done:
 1. `bun run typecheck`: one tsconfig over `src/`, `cli/`, `tools/`, `examples/` and `tests/`; then `bun test`.
 2. Stills of every clip you touched, looked at with the Read tool: `reel still --project <p> --t <times> --only <clip>`. `reel sheet --cuts` checks every cut at once.
 3. Theme or post changes: the print theme must still render the demo byte for byte as before. Stills before and after (`reel still --project examples/demo --t 0.4,2.5,5,7.3`) compared with a pixel diff.
-4. Export path changes: both examples end to end. `reel video --project examples/demo --samples auto --preset veryfast --out <raw.mp4>`, then `reel events`, then `reel mix <raw.mp4> <out.mp4>`; `reel video --project examples/layers --samples auto --preset veryfast` (tracks, a wipe, the film theme's overlay, no audio, vertical, 30 fps); and `reel video --project examples/explainer --samples auto --preset veryfast` (the kit, every transition kind, an image).
+4. Export path changes: both examples end to end. `reel video --project examples/demo --samples auto --preset veryfast --out <raw.mp4>`, then `reel events`, then `reel mix <raw.mp4> <out.mp4>` (it prints the LUFS and true peak), and `reel video --mix` once; `reel video --project examples/layers --samples auto --preset veryfast` (tracks, a wipe, the film theme's overlay, no audio, vertical, 30 fps); and `reel video --project examples/explainer --samples auto --preset veryfast` (the kit, every transition kind, an image).
 5. `reel init`, `tsconfig.project.json` or `project.d.ts` changes: `reel init` a silent and a `--narrated` project under `/tmp`, then in each `bun run typecheck`, `bun run reel still --t 1` and `bun run reel video --samples auto --preset veryfast`.
 6. Python tool changes: run the tool on real input. For `analyze.py`, `tools/synth_song.py` makes songs with known beats: a lead-in, a break, a non-integer tempo, a half-time feel and a drifting tempo are the cases that have broken it before; compare `data/audio.json`'s beats and downbeats with its JSON, for the default path and `--fast`. For narration, `say` per word concatenated gives words with exact boundaries to measure the aligner against.
 

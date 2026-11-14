@@ -24,6 +24,7 @@ const TOOLS: Record<string, string[]> = {
   narrate: ['bun', path.join(ENGINE, 'tools/narrate.ts')],
   align: ['bun', path.join(ENGINE, 'tools/align.ts')],
   mix: ['bun', path.join(ENGINE, 'tools/mix.ts')],
+  subtitles: ['bun', path.join(ENGINE, 'tools/subtitles.ts')],
   analyze: ['uv', 'run', path.join(ENGINE, 'tools/analyze.py')],
 };
 if (TOOLS[mode]) {
@@ -201,10 +202,13 @@ try {
     try {
       const m = await r.meta();
       const out = abs(A.out) ?? path.join(PROJECT, 'out/video.mp4');
+      // (with --mix the picture is rendered beside the output and the mix writes the output)
+      const mixed = !!A.mix || typeof A.subtitles === 'string' || A.subtitles === true;
+      const pic = mixed ? out.replace(/(\.\w+)?$/, '.picture.mp4') : out;
       const v = await exportVideo({
         url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme,
-        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out,
-        crf: num(A, 'crf', 16), preset: (A.preset as string) ?? 'slow', x264: (A.x264 as string) ?? 'aq-mode=3', noaudio: !!A.noaudio,
+        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic,
+        crf: num(A, 'crf', 16), preset: (A.preset as string) ?? 'slow', x264: (A.x264 as string) ?? 'aq-mode=3', noaudio: !!A.noaudio || mixed,
         workers: int(A, 'workers', 2), chunk: int(A, 'chunk', 8), memGb: num(A, 'mem-gb', 1), spoolGb: num(A, 'spool-gb', 20), headed: !!A.headed,
         onProgress: (p) => {
           if (A.progress) console.error(JSON.stringify(p));
@@ -216,6 +220,17 @@ try {
       res.logs.push(...r.explain(v.logs));
       say(`\nwrote ${v.file} (${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
       say(`sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
+      if (mixed && !res.errors.length) {
+        const { mixVideo } = await import('../tools/mix');
+        const { writeSubtitles } = await import('../tools/subtitles');
+        const subs = A.subtitles ? writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
+        try {
+          const mres = await mixVideo({ root: PROJECT, input: pic, output: out, from: num(A, 'from', 0), events: v.events, subtitles: subs });
+          res.warnings.push(...mres.warnings);
+          Object.assign(res, { file: out, loudness: mres.loudness, ...(subs ? { subtitles: subs } : {}) });
+          say(mres.summary);
+        } finally { (await import('node:fs')).rmSync(pic, { force: true }); }
+      }
     } catch (e) {
       if (e instanceof UsageError) throw e;
       res.errors.push(String((e as Error)?.message ?? e));

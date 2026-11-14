@@ -57,7 +57,7 @@ Stills and strips settle layout and most motion. Render video when you need to j
 
 - Draft: `reel video --from 20 --to 26 --only title --preset veryfast --out out/draft.mp4` (one sample: no motion blur).
 - Motion blur and final: `--samples auto` (adaptive; stateful scenes need a fixed `--samples 8`). Slower: export once the stills are right.
-- Narrated or scored: then `reel events` and `reel mix out/raw.mp4 out/final.mp4` lay the music and cue sounds (a partial render mixes with the same `--from`).
+- Narrated or scored: `reel video --samples auto --mix` lays the track, music and cue sounds at the loudness target (it prints LUFS and true peak); `reel events` then `reel mix out/raw.mp4 out/final.mp4` re-mixes a render (a partial one with the same `--from`).
 
 You cannot watch a video file; judge its frames with `reel strip` at the same times, and use the video for the person you are working with.
 
