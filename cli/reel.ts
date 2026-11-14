@@ -206,6 +206,8 @@ try {
       // (with --mix the picture is rendered beside the output and the mix writes the output)
       const mixed = !!A.mix || typeof A.subtitles === 'string' || A.subtitles === true;
       const pic = mixed ? out.replace(/(\.\w+)?$/, '.picture.mp4') : out;
+      // (the subtitles first: a project without timed words fails before it renders, not after)
+      const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
         url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme,
         samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic,
@@ -223,8 +225,6 @@ try {
       say(`sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
       if (mixed && !res.errors.length) {
         const { mixVideo } = await import('../tools/mix');
-        const { writeSubtitles } = await import('../tools/subtitles');
-        const subs = A.subtitles ? writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
         try {
           const mres = await mixVideo({ root: PROJECT, input: pic, output: out, from: num(A, 'from', 0), events: v.events, subtitles: subs });
           res.warnings.push(...mres.warnings);
