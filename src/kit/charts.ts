@@ -88,7 +88,8 @@ export class LineChart extends HtmlComponent {
   constructor(o: LineChartOptions) {
     const fs = Math.round(UNIT * 0.028), box = o.box ?? safeBox(0.12);
     const series = (typeof o.series[0] === 'number' ? [{ values: o.series as number[] }] : (o.series as { values: number[]; color?: string }[])).map((s, i) => ({ values: s.values, color: cssColor(s.color ?? (i === 0 ? 'accent' : 'fg')) }));
-    const all = series.flatMap((s) => s.values), lo = o.min ?? Math.min(0, ...all), hi = o.max ?? Math.max(...all);
+    // (no values at all: an empty plot with its title and axis, no line and no head)
+    const all = series.flatMap((s) => s.values), lo = o.min ?? Math.min(0, ...all), hi = o.max ?? (all.length ? Math.max(...all) : lo + 1);
     const titleH = o.title ? fs * 2.4 : 0, axisH = o.labels ? fs * 2 : 0;
     const pw = Math.round(box.w - fs * 4), ph = Math.round(box.h - titleH - axisH - fs * 1.6);
     const X = (i: number, n: number) => (i / Math.max(1, n - 1)) * pw, Y = (v: number) => ph - ((v - lo) / Math.max(1e-9, hi - lo)) * ph;
@@ -106,14 +107,15 @@ export class LineChart extends HtmlComponent {
         .base { stroke: color-mix(in srgb, var(--fg) 35%, transparent); stroke-width: 2; }
         .lines { clip-path: inset(-${fs}px calc(${pw}px - var(--x, 0px)) -${fs}px -${fs}px); }
         .line { fill: none; stroke-width: ${Math.max(3, Math.round(UNIT * 0.005))}; stroke-linecap: round; stroke-linejoin: round; }
-        .head { position: absolute; width: ${r * 2}px; height: ${r * 2}px; margin: -${r}px 0 0 -${r}px; border-radius: 50%; background: ${series[0]!.color}; }
+        .head { position: absolute; width: ${r * 2}px; height: ${r * 2}px; margin: -${r}px 0 0 -${r}px; border-radius: 50%; background: ${series[0]?.color ?? 'var(--accent)'}; }
         .value { position: absolute; font: 600 ${fs}px Archivo; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .axis { display: flex; justify-content: space-between; width: ${pw}px; margin-top: ${Math.round(fs * 0.5)}px; font: 400 ${fs}px Archivo; color: color-mix(in srgb, var(--fg) 75%, var(--bg)); }`,
     });
     this.o = o;
     // the line is revealed left to right by x, and its head sits on the first series at that x
-    const s = series[0]!.values;
+    const s = series[0]?.values ?? [];
     this.head = (p: number) => {
+      if (!s.length) return { v: NaN, x: p * pw, y: ph };
       const x = p * (s.length - 1), i = Math.max(0, Math.min(s.length - 2, Math.floor(x))), u = x - i;
       const v = s.length > 1 ? s[i]! + (s[i + 1]! - s[i]!) * u : s[0]!;
       return { v, x: p * pw, y: Y(v) };
@@ -121,7 +123,7 @@ export class LineChart extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const p = progressOf(this.o, f), h = this.head(p), on = p > 0;
+    const p = progressOf(this.o, f), h = this.head(p), on = p > 0 && !Number.isNaN(h.v);
     this.layer.vars({ x: `${h.x.toFixed(2)}px` });
     this.layer.set('.head', { style: { left: `${h.x.toFixed(2)}px`, top: `${h.y.toFixed(2)}px`, display: on ? '' : 'none' } });
     // (the value's label slides from left aligned at the start to right aligned at the end, so it stays in the box)
