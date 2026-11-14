@@ -7,7 +7,7 @@ import type { AdaptiveSampling } from '../src/engine/engine';
 import { UsageError, type PageOpts } from './args';
 import { isGone, type PageHandle, type Renderer } from './renderer';
 
-export type Op = 'info' | 'still' | 'sheet' | 'events' | 'perf' | 'gpu';
+export type Op = 'info' | 'still' | 'sheet' | 'strip' | 'events' | 'perf' | 'gpu';
 export interface Req {
   op: Op;
   project: string;
@@ -100,6 +100,22 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     }
     checkTimes(ctx, m, times);
     return grid(h, ctx, times, a.cols ?? 4, a.cell ?? 480, a.out ?? freeName(path.join(req.project, 'out/sheets'), `sheet_${times[0]!.toFixed(2)}-${times.at(-1)!.toFixed(2)}`), a);
+  },
+
+  async strip(h, ctx) {
+    const { req } = ctx, a = req.args as { from?: number; to?: number; n?: number; frames?: number; cell?: number; out?: string; maxSize?: number; preview?: number };
+    const m = await meta(h), dt = 1 / m.fps;
+    const from = a.from ?? 0;
+    let times: number[];
+    if (a.frames) times = Array.from({ length: a.frames }, (_, i) => +(from + i * dt).toFixed(6));
+    else {
+      const to = a.to ?? m.duration - dt;
+      if (!(to > from)) throw new UsageError(`--from ${from} --to ${to}: an empty range`);
+      times = spaced(from, to, a.n ?? 8);
+    }
+    if (times.length > 32) throw new UsageError(`strip: ${times.length} frames do not fit in one row (at most 32; a sheet takes more)`);
+    checkTimes(ctx, m, times);
+    return grid(h, ctx, times, times.length, a.cell ?? 360, a.out ?? freeName(path.join(req.project, 'out/strips'), `strip_${times[0]!.toFixed(3)}-${times.at(-1)!.toFixed(3)}`), a);
   },
 
   async events(h, ctx) {

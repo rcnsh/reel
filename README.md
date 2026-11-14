@@ -70,6 +70,7 @@ cd examples/demo                               # or pass --project <folder> to a
 reel dev                                       # preview at the URL it prints (space plays, [ ] jump clips)
 reel info                                      # format, duration, clips
 reel still --t 2.5,6                           # out/stills/hello_2.500s.png …, never overwritten
+reel strip --from 1 --to 2 --n 8                # frames side by side: motion and easing in one image
 reel video --samples auto --shutter 0.2 --out out/raw.mp4
 reel events                                    # data/cues.json for the mix
 reel mix out/raw.mp4 out/final.mp4

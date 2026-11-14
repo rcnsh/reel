@@ -143,7 +143,8 @@ function argsOf(v: Values): Record<string, unknown> {
       if (!times.length) throw new UsageError('still needs --t <seconds>[,<seconds>...]');
       return { times, out: abs(v.out), maxSize };
     }
-    case 'sheet': return { from: num(v, 'from'), to: num(v, 'to'), n: v.n === undefined ? undefined : int(v, 'n', 12), times: list(v, 'times'), cuts: !!v.cuts, cols: int(v, 'cols', 4), out: abs(v.out) };
+    case 'sheet': return { from: num(v, 'from'), to: num(v, 'to'), n: int(v, 'n', 12), times: list(v, 'times'), cuts: !!v.cuts, cols: int(v, 'cols', 4), cell: int(v, 'cell', 480, 16), out: abs(v.out), maxSize };
+    case 'strip': return { from: num(v, 'from'), to: num(v, 'to'), n: int(v, 'n', 8, 2), frames: v.frames === undefined ? undefined : int(v, 'frames', 8, 2), cell: int(v, 'cell', 360, 16), out: abs(v.out), maxSize };
     case 'events': return { out: abs(v.out) };
     case 'perf': return { from: num(v, 'from', 0), to: num(v, 'to', 5) };
     default: return {};
@@ -164,7 +165,7 @@ finish(res!, (x) => {
     say(`${(x.cues as unknown[]).length} sound cues`);
   } else if (mode === 'still') {
     for (const f of x.frames as { t: number; file: string; subFrames: number }[]) say(typeof req.samples === 'number' ? f.file : `${f.file}  (${f.subFrames} sub-frames)`);
-  } else if (mode === 'sheet') say(String(x.file));
+  } else if (mode === 'sheet' || mode === 'strip') say(String(x.file));
   else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues`);
   else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
   else if (mode === 'gpu') say(String(x.gpu));

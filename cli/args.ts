@@ -10,8 +10,12 @@ Looking at a project (headless Chrome; each exits 1 on a scene error)
   still   --t 1.5,23[,..]    PNG stills, the pixels the video export produces. Named after the clips
                              on screen and the time (hello_1.500s.png); never overwrites a file
                              [--out <dir>|<file.png>] [--max-size <px>]
-  sheet                      a contact sheet: --from/--to with --n frames, or --times a,b,c, or --cuts
-                             (4 frames around every cut)                  [--cols 4] [--out <file.png>]
+  sheet                      a contact sheet, each frame labelled with its time and clips: --from/--to
+                             with --n frames, or --times a,b,c, or --cuts (4 frames around every cut)
+                             [--cols 4] [--cell 480] [--out <file.png>] [--max-size <px>]
+  strip                      frames side by side in one row, to judge motion and easing: --n evenly
+                             spaced from --from to --to (both included), or --frames N consecutive
+                             frames from --from     [--cell 360] [--out <file.png>] [--max-size <px>]
   events                     write the sound-mix cues (the timeline and every cue() of the scenes)
                              [--out data/cues.json]
   perf    --from 0 --to 5    milliseconds per frame, including the export's pixel readback
@@ -62,7 +66,8 @@ const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
 export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Opt>; positionals?: [min: number, max: number] }> = {
   info: { render: true, opts: {} },
   still: { render: true, opts: { t: str, ...IMAGE } },
-  sheet: { render: true, opts: { from: str, to: str, n: str, times: str, cuts: bool, cols: str, out: str } },
+  sheet: { render: true, opts: { from: str, to: str, n: str, times: str, cuts: bool, cols: str, cell: str, ...IMAGE } },
+  strip: { render: true, opts: { from: str, to: str, n: str, frames: str, cell: str, ...IMAGE } },
   events: { render: true, opts: { out: str } },
   perf: { render: true, opts: { from: str, to: str } },
   gpu: { render: true, opts: {} },
