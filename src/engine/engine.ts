@@ -757,7 +757,7 @@ export class Engine {
         // the clip's transition from the previous clip over the overlap (a crossfade unless it says otherwise)
         const tr = transitionOf(e.transition, e.id);
         const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
-        this.transition.draw(r, tr, under, rt.texture, tin, mix);
+        this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0);
         outTex = mix.texture;
         const [wo, wi] = transitionWeights(tr, tin);
         for (let j = 0; j < idx; j++) weights[j]! *= wo;

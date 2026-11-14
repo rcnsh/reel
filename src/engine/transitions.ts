@@ -21,7 +21,10 @@ export interface Transition {
   direction?: TransitionDirection;
   /** A wipe's soft edge, as a share of the frame (default 0.08; 0 is a hard edge). */
   softness?: number;
-  /** A dip's colour: a palette key or '#rrggbb' (default 'bg'). */
+  /**
+   * A dip's colour: a palette key or '#rrggbb' (default 'bg' on track 0; on a track above it, transparent, so
+   * the tracks below show through the dip instead of a colour covering them).
+   */
   color?: string;
 }
 
@@ -56,7 +59,7 @@ export function transitionWeights(t: Transition, k: number): [outgoing: number, 
 /** Draws a transition of two clip textures into a target. */
 export class TransitionPass {
   private pass = new FSPass(/* glsl */ `
-    uniform sampler2D a; uniform sampler2D b; uniform float k, soft; uniform int mode; uniform vec2 dir; uniform vec3 col;
+    uniform sampler2D a; uniform sampler2D b; uniform float k, soft; uniform int mode; uniform vec2 dir; uniform vec3 col; uniform float colA;
     vec4 at(sampler2D t, vec2 uv) { return (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? vec4(0.0) : texture(t, uv); }
     void main() {
       vec2 uv = vUv;
@@ -81,12 +84,15 @@ export class TransitionPass {
         fragColor = mix(ca, cb, k);
         return;
       }
-      vec4 c = vec4(col, 1.0);
+      vec4 c = vec4(col * colA, colA); // (premultiplied: transparent on an upper track)
       fragColor = k < 0.5 ? mix(texture(a, uv), c, k * 2.0) : mix(c, texture(b, uv), k * 2.0 - 1.0);
-    }`, { a: { value: null }, b: { value: null }, k: { value: 0 }, soft: { value: 0 }, mode: { value: 0 }, dir: { value: new THREE.Vector2() }, col: { value: new THREE.Vector3() } });
+    }`, { a: { value: null }, b: { value: null }, k: { value: 0 }, soft: { value: 0 }, mode: { value: 0 }, dir: { value: new THREE.Vector2() }, col: { value: new THREE.Vector3() }, colA: { value: 1 } });
 
-  /** Draw the transition from `a` (outgoing) to `b` (incoming) at overlap progress k into `out`. */
-  draw(renderer: THREE.WebGLRenderer, t: Transition, a: THREE.Texture, b: THREE.Texture, k: number, out: THREE.WebGLRenderTarget) {
+  /**
+   * Draw the transition from `a` (outgoing) to `b` (incoming) at overlap progress k into `out`. `upper`: the clips
+   * are on a track above 0 (a dip without a colour of its own goes through transparent).
+   */
+  draw(renderer: THREE.WebGLRenderer, t: Transition, a: THREE.Texture, b: THREE.Texture, k: number, out: THREE.WebGLRenderTarget, upper = false) {
     const u = this.pass.u, mode = TRANSITION_KINDS.indexOf(t.kind);
     u.a!.value = a;
     u.b!.value = b;
@@ -94,6 +100,7 @@ export class TransitionPass {
     u.k!.value = t.kind === 'crossfade' || t.kind === 'dip' ? k : inOut(k);
     u.soft!.value = t.softness ?? 0.08;
     (u.dir!.value as THREE.Vector2).set(...DIRS[t.direction ?? 'left']);
+    u.colA!.value = upper && t.color === undefined ? 0 : 1;
     const c = t.color ?? 'bg';
     (u.col!.value as THREE.Vector3).set(...(c.startsWith('#') ? hexToLinear(c) : hexToLinear(HEX[c]!)));
     this.pass.render(renderer, out);

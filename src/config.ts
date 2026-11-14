@@ -33,7 +33,8 @@ export interface Clip {
   /**
    * How the clip comes in over the clip before it on its track while they overlap (default a crossfade):
    * 'crossfade', 'wipe', 'slide', 'zoom', 'dip', or { kind, direction?: 'left' | 'right' | 'up' | 'down',
-   * softness?: share of the frame (a wipe's edge), color?: palette key or '#rrggbb' (a dip's) }. A scene with
+   * softness?: share of the frame (a wipe's edge), color?: palette key or '#rrggbb' (a dip's; default bg, or
+   * transparent on a track above 0) }. A scene with
    * handlesTransition draws the transition itself instead.
    */
   transition?: TransitionKind | Transition;
