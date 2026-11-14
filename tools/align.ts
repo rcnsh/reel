@@ -11,7 +11,8 @@ import { $ } from 'bun';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const ROOT = path.resolve(import.meta.dir, '..');
+// the project folder: the one `reel` was pointed at, else the current folder
+const ROOT = path.resolve(process.env.REEL_PROJECT ?? '.');
 const PLATE_GAP = 0.85, TAIL = Number(process.env.TAIL ?? 1.6), CUT_LEAD = 0.25; // TAIL: silence after the last word (room for the credits)
 const tmp = path.join(ROOT, 'audio/.align');
 mkdirSync(tmp, { recursive: true });
@@ -60,7 +61,7 @@ let duration = Number((await $`ffprobe -v error -show_entries format=duration -o
 const w16 = path.join(tmp, 'w16.wav'), wjson = path.join(tmp, 'words.json');
 await $`ffmpeg -loglevel error -y -i ${final} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
 const script = plates.flatMap((p) => p.lines).join(' ');
-await $`uv run -q --with faster-whisper --with numpy python ${path.join(ROOT, 'tools/whisper_words.py')} ${w16} ${wjson} ${script}`;
+await $`uv run -q --with faster-whisper --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${w16} ${wjson} ${script}`;
 const heard: { w: string; s: number; e: number }[] = [];
 // Whisper splits figures into "152" ",000" and "2" ".06": join them back into one word
 for (const h of JSON.parse(readFileSync(wjson, 'utf8')) as typeof heard) {

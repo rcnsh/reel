@@ -6,30 +6,29 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 
 ## Running things
 
-- Dev server (probably already running): `bunx vite --port 5173`. Preview: http://localhost:5173/?t=2.0 (space = play/pause, ←/→ = ±1 s, shift = ±5 s, `,`/`.` = ±1 frame, `[`/`]` = previous/next timeline entry, `l` = loop the current entry, `h` = hide the UI).
-- Stills (the main way to check your work — then LOOK at the PNGs with the Read tool): `bun scripts/render.ts stills --t 12.5,13.0,14.2 --only hello --out out/wip/hello`
-- Contact sheet of a time range: `bun scripts/render.ts sheet --from 1.5 --to 9 --n 16 --cols 4 --only hello --out out/wip/hello/sheet.png`
-- Short video clip (to judge motion: extract frames with ffmpeg, or just trust the math): `bun scripts/render.ts video --from 20 --to 25 --only hello --out out/wip/hello.mp4 --preset veryfast`
-- `--only a,b` loads only those timeline entries (fast, and isolates you from other people's broken scenes). Without a matching entry nothing renders (black), so the entry must exist in the timeline (a narration plate with a scene of the same name, see `src/timeline.ts`).
-- Typecheck just your files: `bunx tsc --noEmit -p tsconfig.json 2>&1 | grep scenes/yourscene`.
-- The render script prints `SCENE ERRORS` and browser console errors — read them.
-- Format: `--size WxH` and `--fps N` on any mode (the preview takes `?w=1080&h=1920&fps=30`). 4K: add `--scale 2` to any mode. Stills are the pixels the video export reads, at full resolution. Check your scene at both scales: downscaled, the 4K frame should look like the 1080p one, only sharper.
-- Renders while files are being edited: run a server without live reload (`REEL_NO_HMR=1 bunx vite --port 5190`) and pass `--url http://localhost:5190`; a live-reloading server reloads the page mid-render. The private server that `render.ts` starts when none is reachable already runs without it.
+`reel` is `bun <engine>/cli/reel.ts`; run it in the project folder or pass `--project <folder>`. `reel --help` lists everything.
+
+- Preview: `reel dev`, then http://localhost:5173/?t=2.0 (space = play/pause, ←/→ = ±1 s, shift = ±5 s, `,`/`.` = ±1 frame, `[`/`]` = previous/next clip, `l` = loop the current clip, `h` = hide the UI).
+- Stills (the main way to check your work — then LOOK at the PNGs with the Read tool): `reel still --t 12.5,13.0,14.2 --only hello --out out/wip/hello`. They are the pixels the video export produces.
+- Contact sheet of a time range: `reel sheet --from 1.5 --to 9 --n 16 --cols 4 --only hello --out out/wip/hello/sheet.png`; `reel sheet --cuts` shows the frames around every cut.
+- Short video clip (to judge motion): `reel video --from 20 --to 25 --only hello --out out/wip/hello.mp4 --preset veryfast`
+- `--only a,b` loads only those clips (fast, and isolates you from other broken scenes). Clips that are not loaded draw nothing.
+- A scene that throws makes the command exit 1 and lists the error (`--json`: in `errors`); in a render it shows as a dark red frame.
+- Format: the project's config sets `size` and `fps`; `--size WxH` and `--fps N` override them for one command. 4K: add `--scale 2`.
 
 ## Data
 
-- `lyrics` (`src/engine/lyrics.ts`): `lines[]` with `text,start,end,words[]`, each word `{w,start,end}` (word-level, aligned to the vocal). Find lines by content, never hard-code times: `const l = this.ctx.lyrics.get('sudden drop')` → `l.words[3].start`. Helpers: `Lyrics.wordProgress(word, t)` (0..1 sung progress), `Lyrics.lineCharProgress(line, t)` (chars sung so far — for per-glyph wipes), `lyrics.findWords('word')`.
-- `audio` (`src/engine/audio.ts`): `beats[]`, `downbeats[]`, `sections[]`, `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `beatBefore(t)` (the beat at or before t: a cut that never lands after a word), `nearestDownbeat(t)`, `events('kick'|'snare'|'hat'|'vocal', t0, t1)`, `env(name, t)` for `rms|low|mid|high|vocal|drums|bass|other` (0..1), `hit(kind, t, halfLife)` decaying pulses.
+- `words` (`ctx.words`, also `ctx.lyrics`; `src/engine/lyrics.ts`; empty in a project without `data/lyrics.json`): `lines[]` with `text,start,end,words[]`, each word `{w,start,end}` (word-level, aligned to the vocal). Find lines by content, never hard-code times: `const l = this.ctx.lyrics.get('sudden drop')` → `l.words[3].start`. Helpers: `Lyrics.wordProgress(word, t)` (0..1 sung progress), `Lyrics.lineCharProgress(line, t)` (chars sung so far — for per-glyph wipes), `lyrics.findWords('word')`.
+- `audio` (`src/engine/audio.ts`; a silent 100 BPM grid in a project without `data/audio.json`): `beats[]`, `downbeats[]`, `sections[]`, `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `beatBefore(t)` (the beat at or before t: a cut that never lands after a word), `nearestDownbeat(t)`, `events('kick'|'snare'|'hat'|'vocal', t0, t1)`, `env(name, t)` for `rms|low|mid|high|vocal|drums|bass|other` (0..1), `hit(kind, t, halfLife)` decaying pulses.
 - Every `Frame` already carries `f.a` = `{rms,low,mid,high,vocal,drums,bass,other,kick,snare,hat,vonset}` and `f.beat,f.bar,f.beatPhase,f.barPhase`.
 
 ## Writing a scene
 
-One file `src/scenes/<name>.ts`, default-exporting a class extending `Scene` (`src/engine/scene.ts`):
+One file `scenes/<name>.ts` in the project, default-exporting a class extending `Scene` (`src/engine/scene.ts`), placed on the timeline by a clip in `reel.config.ts`:
 
 ```ts
 import * as THREE from 'three';
-import { Scene, type Frame } from '../engine/scene';
-import { FSPass, Layer2D, W, H, clearRT } from '../engine/gl';
+import { Scene, type Frame, FSPass, Layer2D, W, H, clearRT } from 'reel';
 
 export default class MyScene extends Scene {
   bg = new FSPass(`uniform float t; void main(){ fragColor = vec4(C_INK, 1.0); }`, { t: { value: 0 } });
@@ -49,9 +48,9 @@ export default class MyScene extends Scene {
 Rules:
 
 - **Deterministic**: output must be a pure function of `f.t` (and seeded randomness: `mulberry32(seed)`, `hash(...)`). Never use `Math.random()`, `Date.now()` or `performance.now()` for visuals. The export averages many sub-frames per frame, in any order (see "Motion blur and sampling"). If you need simulation state (particles, feedback buffers), set `stateful = true`, reset in `reset()`, integrate with `f.dt`, and the engine will fast-forward after seeks; such a scene can only be exported with a fixed `--samples`.
-- `render()` must fully overwrite `out` (a HalfFloat linear-HDR target). Colours are **linear**; values > ~0.85 bloom. Use palette constants (`C_INK`, `C_BONE`, `C_SIGNAL`… in GLSL; `LIN.signal` in TS for GL; `rgba('signal', a)` for Canvas2D).
-- `ctx.params` holds the timeline entry's params (one module can serve several entries); `ctx.start/ctx.end` its window; `f.lt`/`f.p` local time/progress.
-- Transitions: by default the engine crossfades overlapping entries. For custom transitions set `handlesTransition = true` and composite `f.under` (the previous scene's frame) yourself using `f.tin` (0→1 over the overlap). Most cuts should be hard cuts on downbeats (no overlap) — that's the default when windows touch.
+- `render()` must fully overwrite `out` (a HalfFloat linear-HDR target). On track 0 that means opaque; on a higher track, clear to transparent first (`clearRT(renderer, out, [0, 0, 0], 0)`) and draw over it, and the tracks below show through. A clip's `blend` and `opacity` set how its track is laid over the ones below. Colours are **linear**; values > ~0.85 bloom. Use palette constants (`C_INK`, `C_BONE`, `C_SIGNAL`… in GLSL; `LIN.signal` in TS for GL; `rgba('signal', a)` for Canvas2D).
+- `ctx.params` holds the clip's params (one module can serve several clips); `ctx.start/ctx.end` its window; `f.lt`/`f.p` local time/progress.
+- Transitions: by default the engine crossfades clips that overlap on one track. For custom transitions set `handlesTransition = true` and composite `f.under` (the previous scene's frame) yourself using `f.tin` (0→1 over the overlap). Most cuts should be hard cuts on downbeats (no overlap) — that's the default when windows touch.
 - Looks: `LOOKS.print` (the default: no glow, faint grain) and `LOOKS.film` (bloom, halation, chromatic aberration, heavy grain, HUD on), from `post.ts`; return `{ ...LOOKS.film, bloom: 0.8 }` for a scene in the other look.
 - Post overrides you can return: `exposure, bloom, bloomThreshold, bloomKnee, bloomRadius, halation, ca, grain, vignette, hud (HUD opacity), frame (crop marks), paper (HUD in ink), fade, flash, shake:[x,y], zoom, invert`. Defaults in `src/engine/post.ts`.
 - Performance: aim for < 25 ms/frame. Canvas2D layers cost ~2–4 ms to upload each; don't use more than 2–3 per scene. Precompute in `init()`.
@@ -71,11 +70,11 @@ Rules:
 - Lyrics come with typographic punctuation (`don’t`, `’cause`, `“Just`): `Word.w` and `Line.text` go through `smart()`; `lyrics.get()` matches straight or curly quotes. Hardcoded display strings use ’ “ ” … – — × − too. Mono text (IBM Plex Mono) is the UI/terminal voice and keeps typewriter quotes (`plain()` for a lyric shown as typed input).
 - No outlined or haloed type.
 - `util.ts`: `clamp, lerp, remap, smoothstep, ease.*, prog(x,a,b,ease), keys(t, [[t,v,ease],...]), springStep, pulse, mulberry32, hash, noise1/2/3, fbm1/2, polylineLengths, pointAtLength, window01`.
-- `hud.ts`: the global HUD: crop marks (`post.frame`) and captions from timeline entries (`TimelineEntry.caption`), both off until a scene asks (`post.hud`).
+- `hud.ts`: the global HUD: crop marks (`post.frame`) and captions from clips (`Clip.caption`), both off until a scene asks (`post.hud`).
 
 ## Output scale (4K)
 
-`?scale=2` (render.ts `--scale 2`) renders every logical px as 2×2 physical px: a true 3840×2160 frame from the default size. Scenes keep laying out in logical px (`W`, `H`, `ctx.W`, `ctx.H` do not change with the scale); the engine handles the rest:
+`?scale=2` (`--scale 2`) renders every logical px as 2×2 physical px: a true 3840×2160 frame from the default size. Scenes keep laying out in logical px (`W`, `H`, `ctx.W`, `ctx.H` do not change with the scale); the engine handles the rest:
 
 - Render targets: `out`, the engine's targets and `makeRT()` are physical (`PW`×`PH`). `makeRT(w, h)` takes logical px and allocates `w*SCALE`×`h*SCALE`; pass `{ pxScale: 1 }` for a data-sized target whose resolution must not follow the output.
 - `Layer2D`: the backing canvas is `SCALE`× larger and its context is pre-scaled, so drawing code works in logical px. `setTransform`/`resetTransform`/`getTransform`, `shadowBlur`, `shadowOffsetX/Y` and `filter` px lengths are patched to stay logical. Not patched: `canvas.width/height` and `getImageData`/`putImageData` are physical px, and `drawImage(layer.canvas, x, y)` needs an explicit size. `new Layer2D(w, h, 1)` makes a deliberately low-res layer (e.g. a soft glow). `scaleContext2D(ctx, SCALE)` applies the same patch to your own canvas.
@@ -111,4 +110,4 @@ A point of light for a pen, fuse or cursor head that moves along a path: `sparkH
 
 ## Music data (`tools/analyze.py`)
 
-Narration timing (`tools/narration.ts`, `tools/align.ts`) gives a silent 100 BPM grid and empty envelopes, so `f.a` reads 0. `tools/analyze.py <song>` fills them from a song: a constant-tempo grid on the kicks, downbeats, envelopes (`rms`, `low`, `mid`, `high` from the mix; `drums`, `other`, `bass`, `vocal` from a harmonic/percussive split, proxies rather than separated stems), `kick`/`snare`/`hat` onsets and `vocal` onsets (from the same harmonic band, so also a proxy). To cut on the beat, edit `src/timeline.ts` to snap entry starts: `au.beatBefore(ly.get('first words').words[0].start)`, or `au.nearestDownbeat(t)` at the end of a line.
+Narration timing (`reel narrate`, `reel align`) gives a silent 100 BPM grid and empty envelopes, so `f.a` reads 0. `reel analyze <song>` fills them from a song: a constant-tempo grid on the kicks, downbeats, envelopes (`rms`, `low`, `mid`, `high` from the mix; `drums`, `other`, `bass`, `vocal` from a harmonic/percussive split, proxies rather than separated stems), `kick`/`snare`/`hat` onsets and `vocal` onsets (from the same harmonic band, so also a proxy). To cut on the beat, snap clip starts in the config's `timeline(src)`: `src.audio.beatBefore(src.words.get('first words').words[0].start)`, or `src.audio.nearestDownbeat(t)` at the end of a line.

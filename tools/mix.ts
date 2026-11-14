@@ -1,8 +1,8 @@
 #!/usr/bin/env bun
 // Sound mix: lays music beds and cue sounds under a rendered video's narration.
-//   bun tools/mix.ts <in.mp4> <out.mp4> [--from 0]
+//   reel mix <in.mp4> <out.mp4> [--from 0]
 // --from is the timeline time the video starts at (the render's --from), so partial renders mix correctly.
-// Cues come from data/cues.json (bun scripts/render.ts events): the timeline and every cue() scenes recorded.
+// Cues come from data/cues.json (reel events): the timeline and every cue() scenes recorded.
 // What to lay where comes from mix.json in the project root:
 //   {
 //     "music": [{ "file": "bed.mp3", "from": "intro", "to": "outro", "db": -17, "fadeIn": 2, "fadeOut": 4 }],
@@ -21,7 +21,8 @@ interface Music { file: string; from?: string; to?: string; db?: number; fadeIn?
 interface CueSound { file: string; db?: number; minGap?: number }
 interface MixConfig { music?: Music[]; cues?: Record<string, CueSound>; entryCues?: Record<string, string[]> }
 
-const ROOT = path.resolve(import.meta.dir, '..');
+// the project folder: the one `reel` was pointed at, else the current folder
+const ROOT = path.resolve(process.env.REEL_PROJECT ?? '.');
 const argv = process.argv.slice(2);
 const opt = (k: string, d: string) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1]! : d; };
 const [inp, out] = argv.filter((a, i) => !a.startsWith('--') && !argv[i - 1]?.startsWith('--'));

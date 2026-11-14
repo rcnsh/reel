@@ -1,5 +1,6 @@
 // Word-timed lyrics (data/lyrics.json) with queries for karaoke rendering.
 import { smart } from './type';
+import { fetchJSON } from './audio';
 
 export interface Word {
   w: string; // display token (punctuation attached, typographic quotes: don’t, ’cause)
@@ -36,12 +37,13 @@ export class Lyrics {
     this.words.forEach((w, i) => (w.gi = i));
   }
 
-  static async load(): Promise<Lyrics> {
-    for (const url of ['data/lyrics.json', 'data/lyrics.approx.json']) {
-      const r = await fetch(url);
-      if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) return new Lyrics(await r.json());
-    }
-    throw new Error('no lyrics data found');
+  /** `src`: the JSON's path in the project, false for none; by default data/lyrics.json if the project has one. */
+  static async load(src?: string | false): Promise<Lyrics> {
+    if (src === false) return new Lyrics({ lines: [] });
+    const j = await fetchJSON(src ?? 'data/lyrics.json');
+    if (j) return new Lyrics(j as { lines: any[] });
+    if (src) throw new Error(`timed words not found: ${src}`);
+    return new Lyrics({ lines: [] });
   }
 
   /** The line being sung at t (or null in gaps). */

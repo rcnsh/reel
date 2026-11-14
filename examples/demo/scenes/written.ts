@@ -1,12 +1,7 @@
 // Demo plate: a single-stroke font written by a spark in step with the narration's word timings, with a
 // sound cue at the start of every word for the mix.
 import type * as THREE from 'three';
-import { Scene, type Frame } from '../engine/scene';
-import { Layer2D, W, H, clearRT } from '../engine/gl';
-import { LIN, rgba } from '../engine/palette';
-import { strokeText, drawStrokeText, writtenLength, type StrokeText } from '../engine/stroke';
-import { sparkHead2D } from '../engine/spark';
-import { cue } from '../engine/util';
+import { Scene, type Frame, Layer2D, W, H, clearRT, LIN, rgba, strokeText, drawStrokeText, writtenLength, type StrokeText, sparkHead2D, cue } from 'reel';
 
 export default class Written extends Scene {
   layer = new Layer2D();

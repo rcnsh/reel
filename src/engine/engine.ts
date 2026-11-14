@@ -1,5 +1,5 @@
-// The engine: owns the renderer, loads scenes for the timeline, renders any song time
-// deterministically (with preroll for stateful scenes), composites transitions, HUD, post.
+// The engine: owns the renderer, loads the scenes of the timeline's clips, renders any time deterministically
+// (with preroll for stateful scenes), composites tracks and transitions, HUD, post.
 import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Lyrics } from './lyrics';
@@ -9,24 +9,15 @@ import { Hud, type Caption } from './hud';
 import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene';
 import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
+import type { Clip, VideoConfig } from '../config';
 
-export interface TimelineEntry {
-  id: string;
-  /** Lazy module loader; the module's default export is the Scene class. */
-  load: () => Promise<{ default: SceneClass }>;
-  start: number;
-  end: number;
-  /** Plate caption shown bottom-right at the start of this entry. */
-  caption?: { fig: string; text: string; dur?: number; delay?: number };
-  /** Default post overrides for this entry (the scene's own overrides win). */
-  post?: PostOverrides;
-  /** Free-form params handed to the scene as ctx.params. */
-  params?: Record<string, any>;
-  /** Cap on adaptive motion-blur sub-frames while this entry is on screen (for noise that converges slowly). */
-  maxSamples?: number;
-}
+/** A clip on the engine's timeline (see Clip in config.ts). */
+export type TimelineEntry = Clip;
 
-interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; lastT: number }
+/** A track's targets: three for its scenes, two for transitions (a third overlapping clip reads one mix and writes the other). */
+interface TrackRTs { rts: THREE.WebGLRenderTarget[]; mix: THREE.WebGLRenderTarget[] }
+
+interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number }
 
 /**
  * Per-frame adaptive motion-blur sampling (see Engine.render): the sub-frame count steps through
@@ -72,8 +63,10 @@ export class Engine {
   comp = new Compositor();
   loaded = new Map<string, Loaded>();
   // (the scene targets and the motion-blur sums have a depth buffer: it carries the tile mask of per-tile refinement)
-  private rts = [makeRT(), makeRT(), makeRT()];
-  private mixRT = makeRT();
+  // per track: three scene targets (clips overlapping in a transition) and the transition's mix; then the stack of tracks
+  private trackRTs: TrackRTs[] = [];
+  private stackRT = makeRT();
+  private _duration = 0;
   // motion-blur sub-frame sums (float: up to hundreds of sub-frames), their average, and the error estimate
   private sumRT = makeRT(W, H, { type: THREE.FloatType });
   private newRT = makeRT(W, H, { type: THREE.FloatType });
@@ -116,12 +109,10 @@ export class Engine {
   private lastT = -1;
   lastPost: PostParams = { ...DEFAULT_POST };
   errors: string[] = [];
-  /** Suppress the HUD (captions, crop marks): render.ts `plates` turns it off for thumbnails. */
-  hudOff = false;
 
   timeline: TimelineEntry[] = [];
 
-  constructor(public canvas: HTMLCanvasElement, private makeTimeline: (lyrics: Lyrics, audio: AudioData) => TimelineEntry[]) {
+  constructor(public canvas: HTMLCanvasElement, private config: VideoConfig) {
     this.renderer = new THREE.WebGLRenderer({ canvas, antialias: false, alpha: false, preserveDrawingBuffer: true, powerPreference: 'high-performance' });
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(PW, PH, false);
@@ -196,7 +187,7 @@ export class Engine {
       }`, { tiles: { value: this.tileTex }, map: { value: new THREE.Vector4(1, 1, 0, 0) } });
     const mm = this.maskPass.mat;
     mm.colorWrite = false; mm.depthTest = true; mm.depthWrite = true; mm.depthFunc = THREE.AlwaysDepth;
-    for (const rt of [...this.rts, this.mixRT, this.newRT, this.sumRT]) this.maskedRTs.set(rt, { margin: 0 });
+    for (const rt of [this.stackRT, this.newRT, this.sumRT]) this.maskedRTs.set(rt, { margin: 0 });
     this.hookDepthState();
     // errPass with the error of tiles no longer refining forced to 0 (their sums hold nothing new)
     this.errTilePass = new FSPass(/* glsl */ `
@@ -311,9 +302,24 @@ export class Engine {
   }
 
   async init(only?: (e: TimelineEntry) => boolean) {
-    [this.audio, this.lyrics] = await Promise.all([AudioData.load(), Lyrics.load(), loadFonts(), loadStrokeFonts()]) as [AudioData, Lyrics, void, void];
-    this.timeline = this.makeTimeline(this.lyrics, this.audio);
-    this.ctx = { renderer: this.renderer, audio: this.audio, lyrics: this.lyrics, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map) };
+    const c = this.config;
+    [this.audio, this.lyrics] = await Promise.all([AudioData.load(c.audio), Lyrics.load(c.words), loadFonts(), loadStrokeFonts()]) as [AudioData, Lyrics, void, void];
+    this.timeline = c.timeline({ words: this.lyrics, audio: this.audio });
+    const ids = new Set<string>();
+    for (const e of this.timeline) {
+      if (ids.has(e.id)) throw new Error(`timeline: two clips are called '${e.id}'`);
+      ids.add(e.id);
+      if (!(e.end > e.start) || e.start < 0) throw new Error(`timeline: clip '${e.id}' runs ${e.start} to ${e.end}`);
+    }
+    this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
+    if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
+    const tracks = new Set(this.timeline.map((e) => e.track ?? 0)).size;
+    for (let i = 0; i < Math.max(1, tracks); i++) {
+      const t: TrackRTs = { rts: [makeRT(), makeRT(), makeRT()], mix: [makeRT(), makeRT()] };
+      this.trackRTs.push(t);
+      for (const rt of [...t.rts, ...t.mix]) this.maskedRTs.set(rt, { margin: 0 });
+    }
+    this.ctx = { renderer: this.renderer, audio: this.audio, lyrics: this.lyrics, words: this.lyrics, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map) };
     this.post = new Post();
     const captions: Caption[] = this.timeline.filter((e) => e.caption).map((e) => {
       const d = e.caption!.delay ?? 0.3;
@@ -328,7 +334,7 @@ export class Engine {
     const rec: Loaded = { entry: e, scene: null, lastT: -1 };
     this.loaded.set(e.id, rec);
     try {
-      const mod = await e.load();
+      const mod = await e.scene();
       const s = new mod.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
       await s.init();
       rec.scene = s;
@@ -351,7 +357,7 @@ export class Engine {
     this.lastT = -1;
   }
 
-  get duration() { return this.audio.duration; }
+  get duration() { return this._duration; }
 
   private frameFor(e: TimelineEntry, t: number, dt: number, seeked: boolean, preroll: boolean, under: THREE.Texture | null, tin: number, tout: number): Frame {
     const beat = this.audio.beatAt(t), bar = this.audio.barAt(t);
@@ -511,7 +517,7 @@ export class Engine {
       outTex = this.avgRT.texture;
     }
     this.lastSamples = n;
-    const hudTex = this.hud.draw(t, { opacity: this.hudOff ? 0 : post.hud, frame: post.frame, paper: post.paper });
+    const hudTex = this.hud.draw(t, { opacity: post.hud, frame: post.frame, paper: post.paper });
     this.post.render(r, outTex, hudTex, this.finalRT, post, t);
     this.lastPost = post;
     if (toScreen) {
@@ -544,25 +550,52 @@ export class Engine {
   }
 
   /**
-   * Render and composite all scenes active at t into an HDR texture (no post). `dt` is the step handed to
-   * scenes (the frame step, or the sub-frame spacing); `seeked` says time jumped before this call.
+   * Render and composite all clips active at t into an HDR texture (no post): each track's clips (with their
+   * transition), then the tracks over one another, lowest first. `dt` is the step handed to scenes (the frame
+   * step, or the sub-frame spacing); `seeked` says time jumped before this call.
    */
   private composite(t: number, dt: number, seeked: boolean): { outTex: THREE.Texture; post: PostParams } {
     const r = this.renderer;
-
-    const active = this.timeline.filter((e) => t >= e.start && t < e.end).sort((a, b) => a.start - b.start);
+    const active = this.timeline.filter((e) => t >= e.start && t < e.end);
+    const tracks = [...new Set(active.map((e) => e.track ?? 0))].sort((a, b) => a - b);
     let post: PostParams = { ...DEFAULT_POST };
-    let under: THREE.Texture | null = null;
     let outTex: THREE.Texture | null = null;
+    tracks.forEach((tn, ti) => {
+      const clips = active.filter((e) => (e.track ?? 0) === tn).sort((a, b) => a.start - b.start);
+      const res = this.compositeTrack(clips, t, dt, seeked, this.trackRTs[ti % this.trackRTs.length]!);
+      post = { ...post, ...res.post };
+      // the track's blend is its latest clip's; its opacity fades from clip to clip across a transition
+      const top = clips[clips.length - 1]!, before = clips[clips.length - 2];
+      const mode = top.blend ?? 'normal';
+      let opacity = top.opacity ?? 1;
+      if (before) opacity = (before.opacity ?? 1) + (opacity - (before.opacity ?? 1)) * Math.min(1, (t - top.start) / Math.max(1e-3, before.end - top.start));
+      // (the lowest track goes into the stack only when it is blended or something is drawn over it)
+      if (ti === 0 && mode === 'normal' && opacity === 1) { outTex = res.outTex; return; }
+      if (ti === 0) clearRT(r, this.stackRT, [0, 0, 0]);
+      else if (outTex !== this.stackRT.texture) this.comp.draw(r, outTex!, this.stackRT, { mode: 'replace', premult: false });
+      this.comp.draw(r, res.outTex, this.stackRT, { mode, opacity, premult: false });
+      outTex = this.stackRT.texture;
+    });
+    if (!outTex) { clearRT(r, this.stackRT, [0, 0, 0]); outTex = this.stackRT.texture; }
+    return { outTex, post };
+  }
+
+  /** One track at t: its active clips in start order, the later ones transitioning in over the earlier. */
+  private compositeTrack(active: TimelineEntry[], t: number, dt: number, seeked: boolean, rt3: TrackRTs): { outTex: THREE.Texture; post: PostOverrides } {
+    const r = this.renderer;
+    let post: PostOverrides = {};
+    let under: THREE.Texture | null = null;
+    let outTex: THREE.Texture = rt3.rts[0]!.texture;
 
     active.forEach((e, idx) => {
       const rec = this.loaded.get(e.id);
-      const rt = this.rts[idx % this.rts.length]!;
+      const rt = rt3.rts[idx % rt3.rts.length]!;
       const prev = active[idx - 1], next = active[idx + 1];
       const tin = prev ? Math.min(1, (t - e.start) / Math.max(1e-3, prev.end - e.start)) : 1;
       const tout = next ? Math.max(0, (t - next.start) / Math.max(1e-3, e.end - next.start)) : 0;
       if (!rec?.scene) {
-        clearRT(r, rt, [0.25, 0.0, 0.0]);
+        // a clip that was not loaded (--only) shows nothing; one whose scene failed shows dark red
+        clearRT(r, rt, rec?.error ? [0.25, 0.0, 0.0] : [0, 0, 0], rec?.error ? 1 : 0);
         under = rt.texture; outTex = rt.texture;
         return;
       }
@@ -583,23 +616,23 @@ export class Engine {
       try {
         ov = s.render(this.frameFor(e, t, sceneSeeked ? 0 : dt, sceneSeeked && !s.stateful, false, idx > 0 ? under : null, tin, tout), rt);
       } catch (err) {
-        console.error(`scene ${e.id} render error`, err);
+        const msg = `[${e.id}] render at ${t.toFixed(3)} s: ${String((err as Error)?.stack ?? err)}`;
+        if (!rec.renderError) { rec.renderError = msg; this.errors.push(msg); console.error(msg); }
         clearRT(r, rt, [0.25, 0.0, 0.0]);
       }
       rec.lastT = t;
       post = { ...post, ...(e.post ?? {}), ...(ov ?? {}) };
       if (idx > 0 && !s.handlesTransition && under) {
-        // default: crossfade from the previous scene over the overlap
+        // default: crossfade from the previous clip over the overlap
         this.xfade.u.a!.value = under;
         this.xfade.u.b!.value = rt.texture;
         this.xfade.u.k!.value = tin;
-        this.xfade.render(r, this.mixRT);
-        outTex = this.mixRT.texture;
+        const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
+        this.xfade.render(r, mix);
+        outTex = mix.texture;
       } else outTex = rt.texture;
       under = outTex;
     });
-
-    if (!outTex) { clearRT(r, this.rts[0]!, [0, 0, 0]); outTex = this.rts[0]!.texture; }
     return { outTex, post };
   }
 

@@ -17,8 +17,15 @@
     "three": "^0.186.0"
   },
   "scripts": {
-    "dev": "vite --port 5173",
-    "typecheck": "tsc --noEmit -p tsconfig.json && tsc --noEmit -p tsconfig.scripts.json && tsc --noEmit -p tsconfig.tools.json",
-    "render": "bun scripts/render.ts"
+    "dev": "bun cli/reel.ts dev --project examples/demo",
+    "typecheck": "tsc --noEmit -p tsconfig.json",
+    "test": "bun test"
+  },
+  "bin": {
+    "reel": "./cli/reel.ts"
+  },
+  "exports": {
+    ".": "./src/index.ts",
+    "./config": "./src/config.ts"
   }
 }

@@ -10,13 +10,15 @@ import type { PostParams } from './post';
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
   audio: AudioData;
+  /** The project's timed words (narration, lyrics, captions); `lyrics` is the same object. */
+  words: Lyrics;
   lyrics: Lyrics;
   comp: Compositor;
   W: number;
   H: number;
   /** Timeline entry id and its free-form params (lets one scene module serve several entries). */
   id: string;
-  params: Record<string, any>;
+  params: Record<string, unknown>;
   /** Entry window (song seconds). */
   start: number;
   end: number;

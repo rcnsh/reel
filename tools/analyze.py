@@ -32,6 +32,7 @@ sections stay as they were and --offset places the song's start on the video's t
 import argparse
 import json
 import math
+import os
 import re
 import shutil
 import sys
@@ -41,7 +42,8 @@ import librosa
 import numpy as np
 from scipy.signal import butter, sosfiltfilt
 
-ROOT = Path(__file__).resolve().parent.parent
+# the project folder: the one `reel` was pointed at, else the current folder
+ROOT = Path(os.environ.get("REEL_PROJECT", ".")).resolve()
 SR = 22050
 FPS = 100
 

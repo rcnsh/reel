@@ -175,7 +175,7 @@ export function hexToLinear(hex: string): [number, number, number] {
 
 /**
  * Record a sound cue at song time t (a pen tick, a whoosh, a page turn) for the mix: scenes call it from
- * init(), and `bun scripts/render.ts events` writes every cue to data/cues.json, sorted by time.
+ * init(), and `reel events` writes every cue to data/cues.json, sorted by time.
  */
 export function cue(kind: string, t: number) {
   const g = globalThis as { __reelCues?: { kind: string; t: number }[] };

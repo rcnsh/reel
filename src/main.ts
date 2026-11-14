@@ -1,7 +1,7 @@
-// Entry: preview player (default) or export mode (?export=1, driven by scripts/render.ts).
+// Entry: preview player (default) or export mode (?export=1, driven by cli/reel.ts).
 import { Engine, type AdaptiveSampling } from './engine/engine';
 import { W, H, PW, PH, SCALE, FPS } from './engine/gl';
-import { makeTimeline } from './timeline';
+import config from '@project/reel.config';
 
 const params = new URLSearchParams(location.search);
 const EXPORT = params.has('export');
@@ -15,7 +15,7 @@ canvas.height = PH;
 canvas.style.aspectRatio = W + ' / ' + H;
 if (EXPORT) { canvas.style.width = W + 'px'; canvas.style.height = H + 'px'; }
 
-const engine = new Engine(canvas, makeTimeline);
+const engine = new Engine(canvas, config);
 
 declare global {
   interface Window { __reel: any }
@@ -94,13 +94,17 @@ function setupExport() {
   window.__reel = {
     engine,
     duration: engine.duration,
+    /** The sound the export muxes (a path in the project), or null for a silent video. */
+    track: engine.audio.track,
     errors: engine.errors,
     /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24). */
     scale: SCALE,
     width: PW,
     height: PH,
     fps: FPS,
-    timeline: TIMELINE.map(({ id, start, end }) => ({ id, start, end })),
+    /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
+    stateful: [...engine.loaded.values()].some((l) => l.scene?.stateful),
+    timeline: TIMELINE.map(({ id, start, end, track }) => ({ id, start, end, track: track ?? 0 })),
     /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
     /** Render a single frame at t (seeks as needed). */
@@ -153,7 +157,7 @@ function setupExport() {
 
 // ------------------------------------------------------------------ preview player
 function setupPlayer() {
-  const audio = new Audio(engine.audio.track);
+  const audio = new Audio(engine.audio.track ?? undefined);
   audio.preload = 'auto';
   const ui = document.getElementById('ui')!;
   const scrub = document.getElementById('scrub') as HTMLInputElement;
@@ -225,7 +229,7 @@ function setupPlayer() {
 
   // Vite HMR: re-instantiate scenes whose module changed
   if (import.meta.hot) {
-    import.meta.hot.on('vite:afterUpdate', (payload: any) => {
+    (import.meta.hot as unknown as { on(ev: string, cb: (payload: any) => void): void }).on('vite:afterUpdate', (payload) => {
       for (const u of payload.updates ?? []) {
         const m = /scenes\/([\w-]+)\.ts/.exec(u.path ?? '');
         if (m) for (const e of TIMELINE) if (e.id === m[1] || (e as any).file === m[1]) engine.reload(e.id);

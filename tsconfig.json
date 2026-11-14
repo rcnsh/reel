@@ -1,6 +1,10 @@
 {
   "compilerOptions": {
-    "lib": ["ESNext", "DOM", "DOM.Iterable"],
+    "lib": [
+      "ESNext",
+      "DOM",
+      "DOM.Iterable"
+    ],
     "target": "ESNext",
     "module": "ESNext",
     "moduleDetection": "force",
@@ -12,7 +16,26 @@
     "skipLibCheck": true,
     "noFallthroughCasesInSwitch": true,
     "noImplicitOverride": true,
-    "types": ["vite/client"]
+    "types": [
+      "vite/client",
+      "bun"
+    ],
+    "paths": {
+      "reel": [
+        "./src/index.ts"
+      ],
+      "reel/config": [
+        "./src/config.ts"
+      ],
+      "@project/*": [
+        "./examples/demo/*"
+      ]
+    }
   },
-  "include": ["src"]
+  "include": [
+    "src",
+    "cli",
+    "tools",
+    "examples"
+  ]
 }

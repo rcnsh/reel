@@ -1,11 +1,6 @@
 // Demo plate: a shader background (paper with engraved hatching) and the line set in type as it is spoken.
 import type * as THREE from 'three';
-import { Scene, type Frame } from '../engine/scene';
-import { FSPass, Layer2D, W, H } from '../engine/gl';
-import { F, font } from '../engine/type';
-import { rgba } from '../engine/palette';
-import { Lyrics } from '../engine/lyrics';
-import { ease, prog } from '../engine/util';
+import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, rgba, Lyrics, ease, prog } from 'reel';
 
 export default class Hello extends Scene {
   bg = new FSPass(/* glsl */ `

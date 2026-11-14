@@ -8,7 +8,8 @@ import { $ } from 'bun';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 
-const ROOT = path.resolve(import.meta.dir, '..');
+// the project folder: the one `reel` was pointed at, else the current folder
+const ROOT = path.resolve(process.env.REEL_PROJECT ?? '.');
 const VOICE = process.env.VOICE ?? 'Daniel';
 const RATE = Number(process.env.RATE ?? 172); // words per minute for `say`
 const LEAD = 0.6, LINE_GAP = 0.32, PLATE_GAP = 0.85, TAIL = 1.6;

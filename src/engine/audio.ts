@@ -21,6 +21,12 @@ export interface AudioSample {
   kick: number; snare: number; hat: number; vonset: number;
 }
 
+/** A project file as JSON, or null when it is missing (the dev server answers a missing file with the page). */
+export async function fetchJSON(url: string): Promise<unknown> {
+  const r = await fetch(url);
+  return r.ok && (r.headers.get('content-type') ?? '').includes('json') ? r.json() : null;
+}
+
 const FEATURES = ['rms', 'low', 'mid', 'high', 'vocal', 'drums', 'bass', 'other'] as const;
 
 export class AudioData {
@@ -32,7 +38,8 @@ export class AudioData {
   private fps: number;
   private feat: Record<string, Float32Array> = {};
   onsets: Record<string, [number, number][]>;
-  track: string;
+  /** The sound the preview plays and the export muxes, or null: a video with no audio analysis is silent. */
+  track: string | null;
 
   constructor(j: AudioJSON) {
     this.duration = j.duration;
@@ -44,15 +51,21 @@ export class AudioData {
     // envelopes may be nested under `features` or top-level arrays
     for (const k of FEATURES) this.feat[k] = Float32Array.from(j.features?.[k] ?? ((j as any)[k] as number[] | undefined) ?? []);
     this.onsets = j.onsets ?? {};
-    this.track = j.track ?? 'audio/narration.mp3';
+    this.track = j.track ?? (j.duration > 0 ? 'audio/narration.mp3' : null);
   }
 
-  static async load(): Promise<AudioData> {
-    for (const url of ['data/audio.json', 'data/audio.approx.json']) {
-      const r = await fetch(url);
-      if (r.ok && (r.headers.get('content-type') ?? '').includes('json')) return new AudioData(await r.json());
-    }
-    throw new Error('no audio analysis data found');
+  /** No analysis: a silent 100 BPM grid, no sections (the length then comes from the config or its clips). */
+  static empty(): AudioData {
+    return new AudioData({ duration: 0, bpm: 100, fps: 100, beats: [], downbeats: [], sections: [], features: {}, onsets: {} });
+  }
+
+  /** `src`: the JSON's path in the project, false for none; by default data/audio.json if the project has one. */
+  static async load(src?: string | false): Promise<AudioData> {
+    if (src === false) return AudioData.empty();
+    const j = await fetchJSON(src ?? 'data/audio.json');
+    if (j) return new AudioData(j as AudioJSON);
+    if (src) throw new Error(`audio analysis not found: ${src}`);
+    return AudioData.empty();
   }
 
   /** Linear-interpolated envelope value at time t. */
