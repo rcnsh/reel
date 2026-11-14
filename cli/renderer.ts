@@ -6,7 +6,7 @@ import { formatOf } from '../src/config';
 import { resolveTheme } from '../src/themes';
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { loadConfig, startServer } from './server';
+import { ENGINE, loadConfig, startServer } from './server';
 import type { PageOpts } from './args';
 
 /** Paths in a project whose changes never matter to its pages (renders, tools' working files, the config loader's). */
@@ -126,8 +126,27 @@ export class Renderer {
     if (first || !changed.length) return;
     this.gen++;
     this.configDirty = true;
+    for (const f of changed) this.moduleErrors.delete(f);
     const g = this.srv?.server.moduleGraph;
     if (g) for (const f of changed) for (const m of g.getModulesByFile(f) ?? []) g.invalidateModule(m);
+  }
+
+  /** Modules Vite failed to transform, by file, until the file changes. */
+  private moduleErrors = new Map<string, string>();
+
+  /**
+   * The page only learns that a scene's import failed ("Failed to fetch dynamically imported module: <url>"):
+   * put Vite's error for that file (the syntax error, its line and code frame) in its place.
+   */
+  explain(errors: string[]): string[] {
+    if (!this.moduleErrors.size) return errors;
+    return errors.map((e) => e.replace(/(?:TypeError: )?Failed to fetch dynamically imported module: (\S+)/, (all, url: string) => {
+      let p: string;
+      try { p = decodeURIComponent(new URL(url).pathname); } catch { return all; }
+      const file = p.startsWith('/@fs/') ? p.slice(4) : path.join(ENGINE, p);
+      const m = this.moduleErrors.get(file);
+      return m ? `could not load ${m}` : all;
+    }));
   }
 
   get pageCount() { return this.pages.size; }
@@ -145,7 +164,7 @@ export class Renderer {
       }
     }
     this.configDirty = false;
-    this.srv ??= await startServer(this.project);
+    this.srv ??= await startServer(this.project, { onModuleError: (e) => this.moduleErrors.set(e.file, e.message) });
     return this.srv;
   }
 

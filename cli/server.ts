@@ -5,6 +5,7 @@
 import type { ViteDevServer } from 'vite';
 import { existsSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { stripVTControlCharacters } from 'node:util';
 import { formatOf, type VideoConfig } from '../src/config';
 import { resolveTheme, type ResolvedTheme } from '../src/themes';
 
@@ -44,22 +45,36 @@ export async function loadConfig(project: string): Promise<VideoConfig> {
   return mod.default as VideoConfig;
 }
 
+/** A module Vite could not transform (a syntax error in a scene): the file, and the error with its code frame. */
+export interface ModuleError { file: string; message: string }
+
 /**
  * Start the server for `project`. `hmr: false` for renders: a file saved mid-render must not reload the page.
  * `port: 0` picks a free port; a port with `strictPort: false` falls back to the next free one. `theme` names a
- * built-in theme to use instead of the config's.
+ * built-in theme to use instead of the config's. `onModuleError` takes the modules Vite fails to transform
+ * (the page only learns that a dynamic import failed); without it they are printed.
  */
-export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
+export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string; onModuleError?: (e: ModuleError) => void } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
   const config = await loadConfig(project);
   const format = formatOf(config);
   const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
   // (imported here: a command that only talks to the warm renderer never loads Vite)
-  const { createServer } = await import('vite');
+  const { createServer, createLogger } = await import('vite');
+  const logger = createLogger('error');
+  const logError = logger.error.bind(logger);
+  logger.error = (msg, o) => {
+    // (err.loc is not used: for a transform error it points into Vite's own code; the message has the code frame)
+    const err = o?.error as { id?: string; message?: string } | null | undefined;
+    if (opts.onModuleError && err?.id && err.message) {
+      const file = err.id.split('?')[0]!;
+      opts.onModuleError({ file, message: `${path.relative(project, file)}: ${stripVTControlCharacters(err.message).trim()}` });
+    } else logError(msg, o);
+  };
   const server = await createServer({
     configFile: false,
     root: ENGINE,
     publicDir: path.join(ENGINE, 'public'),
-    logLevel: 'error',
+    customLogger: logger,
     clearScreen: false,
     define: { __REEL_FORMAT__: JSON.stringify(format), __REEL_THEME__: JSON.stringify(theme) },
     resolve: {

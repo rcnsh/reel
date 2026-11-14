@@ -177,8 +177,8 @@ try {
         },
       });
       Object.assign(res, { file: v.file, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
-      res.errors.push(...v.errors);
-      res.logs.push(...v.logs);
+      res.errors.push(...r.explain(v.errors));
+      res.logs.push(...r.explain(v.logs));
       say(`\nwrote ${v.file} (${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
       say(`sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
     } catch (e) {

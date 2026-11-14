@@ -1,7 +1,7 @@
 // The `reel` command end to end: flags and exit codes, stills that never overwrite, diff, check on the demo in
 // two formats, init, and the warm renderer's status and stop. Renders work on scratch copies of the examples.
 import { afterAll, expect, test } from 'bun:test';
-import { existsSync, mkdtempSync, realpathSync, rmSync } from 'node:fs';
+import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { hasChrome, reel, scratchCopy } from './helpers';
@@ -56,6 +56,18 @@ test.skipIf(!hasChrome)('check passes the demo at 16:9 and fails it vertical, na
   expect(errors.map((f: { kind: string; clip: string }) => `${f.kind} ${f.clip}`).sort()).toEqual(['offFrame hello', 'offFrame written']);
   for (const f of errors) expect(existsSync(f.image)).toBe(true);
 }, 180_000);
+
+test.skipIf(!hasChrome)('a syntax error in a scene is reported with its line through the warm renderer, and its fix is picked up', async () => {
+  const file = path.join(layers.dir, 'scenes/title.ts'), good = readFileSync(file, 'utf8');
+  writeFileSync(file, good.replace('clearRT(renderer, out, [0, 0, 0], 0);', 'clearRT(renderer, out, [0, 0, 0], 0'));
+  try {
+    const bad = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
+    expect(bad.code).toBe(1);
+    expect(bad.json().errors.join('\n')).toMatch(/\[title\] could not load scenes\/title\.ts: [^]*`,` or `\)` expected/);
+  } finally { writeFileSync(file, good); }
+  const fixed = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
+  expect(fixed.json().errors).toEqual([]);
+}, 120_000);
 
 test.skipIf(!hasChrome)('the warm renderer shows in daemon status and stops', async () => {
   await reel(['info', '--project', layers.dir]);

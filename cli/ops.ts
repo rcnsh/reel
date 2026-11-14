@@ -240,7 +240,8 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       break;
     }
   }
-  res.errors = [...new Set(res.errors)];
+  res.errors = [...new Set(r.explain(res.errors))];
+  res.logs = r.explain(res.logs);
   res.ok = res.errors.length === 0;
   return res;
 }
