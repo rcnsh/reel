@@ -50,7 +50,8 @@ async function ensureServer(): Promise<{ url: string; stop: () => void }> {
 
 async function openPage(url: string) {
   const browser = await chromium.launch({
-    executablePath: process.env.CHROME_PATH || undefined,
+    // CHROME_PATH (e.g. Playwright's Chrome for Testing), else the installed Google Chrome
+    ...(process.env.CHROME_PATH ? { executablePath: process.env.CHROME_PATH } : { channel: 'chrome' }),
     headless: !flag('headed'),
     args: ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'],
   });
@@ -118,7 +119,9 @@ async function sheet(page: Page, times: number[], cols: number, out: string) {
 async function video(url: string, from: number, to: number, fps: number, out: string) {
   mkdirSync(path.dirname(out), { recursive: true });
   const crf = opt('crf', '16')!;
-  const audio = path.join(ROOT, 'audio/narration.mp3');
+  // the sound named by data/audio.json (tools/analyze.py sets it to the song), else the narration
+  const track: string = (await Bun.file(path.join(ROOT, 'data/audio.json')).json()).track ?? 'audio/narration.mp3';
+  const audio = path.join(ROOT, track);
   // (frames come as rgb24: the same YUV out of the scaler as from rgba, a quarter fewer bytes to move)
   const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb24', '-s', `${OW}x${OH}`, '-r', String(fps), '-i', 'pipe:0'];
   if (!flag('noaudio')) args.push('-ss', String(from), '-t', String(to - from), '-i', audio);

@@ -1,10 +1,11 @@
-// Demo plate: a single-stroke font written by a moving pen in step with the narration's word timings,
-// with a sound cue at the start of every word for the mix.
+// Demo plate: a single-stroke font written by a spark in step with the narration's word timings, with a
+// sound cue at the start of every word for the mix.
 import type * as THREE from 'three';
 import { Scene, type Frame } from '../engine/scene';
 import { Layer2D, W, H, clearRT } from '../engine/gl';
 import { LIN, rgba } from '../engine/palette';
 import { strokeText, drawStrokeText, writtenLength, type StrokeText } from '../engine/stroke';
+import { sparkHead2D } from '../engine/spark';
 import { cue } from '../engine/util';
 
 export default class Written extends Scene {
@@ -35,12 +36,7 @@ export default class Written extends Scene {
     c.lineWidth = 3;
     c.lineCap = c.lineJoin = 'round';
     const head = drawStrokeText(c, this.st, writtenLength(this.st, this.charTimes, f.t));
-    if (head) {
-      c.fillStyle = rgba('signal');
-      c.beginPath();
-      c.arc(head.x, head.y, 6, 0, Math.PI * 2);
-      c.fill();
-    }
+    if (head) sparkHead2D(c, head.x, head.y, f.t, 0.5);
     c.restore();
     comp.draw(renderer, this.layer.upload(), out);
   }

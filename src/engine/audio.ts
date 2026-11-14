@@ -1,4 +1,5 @@
-// Music analysis (data/audio.json) sampled at arbitrary song time.
+// Timing and music analysis (data/audio.json: tools/narration.ts, tools/align.ts or tools/analyze.py)
+// sampled at arbitrary time.
 
 export interface AudioJSON {
   duration: number;
@@ -9,6 +10,8 @@ export interface AudioJSON {
   sections: { name: string; start: number; end: number }[];
   features: Record<string, number[]>;
   onsets: Record<string, [number, number][]>;
+  /** The sound the preview plays and the export muxes, relative to the project root (default audio/narration.mp3). */
+  track?: string;
 }
 
 export interface AudioSample {
@@ -29,6 +32,7 @@ export class AudioData {
   private fps: number;
   private feat: Record<string, Float32Array> = {};
   onsets: Record<string, [number, number][]>;
+  track: string;
 
   constructor(j: AudioJSON) {
     this.duration = j.duration;
@@ -40,6 +44,7 @@ export class AudioData {
     // envelopes may be nested under `features` or top-level arrays
     for (const k of FEATURES) this.feat[k] = Float32Array.from(j.features?.[k] ?? ((j as any)[k] as number[] | undefined) ?? []);
     this.onsets = j.onsets ?? {};
+    this.track = j.track ?? 'audio/narration.mp3';
   }
 
   static async load(): Promise<AudioData> {
@@ -141,6 +146,16 @@ export class AudioData {
   /** Nearest beat time to t. */
   nearestBeat(t: number): number {
     return this.timeOfBeat(Math.round(this.beatAt(t)));
+  }
+
+  /** The last beat at or before t (`tol` s of slack, for a word sung a hair before its beat): a cut that never lands after t. */
+  beatBefore(t: number, tol = 0.02): number {
+    return this.timeOfBeat(Math.floor(this.beatAt(t + tol)));
+  }
+
+  /** Nearest downbeat to t (t itself when there are none). */
+  nearestDownbeat(t: number): number {
+    return this.downbeats.reduce((b, d) => (Math.abs(d - t) < Math.abs(b - t) ? d : b), this.downbeats[0] ?? t);
   }
 
   section(t: number) {

@@ -19,7 +19,7 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 ## Data
 
 - `lyrics` (`src/engine/lyrics.ts`): `lines[]` with `text,start,end,words[]`, each word `{w,start,end}` (word-level, aligned to the vocal). Find lines by content, never hard-code times: `const l = this.ctx.lyrics.get('sudden drop')` → `l.words[3].start`. Helpers: `Lyrics.wordProgress(word, t)` (0..1 sung progress), `Lyrics.lineCharProgress(line, t)` (chars sung so far — for per-glyph wipes), `lyrics.findWords('word')`.
-- `audio` (`src/engine/audio.ts`): `beats[]`, `downbeats[]`, `sections[]`, `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `events('kick'|'snare'|'hat'|'vocal', t0, t1)`, `env(name, t)` for `rms|low|mid|high|vocal|drums|bass|other` (0..1), `hit(kind, t, halfLife)` decaying pulses.
+- `audio` (`src/engine/audio.ts`): `beats[]`, `downbeats[]`, `sections[]`, `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `beatBefore(t)` (the beat at or before t: a cut that never lands after a word), `nearestDownbeat(t)`, `events('kick'|'snare'|'hat'|'vocal', t0, t1)`, `env(name, t)` for `rms|low|mid|high|vocal|drums|bass|other` (0..1), `hit(kind, t, halfLife)` decaying pulses.
 - Every `Frame` already carries `f.a` = `{rms,low,mid,high,vocal,drums,bass,other,kick,snare,hat,vonset}` and `f.beat,f.bar,f.beatPhase,f.barPhase`.
 
 ## Writing a scene
@@ -52,6 +52,7 @@ Rules:
 - `render()` must fully overwrite `out` (a HalfFloat linear-HDR target). Colours are **linear**; values > ~0.85 bloom. Use palette constants (`C_INK`, `C_BONE`, `C_SIGNAL`… in GLSL; `LIN.signal` in TS for GL; `rgba('signal', a)` for Canvas2D).
 - `ctx.params` holds the timeline entry's params (one module can serve several entries); `ctx.start/ctx.end` its window; `f.lt`/`f.p` local time/progress.
 - Transitions: by default the engine crossfades overlapping entries. For custom transitions set `handlesTransition = true` and composite `f.under` (the previous scene's frame) yourself using `f.tin` (0→1 over the overlap). Most cuts should be hard cuts on downbeats (no overlap) — that's the default when windows touch.
+- Looks: `LOOKS.print` (the default: no glow, faint grain) and `LOOKS.film` (bloom, halation, chromatic aberration, heavy grain, HUD on), from `post.ts`; return `{ ...LOOKS.film, bloom: 0.8 }` for a scene in the other look.
 - Post overrides you can return: `exposure, bloom, bloomThreshold, bloomKnee, bloomRadius, halation, ca, grain, vignette, hud (HUD opacity), frame (crop marks), paper (HUD in ink), fade, flash, shake:[x,y], zoom, invert`. Defaults in `src/engine/post.ts`.
 - Performance: aim for < 25 ms/frame. Canvas2D layers cost ~2–4 ms to upload each; don't use more than 2–3 per scene. Precompute in `init()`.
 - Sound: call `cue(kind, t)` (`util.ts`) from `init()` for each sound the mix should lay (a pen tick, a whoosh); `mix.json` maps kinds to files.
@@ -103,3 +104,11 @@ What this asks of scenes:
 - Post parameters (shake, flash, zoom, fades, the HUD mode) are read at one point of the shutter, 1/8 of it after the frame's time (where the video was tuned, and a point every sample set includes); the HUD, grain and dither are drawn once per frame.
 - Masked tiles keep what the last sub-frame drew there. That is safe for `out` and the engine's own targets. A scene's own target keeps being drawn in full (and costs full price) unless the scene lists it in `tileMasked`: only a target with a depth buffer whose texels are read back at their own screen position or within a few px of it (`margin: 1` widens the mask by a tile), or, with `moving: true`, one read through a zoom or pan that the scene gives before each sub-frame's draws with `ctx.mapTileMask(rt, map)` (`null` while it is read through a warp). A target read through a warp or a wide blur must not be listed.
 - A draw into a masked target whose material asks for its own depth test (3D with a depth buffer) can't use the mask: the engine draws that sub-frame again unmasked and keeps drawing that scene unmasked.
+
+## The spark (`src/engine/spark.ts`)
+
+A point of light for a pen, fuse or cursor head that moves along a path: `sparkHead(lineBatch, x, y, t, scale, intensity)` (white-hot core, glow and rays, drawn with a 2D additive `LineBatch` after the line it drags), `sparkParticles(lineBatch, t, headAt, opts)` (sputtering particles from a head whose position over time is `headAt(t)`; deterministic, born on a fixed clock with hashed velocities), and `sparkHead2D(ctx, x, y, t, scale)` for Canvas2D layers. Coloured from the palette's `signal` and `ember`; the HDR core blooms under `LOOKS.film`.
+
+## Music data (`tools/analyze.py`)
+
+Narration timing (`tools/narration.ts`, `tools/align.ts`) gives a silent 100 BPM grid and empty envelopes, so `f.a` reads 0. `tools/analyze.py <song>` fills them from a song: a constant-tempo grid on the kicks, downbeats, envelopes (`rms`, `low`, `mid`, `high` from the mix; `drums`, `other`, `bass`, `vocal` from a harmonic/percussive split, proxies rather than separated stems) and `kick`/`snare`/`hat` onsets. To cut on the beat, edit `src/timeline.ts` to snap entry starts: `au.beatBefore(ly.get('first words').words[0].start)`, or `au.nearestDownbeat(t)` at the end of a line.

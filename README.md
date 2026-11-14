@@ -20,23 +20,29 @@ Fonts in `public/fonts/`:
 
 The repo ships a two-plate demo (`hello`, `written`) built this way.
 
+### Cutting to music
+
+`uv run tools/analyze.py <song>` analyses a song into `data/audio.json`: a constant-tempo beat grid, downbeats, 100 fps loudness envelopes (mix bands plus harmonic/percussive proxies for drums, bass, other and vocal), kick, snare and hat onsets, and sections. That is what the engine's music helpers read (`f.beat`, `f.bar`, `f.a.kick`, `audio.env`, `audio.hit`, `audio.beatBefore`, `audio.nearestDownbeat`), so scenes can pulse on the kick and cuts can land on the beat. Sections come from `--sections sections.json` (`[{"name": "intro", "bar": 0}, …]`, named after your scenes), or structural segmentation (`part1`, `part2`, …). The song becomes the track the preview plays and the export muxes. For a narrated video with a music bed, `--keep-sections --offset <s>` keeps the narration's timing and adds the bed's beats from where it starts. Run `uv run tools/analyze.py --help` for the flags.
+
+Lyrics for a sung track still go through `tools/align.ts` (Whisper word times), which suits clear vocals; it is not a forced aligner.
+
 ## Layout
 
-- `src/engine/`: the engine: renderer, adaptive sampling and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing (`post.ts`), HUD, type and single-stroke fonts, GPU lines, palette, shared GLSL.
+- `src/engine/`: the engine: renderer, adaptive sampling and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing with `print` and `film` looks (`post.ts`), HUD, type and single-stroke fonts, GPU lines, the spark (`spark.ts`), palette, shared GLSL.
 - `src/scenes/`: one scene per plate. `src/timeline.ts`: plates to scenes. `src/main.ts`: the preview player and the export API (`window.__reel`).
 - `scripts/render.ts`: stills, contact sheets, plate thumbnails, sound cues, perf and the video.
-- `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `mix.ts` (music and cue sounds under a render, configured by `mix.json`).
+- `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `audio/`, `data/`: the narration and its timing (written by the tools), music and sound files, `data/cues.json` (written by `render.ts events`).
 - `docs/ENGINE.md`: the scene author's guide: the Scene API, rules for determinism and sampling, the toolbox, 4K.
 - `out/`: renders (ignored by git).
 
 ## Running
 
-You need [bun](https://bun.sh), ffmpeg and a Chromium build for headless rendering, such as Playwright's Chrome for Testing. Aligning a recording also needs [uv](https://docs.astral.sh/uv/), which fetches faster-whisper on first use.
+You need [bun](https://bun.sh), ffmpeg and Chrome for headless rendering: `CHROME_PATH` names a Chromium build such as Playwright's Chrome for Testing, else the installed Google Chrome is used. The Python tools (`align.ts`'s Whisper step, `analyze.py`, `make_fonts.py`) need [uv](https://docs.astral.sh/uv/), which fetches their dependencies on first use.
 
 ```sh
 bun install
-export CHROME_PATH="<path to the Chrome for Testing binary>"
+export CHROME_PATH="<path to the Chrome for Testing binary>"   # optional
 
 bun run dev                                    # preview at http://localhost:5173 (space plays, [ ] jump plates)
 bun run typecheck

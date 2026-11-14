@@ -35,18 +35,19 @@ export interface PostParams {
   invert: number; // 0..1 invert (ink <-> bone), applied before grain
 }
 
+/**
+ * Two finished looks for the post stack: `print` (paper and ink, no glow: the default) and `film` (upstream
+ * pdoom-video's dark cinematic grade: bloom, red-orange halation, chromatic aberration, heavy grain and
+ * vignette, with the HUD on). A scene returns one, plus its own tweaks: `return { ...LOOKS.film, bloom: 0.8 }`.
+ */
+export const LOOKS = {
+  print: { bloom: 0, bloomThreshold: 1.2, bloomKnee: 0.3, bloomRadius: 0.5, halation: 0, ca: 0.25, grain: 0.028, vignette: 0.16, hud: 0 },
+  film: { bloom: 0.55, bloomThreshold: 0.85, bloomKnee: 0.5, bloomRadius: 0.75, halation: 0.25, ca: 1.2, grain: 0.055, vignette: 0.35, hud: 1 },
+} satisfies Record<string, Partial<PostParams>>;
+
 export const DEFAULT_POST: PostParams = {
-  // print look: no glow, faint grain, gentle vignette (scenes turn bloom/halation up per frame)
   exposure: 1,
-  bloom: 0.0,
-  bloomThreshold: 1.2,
-  bloomKnee: 0.3,
-  bloomRadius: 0.5,
-  halation: 0.0,
-  ca: 0.25,
-  grain: 0.028,
-  vignette: 0.16,
-  hud: 0,
+  ...LOOKS.print,
   frame: 0,
   paper: 0,
   fade: 0,
