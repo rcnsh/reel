@@ -4,8 +4,8 @@
 import { HEX } from './palette';
 
 /** The rules of `reel check` a box or a clip can be exempt from. */
-export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast';
-export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast'];
+export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped';
+export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped'];
 
 export interface DrawnBox {
   /** What was drawn: text is checked for size, overlap and contrast; every kind for leaving the frame. */
@@ -26,6 +26,12 @@ export interface DrawnBox {
   alpha?: number;
   /** Rules this box is meant to break (a title flying in from off the frame: ['offFrame']); true: all. */
   exempt?: CheckRule[] | true;
+  /**
+   * Text that does not fit its container (HTML layers report it): `clipped` when an ancestor's `overflow` cuts
+   * it off (`truncated` when that is an ellipsis or a line clamp, on purpose), else it spills out of its own
+   * box; `container` is that box in frame px, `px` how far the text passes it.
+   */
+  overflow?: { clipped: boolean; truncated?: boolean; container: [number, number, number, number]; px: number };
 }
 
 /**

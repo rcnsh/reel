@@ -10,6 +10,7 @@ import type { Frame, Scene, SceneClass, SceneCtx, PostOverrides } from './scene'
 import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
+import { htmlLayers } from './html';
 import type { Clip, VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -20,6 +21,9 @@ export const OVERLAY_ID = 'overlay';
 
 /** A track's targets: three for its scenes, two for transitions (a third overlapping clip reads one mix and writes the other). */
 interface TrackRTs { rts: THREE.WebGLRenderTarget[]; mix: THREE.WebGLRenderTarget[] }
+
+/** A scene module as imported, or why it did not import. */
+type Imported = { m?: { default: SceneClass }; err?: unknown };
 
 interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number }
 
@@ -139,6 +143,7 @@ export class Engine {
     this.renderer.setPixelRatio(1);
     this.renderer.setSize(PW, PH, false);
     this.renderer.autoClear = false;
+    htmlLayers.attach(canvas);
     // a shader that does not compile (a palette key the theme lacks, a typo) is an error, not a black draw
     // (named after the clip drawing when it compiled, with the source line each error points at: the line
     // numbers count the engine's GLSL prepended to the scene's)
@@ -371,23 +376,34 @@ export class Engine {
     this.post = new Post();
     // (the overlay is part of the look: loaded with any --only)
     const entries = only ? this.timeline.filter((e) => e === overlay || only(e)) : this.timeline;
-    await Promise.all(entries.map((e) => this.loadEntry(e)));
+    // modules load in parallel; scenes are made and initialised one at a time, so the HTML layers a scene
+    // makes know their clip
+    const mods = await Promise.all(entries.map((e): Promise<Imported> => e.scene().then((m) => ({ m }), (err: unknown) => ({ err }))));
+    for (const [i, e] of entries.entries()) await this.loadEntry(e, mods[i]!);
+    for (const [id, msg] of await htmlLayers.settle()) this.fail(id, msg);
   }
 
-  private async loadEntry(e: TimelineEntry) {
+  private fail(id: string, msg: string) {
+    const rec = this.loaded.get(id);
+    if (rec) { rec.error = msg; rec.scene = null; }
+    this.loadErrors.push(`[${id}] ${msg}`);
+    console.error(`scene ${id} failed`, msg);
+  }
+
+  private async loadEntry(e: TimelineEntry, mod?: Imported) {
     const rec: Loaded = { entry: e, scene: null, lastT: -1 };
     this.loaded.set(e.id, rec);
+    htmlLayers.owner(e.id);
     try {
-      const mod = await e.scene();
-      const s = new mod.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
+      if (!m.m) throw m.err;
+      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
       await s.init();
       rec.scene = s;
-      for (const m of s.tileMasked) this.maskedRTs.set(m.rt, { margin: m.margin, moving: m.moving });
+      for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
     } catch (err) {
-      rec.error = String((err as Error)?.stack ?? err);
-      this.loadErrors.push(`[${e.id}] ${rec.error}`);
-      console.error(`scene ${e.id} failed`, err);
-    }
+      this.fail(e.id, String((err as Error)?.stack ?? err));
+    } finally { htmlLayers.owner(''); }
   }
 
   /** Hot-swap a scene module (used by Vite HMR in preview). */
@@ -397,11 +413,50 @@ export class Engine {
     const old = this.loaded.get(id)?.scene;
     for (const m of old?.tileMasked ?? []) this.maskedRTs.delete(m.rt);
     old?.dispose();
+    htmlLayers.drop(id);
     await this.loadEntry(e);
+    for (const [cid, msg] of await htmlLayers.settle()) this.fail(cid, msg);
     this.lastT = -1;
   }
 
   get duration() { return this._duration; }
+
+  /**
+   * Get ready to render the output frame at t: every clip on screen during the frame's shutter has its scene's
+   * prepare(f) called and its HTML layers updated; layers that changed are painted and uploaded (one paint for
+   * all). Asynchronous, once per output frame; render() then draws the frame's sub-frames synchronously.
+   */
+  async prepare(t: number, dt = 1 / FPS, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
+    const w = samples === 1 ? 0 : dt * shutter;
+    const frames = new Map<string, Frame>();
+    for (const e of this.timeline) {
+      if (!(t + w / 2 >= e.start && t - w / 2 < e.end)) continue;
+      const rec = this.loaded.get(e.id);
+      if (!rec?.scene) continue;
+      // (a clip that starts or ends within the shutter is prepared at its first or last moment)
+      const f = this.frameFor(e, Math.min(Math.max(t, e.start), e.end - 1e-6), dt, false, false, null, 1, 0);
+      try { await rec.scene.prepare(f); } catch (err) { this.renderFailed(rec, `[${e.id}] prepare at ${t.toFixed(3)} s: ${String((err as Error)?.stack ?? err)}`); }
+      frames.set(e.id, f);
+    }
+    if (!htmlLayers.count()) return;
+    for (const [id, msg] of await htmlLayers.prepare(this.renderer, frames)) {
+      const rec = this.loaded.get(id);
+      if (rec) this.renderFailed(rec, `[${id}] HTML layer at ${t.toFixed(3)} s: ${msg}`);
+    }
+  }
+
+  private renderFailed(rec: Loaded, msg: string) {
+    if (rec.renderError) return;
+    rec.renderError = msg;
+    this.renderErrors.push(msg);
+    console.error(msg);
+  }
+
+  /** prepare() then render(): one output frame. */
+  async renderFrame(t: number, dt = 1 / FPS, toScreen = true, samples: number | AdaptiveSampling = 1, shutter = 0.5): Promise<number> {
+    await this.prepare(t, dt, samples, shutter);
+    return this.render(t, dt, toScreen, samples, shutter);
+  }
 
   private frameFor(e: TimelineEntry, t: number, dt: number, seeked: boolean, preroll: boolean, under: THREE.Texture | null, tin: number, tout: number): Frame {
     const beat = this.audio.beatAt(t), bar = this.audio.barAt(t);
@@ -675,8 +730,7 @@ export class Engine {
       try {
         ov = s.render(this.frameFor(e, t, sceneSeeked ? 0 : dt, sceneSeeked && !s.stateful, false, idx > 0 ? under : null, tin, tout), rt);
       } catch (err) {
-        const msg = `[${e.id}] render at ${t.toFixed(3)} s: ${String((err as Error)?.stack ?? err)}`;
-        if (!rec.renderError) { rec.renderError = msg; this.renderErrors.push(msg); console.error(msg); }
+        this.renderFailed(rec, `[${e.id}] render at ${t.toFixed(3)} s: ${String((err as Error)?.stack ?? err)}`);
         clearRT(r, rt, [0.25, 0.0, 0.0]);
       }
       this.drawing = '';

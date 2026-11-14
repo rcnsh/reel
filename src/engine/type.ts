@@ -1,6 +1,7 @@
 // Typography: font registry (Canvas2D via FontFace + outlines via opentype.js),
 // glyph layout, text outlines as Path2D, and point sampling of text for particle effects.
 import * as opentype from 'opentype.js';
+import { htmlFamilies } from './html';
 
 /**
  * Font keys. Archivo comes in static width instances (w = wdth*10) x weights so we can
@@ -55,16 +56,51 @@ export const font = (family: string, sizePx: number) => `${sizePx}px "${family}"
 const otCache = new Map<string, opentype.Font>();
 const bufCache = new Map<string, ArrayBuffer>();
 
+/** A font face for HTML layers: a family name CSS uses, its file (a URL) and the range it covers. */
+export interface FontFaceDef { family: string; url: string; weight?: string; stretch?: string; style?: 'normal' | 'italic'; featureSettings?: string }
+
+/**
+ * The engine's fonts under the names CSS knows them by, for HTML layers: Archivo and Cormorant Garamond as their
+ * variable fonts (every weight, and Archivo's widths as font-stretch 62% to 125%), IBM Plex Mono by weight.
+ */
+export const ENGINE_HTML_FONTS: FontFaceDef[] = [
+  { family: 'Archivo', url: 'fonts/src/Archivo[wdth,wght].ttf', weight: '100 900', stretch: '62% 125%' },
+  { family: 'Archivo', url: 'fonts/src/Archivo-Italic[wdth,wght].ttf', weight: '100 900', stretch: '62% 125%', style: 'italic' },
+  { family: 'Cormorant Garamond', url: 'fonts/src/CormorantGaramond[wght].ttf', weight: '300 700', featureSettings: '"lnum" 1' },
+  { family: 'Cormorant Garamond', url: 'fonts/src/CormorantGaramond-Italic[wght].ttf', weight: '300 700', style: 'italic', featureSettings: '"lnum" 1' },
+  ...([['300', 'Light'], ['400', 'Regular'], ['500', 'Medium'], ['600', 'SemiBold'], ['700', 'Bold']] as const).map(([weight, f]) => ({ family: 'IBM Plex Mono', url: `fonts/src/IBMPlexMono-${f}.ttf`, weight })),
+  { family: 'IBM Plex Mono', url: 'fonts/src/IBMPlexMono-Italic.ttf', weight: '400', style: 'italic' as const },
+];
+
+/**
+ * Load the fonts before any scene is made: the engine's static instances for Canvas2D (families such as
+ * 'Archivo-1000-700', see F), the engine's families for HTML layers, and the project's own fonts (its `fonts/`
+ * folder, listed by the dev server at /@reel/fonts.json). A font that does not load is an error.
+ */
 export async function loadFonts(): Promise<void> {
-  await Promise.all(
-    DEFS.map(async (d) => {
+  // (a page served without the CLI's dev server has no project fonts)
+  const r = await fetch('/@reel/fonts.json').catch(() => null);
+  const listed = r && (r.headers.get('content-type') ?? '').includes('json') ? (await r.json()) as { fonts?: FontFaceDef[]; error?: string } : null;
+  if (listed?.error) throw new Error(`the project's fonts: ${listed.error}`);
+  const project = listed?.fonts ?? [];
+  const face = async (d: FontFaceDef) => {
+    const ff = new FontFace(d.family, `url("${encodeURI(d.url)}")`, { weight: d.weight ?? '400', stretch: d.stretch ?? '100%', style: d.style ?? 'normal', ...(d.featureSettings ? { featureSettings: d.featureSettings } : {}) });
+    try { await ff.load(); } catch { throw new Error(`font '${d.family}' (${d.url}) did not load: is it a font file (ttf, otf, woff, woff2)?`); }
+    document.fonts.add(ff);
+    htmlFamilies.set(d.family.toLowerCase(), d.family);
+  };
+  await Promise.all([
+    ...DEFS.map(async (d) => {
       const buf = await (await fetch(`fonts/${d.file}`)).arrayBuffer();
       bufCache.set(d.family, buf);
       const ff = new FontFace(d.family, buf, d.features ? { featureSettings: d.features } : undefined);
       await ff.load();
       document.fonts.add(ff);
+      if (!htmlFamilies.has(d.family.toLowerCase())) htmlFamilies.set(d.family.toLowerCase(), null);
     }),
-  );
+    ...ENGINE_HTML_FONTS.map(face),
+    ...project.map(face),
+  ]);
   await document.fonts.ready;
 }
 

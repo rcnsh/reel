@@ -97,6 +97,15 @@ describe('findingsOf', () => {
     expect(findingsOf([sample(1, [one, box({ x: 420, text: 'two', clip: 'b', track: 0 })])], opts)).toHaveLength(0);
     expect(findingsOf([sample(1, [one, box({ x: 420, text: 'two', clip: 'b', track: 1 })])], opts).map((x) => x.kind)).toEqual(['overlap']);
   });
+  test('HTML text that overflows its box is an error; clipped a warning; truncated on purpose a note', () => {
+    const over = box({ overflow: { clipped: false, container: [100, 100, 150, 40], px: 50 } });
+    const clip = box({ index: 1, x: 100, y: 300, overflow: { clipped: true, container: [100, 300, 200, 40], px: 30 } });
+    const ell = box({ index: 2, x: 100, y: 400, overflow: { clipped: true, truncated: true, container: [100, 400, 200, 40], px: 80 } });
+    const f = findingsOf([sample(1, [over, clip, ell])], opts);
+    expect(f.map((x) => `${x.severity} ${x.kind}`)).toEqual(['error overflow', 'warning clipped', 'info clipped']);
+    expect(f[1]!.rect).toEqual([100, 300, 200, 40]);
+    expect(findingsOf([sample(1, [box({ ...over, exempt: ['overflow'] })])], opts)).toHaveLength(0);
+  });
   test('contrast from the measure, with a palette colour that reads', () => {
     const m = { fg: relLum(200, 200, 200), bg: relLum(220, 220, 220), ratio: 1.2, coverage: 0.3, bgHex: '#DCDCDC' };
     const f = findingsOf([sample(1, [box({ m })])], opts);

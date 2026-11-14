@@ -18,9 +18,10 @@ reuses; each exits 1 on a scene error)
                              spaced from --from to --to (both included), or --frames N consecutive
                              frames from --from     [--cell 360] [--out <file.png>] [--max-size <px>]
   check                      sweep the video for problems and print findings: blank or frozen frames,
-                             scene errors, and the boxes scenes report (report(), reportText()): text
-                             off the frame, in the safe margin, overlapping, too small or low in
-                             contrast; each with a cropped image. Exits 1 on an error finding
+                             scene errors, and the text HTML layers and scenes report (report(),
+                             reportText()): off the frame, in the safe margin, overlapping, too small,
+                             low in contrast, overflowing or clipped; each with a cropped image.
+                             Exits 1 on an error finding
                              [--from 0] [--to <duration>] [--step 0.5] [--safe 0.05] [--min-text <px>]
                              [--frozen 3] [--out <dir>]
   diff    <a.png> <b.png>    compare two images: changed pixels, max and mean difference, the box

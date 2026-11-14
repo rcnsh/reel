@@ -175,11 +175,11 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
       const P = (window as any).__reel, dt = 1 / P.fps;
       const ms: number[] = [];
       const buf = new Uint8Array(P.width * P.height * 4);
-      P.still(from);
+      await P.still(from);
       const used: Record<number, number> = {};
       for (let t = from; t < to; t += dt) {
         const a = performance.now();
-        const k = P.engine.render(t, dt, false, samples, shutter);
+        const k = await P.engine.renderFrame(t, dt, false, samples, shutter);
         used[k] = (used[k] ?? 0) + 1;
         await P.engine.readPixelsAsync(buf);
         ms.push(performance.now() - a);

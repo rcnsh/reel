@@ -199,11 +199,25 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
         else add({
           ...base, kind: 'offFrame', severity: b.kind === 'text' ? 'error' : 'info', value: +Math.max(...out.map(([, v]) => v)).toFixed(1),
           message: b.kind === 'text'
-            ? `${quote(b.text)}${b.size ? ` (${fmt(b.size)} px)` : ''} runs ${where} edge of the ${o.W}x${o.H} frame. Lay it out from W and H: size it with fitSize(text, family, W - ${fmt(2 * mx)}, size), or break it into lines`
+            ? `${quote(b.text)}${b.size ? ` (${fmt(b.size)} px)` : ''} runs ${where} edge of the ${o.W}x${o.H} frame. Lay it out from W and H: in an HTML layer give it a width in % and let it wrap (or fit it with a text block); in Canvas2D size it with fitSize(text, family, W - ${fmt(2 * mx)}, size) or break it into lines`
             : `this ${b.kind} runs ${where} edge of the frame`,
         }, name, worst);
       }
       if (b.kind !== 'text') continue;
+      // text that does not fit its box (HTML layers)
+      const ov = b.overflow;
+      if (ov && !exempt(ov.clipped ? 'clipped' : 'overflow', b.clip, b)) {
+        if (ov.clipped) add({
+          ...base, rect: ov.container, kind: 'clipped', severity: ov.truncated ? 'info' : 'warning', value: +ov.px.toFixed(1),
+          message: ov.truncated
+            ? `${quote(b.text)} is truncated (an ellipsis or a line clamp) to fit its ${fmt(ov.container[2])}x${fmt(ov.container[3])} px box: the viewer does not see all of it`
+            : `${quote(b.text)} is cut off by ${fmt(ov.px)} px by a container with overflow: hidden (${fmt(ov.container[2])}x${fmt(ov.container[3])} px): shorten it, make it smaller (a text block can fit it to its box), or give it room`,
+        }, `${name}|clipped`, ov.px);
+        else add({
+          ...base, kind: 'overflow', severity: 'error', value: +ov.px.toFixed(1),
+          message: `${quote(b.text)} overflows its ${fmt(ov.container[2])}x${fmt(ov.container[3])} px box by ${fmt(ov.px)} px: let it wrap (no fixed width or white-space: nowrap), make it smaller, or fit it to the box`,
+        }, `${name}|overflow`, ov.px);
+      }
       // the safe margin (only for text that is inside the frame)
       if (!out.length && !exempt('safeArea', b.clip, b)) {
         const into = { left: mx - b.x, top: my - b.y, right: b.x + b.w - (o.W - mx), bottom: b.y + b.h - (o.H - my) };

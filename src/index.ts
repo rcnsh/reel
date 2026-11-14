@@ -8,6 +8,7 @@ export * from './engine/stroke';
 export * from './engine/lines';
 export * from './engine/spark';
 export * from './engine/post';
+export { HtmlLayer, HTML_TEXEL_GLSL, THEME_CSS_VARS, awaitBeforeFirstFrame, type HtmlLayerOptions, type HtmlDraw, type HtmlUpdate } from './engine/html';
 export * from './engine/words';
 export * from './engine/audio';
 export { report, reportText, reporting, CHECK_RULES, type CheckRule, type DrawnBox } from './engine/report';

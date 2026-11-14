@@ -14,7 +14,9 @@ import type { PageOpts } from './args';
 export const IGNORED = /^(out|node_modules|\.git|audio\/\.work|audio\/\.align|\.claude)(\/|$)|(^|\/)\.reel\.config\.[^/]*\.mjs$|(^|\/)\.DS_Store$/;
 
 /** The flags every Chrome the CLI starts gets. */
-export const CHROME_ARGS = ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows'];
+// (--disable-frame-rate-limit: a page paints as soon as it is asked to instead of on a 60 Hz clock, so an HTML
+// layer that changes costs a fraction of a millisecond per frame instead of up to 17)
+export const CHROME_ARGS = ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--disable-frame-rate-limit'];
 
 /** Start the Chrome reel renders with (cli/chrome.ts), refusing one too old for HTML layers. */
 export async function launchChrome(headed = false) {

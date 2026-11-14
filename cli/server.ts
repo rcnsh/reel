@@ -8,6 +8,7 @@ import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { formatOf, type VideoConfig } from '../src/config';
 import { resolveTheme, type ResolvedTheme } from '../src/themes';
+import { projectFonts } from './fonts';
 
 export const ENGINE = path.resolve(import.meta.dir, '..');
 
@@ -101,6 +102,13 @@ export async function startServer(project: string, opts: { port?: number; strict
       configureServer(s) {
         s.middlewares.use((req, res, next) => {
           const rel = decodeURIComponent((req.url ?? '/').split('?')[0]!);
+          // the project's fonts (its fonts/ folder), described from the files, for the page to load
+          if (rel === '/@reel/fonts.json') {
+            res.setHeader('Content-Type', 'application/json');
+            res.setHeader('Cache-Control', 'no-store');
+            try { res.end(JSON.stringify({ fonts: projectFonts(project) })); } catch (e) { res.statusCode = 500; res.end(JSON.stringify({ error: (e as Error).message })); }
+            return;
+          }
           if (rel === '/' || rel.startsWith('/@') || rel.startsWith('/src/') || rel.startsWith('/node_modules/')) return next();
           const file = path.join(project, rel);
           // (inside the project only, never its config or sources: those go through Vite's transform)

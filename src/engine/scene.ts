@@ -88,6 +88,13 @@ export abstract class Scene {
   /** Reset internal state (called on seeks for stateful scenes). */
   reset(): void {}
 
+  /**
+   * Once per output frame while the clip is on screen, before the frame's sub-frames are rendered (and before
+   * the engine updates the scene's HTML layers): change HTML layers here or in their own `update`, or await
+   * anything the frame needs. Optional; render() stays synchronous.
+   */
+  prepare(_f: Frame): void | Promise<void> {}
+
   /** Render into `out` (HalfFloat, linear HDR). Must fully overwrite/clear it. Return post-processing overrides. */
   abstract render(f: Frame, out: THREE.WebGLRenderTarget): PostOverrides | void;
 

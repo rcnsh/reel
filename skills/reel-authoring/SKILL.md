@@ -47,6 +47,30 @@ export default defineVideo({
 
 ## A scene
 
+Text and layout go in an **HTML layer** (HTML and CSS rendered to a texture, theme colours as CSS variables, fonts by family name, reported to `reel check` by itself): see reference/html.md. GL (`FSPass`, three.js) and Canvas2D (`Layer2D`) are for pictures, shaders, particles and drawn strokes. A scene mixing both:
+
+```ts
+import type * as THREE from 'three';
+import { Scene, type Frame, FSPass, HtmlLayer, prog, ease, H } from 'reel';
+
+export default class Intro extends Scene {
+  bg = new FSPass(/* glsl */ `void main() { fragColor = vec4(mix(C_BG, C_ACCENT_LO, vUv.y * 0.2), 1.0); }`);
+  title = new HtmlLayer({
+    html: `<h1></h1>`,
+    css: `h1 { position: absolute; inset: 0; display: grid; place-items: center; padding: 0 8%; text-align: center;
+                font: 800 clamp(48px, 9vmin, 140px)/1 Archivo; }`,
+    update: (f, l) => l.text('h1', String(this.ctx.params.text)),   // once per frame, a pure function of f
+  });
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    this.bg.render(this.ctx.renderer, out);
+    const k = prog(f.lt, 0, 0.9, ease.outExpo);
+    this.title.draw(this.ctx.renderer, out, { y: (1 - k) * H * 0.05, opacity: k });   // per sub-frame: motion blurs
+  }
+}
+```
+
+The same title drawn with Canvas2D, for comparison (text you draw yourself must be reported by hand):
+
 ```ts
 import type * as THREE from 'three';
 import { Scene, type Frame, FSPass, Layer2D, W, H, F, font, fitSize, rgba, ease, prog, window01, reportText } from 'reel';
@@ -84,7 +108,7 @@ What a scene gets:
 
 - `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `id`, `start`, `end`, `W`, `H`.
 - `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt`, `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
-- Lifecycle: `init()` once (async; load and precompute here), `render()` per frame and per motion-blur sub-frame, `reset()` for stateful scenes, `dispose()`.
+- Lifecycle: `init()` once (async; load and precompute here), `prepare(f)` once per output frame before its sub-frames (optional, may be async; HTML layers update then), `render()` per frame and per motion-blur sub-frame (synchronous), `reset()` for stateful scenes, `dispose()`.
 - Flags: `stateful = true` for simulation state, `handlesTransition = true` to composite `f.under` with `f.tin` yourself, `tileMasked` (see reference/sampling.md).
 
 ## Rules that keep a video correct
@@ -92,9 +116,9 @@ What a scene gets:
 1. **Pure in `f.t`.** Same `t`, same pixels, in any order: the export renders sub-frames out of order and any number of times. No `Math.random()`, `Date.now()`, `performance.now()` for visuals, no counting `render()` calls, no state carried between calls (unless `stateful`, which then cannot use `--samples auto`). Randomness: `mulberry32(seed)`, `hash(a, b, …)`, `noise1/2/3`, seeded by indices.
 2. **Per-frame jitter uses `frameIdx(t)`**, constant over a frame's shutter; `Math.floor(t * FPS)` double-exposes two states. Step frames by `1 / FPS`, never `1 / 60`.
 3. **Anchor to words, not numbers.** `this.ctx.words.get('some words')` finds a line by its text (and throws if it is gone, so a script edit fails loudly); use its `start`, `end` and `words[i].start`. A typed time breaks when the voice is re-timed.
-4. **Lay out from `W` and `H`** (logical px). Size text with `fitSize` to a width derived from `W`, never from 1920 or 1080, and check the layout at `--size 1080x1920`. Logical px hold at every output scale; `PW`/`PH`, `gl_FragCoord` and canvas backing sizes are physical (reference/sampling.md, "Output scale").
+4. **Lay out from `W` and `H`** (logical px). In HTML, use widths in % of the layer and sizes in `vmin` or `clamp()`; in Canvas2D, size text with `fitSize` to a width derived from `W`; never from 1920 or 1080. Check the layout at `--size 1080x1920`. Logical px hold at every output scale; `PW`/`PH`, `gl_FragCoord` and canvas backing sizes are physical (reference/sampling.md, "Output scale").
 5. **Colours from the theme**, linear: `C_<KEY>` in GLSL (`accentHi` is `C_ACCENT_HI`), `LIN.<key>` for GL uniforms, `rgba('<key>', alpha)` for Canvas2D. `bg`, `fg`, `accent`, `accentHi`, `accentLo` exist in every theme; a theme's own keys tie the scene to it. A missing key throws (and fails the command).
-6. **Report what you draw.** After `fillText`, `reportText(c, text, x, y, { label })`; for stroke fonts, glyph atlases, images and shapes, `report({ kind, x, y, w, h, text?, size?, color?, alpha?, label? })` in logical frame px. Free outside `reel check`; guard extra work with `if (reporting())`. Mark intended rule breaks: `exempt: ['offFrame']` on a box, `check: { exempt: ['blank'] }` on a clip (rules: `blank frozen offFrame safeArea overlap minSize contrast`).
+6. **Report what you draw.** HTML layers report their text and images by themselves (`data-label`, `data-exempt` on elements). Text you draw yourself: after `fillText`, `reportText(c, text, x, y, { label })`; for stroke fonts, glyph atlases, images and shapes, `report({ kind, x, y, w, h, text?, size?, color?, alpha?, label? })` in logical frame px. Free outside `reel check`; guard extra work with `if (reporting())`. Mark intended rule breaks: `exempt: ['offFrame']` on a box, `check: { exempt: ['blank'] }` on a clip (rules: `blank frozen offFrame safeArea overlap minSize contrast overflow clipped`).
 7. **Sound by cue.** `cue(kind, t)` in `init()` (from word times); `mix.json` maps kinds to files. Scenes never play audio.
 8. **Values over ~0.85 bloom** under themes with bloom (`film`). Keep text below that unless it should glow.
 
@@ -104,10 +128,11 @@ A theme is data: a palette (`bg`, `fg`, `accent`, optional `accentHi`/`accentLo`
 
 ## Performance
 
-Aim under 25 ms a frame (`reel perf --from a --to b`). Precompute in `init()`. Each `Layer2D.upload()` costs 2 to 4 ms; use at most two or three per scene, and skip redrawing a layer whose content did not change (cache a key of what it shows, as `reel/scenes/hud` does). Text as geometry (`textPath2D`, `textPoints`) is precomputed, not rebuilt per frame.
+Aim under 25 ms a frame (`reel perf --from a --to b`). Precompute in `init()`. An HTML layer that does not change is free after its first upload; one that changes every frame costs about 1 ms. Each `Layer2D.upload()` costs 2 to 4 ms; use at most two or three per scene, and skip redrawing a layer whose content did not change (cache a key of what it shows, as `reel/scenes/hud` does). Text as geometry (`textPath2D`, `textPoints`) is precomputed, not rebuilt per frame.
 
 ## Where to look next
 
+- `reference/html.md`: HTML layers: markup, CSS, per-frame updates, CSS animations on the clip's clock, theme variables, fonts, images, what check sees.
 - `reference/toolbox.md`: FSPass, Compositor, Layer2D, render targets, the GLSL helpers (noise, SDFs, hatching, `pxLine`), LineBatch, fonts and type layout, stroke fonts, easing and keyframes, the spark, the HUD scene.
 - `reference/sampling.md`: motion blur, adaptive sampling and what it asks of scenes; 4K output scale; stateful scenes; supersampling shaders.
 - `reference/themes.md`: palettes, post parameters, overlays, custom themes.

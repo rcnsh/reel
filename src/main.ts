@@ -11,11 +11,13 @@ const ONLY = params.get('only'); // comma-separated scene ids to load (faster st
 const FROM = params.get('t') ? parseFloat(params.get('t')!) : null;
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
-// physical size: the logical frame times ?scale= (the page CSS shows it at the logical size)
+// physical size: the logical frame times ?scale=, laid out at the logical size (HTML layers inside the canvas
+// rasterise at its backing size over its layout size, so that ratio must be the scale exactly: the preview
+// fits the canvas to the window with a transform, which leaves its layout size alone)
 canvas.width = PW;
 canvas.height = PH;
-canvas.style.aspectRatio = W + ' / ' + H;
-if (EXPORT) { canvas.style.width = W + 'px'; canvas.style.height = H + 'px'; }
+canvas.style.width = W + 'px';
+canvas.style.height = H + 'px';
 
 const engine = new Engine(canvas, config);
 let contextLost = false;
@@ -152,13 +154,14 @@ function setupExport() {
     /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
     /** Render a single frame at t (seeks as needed). Returns the sub-frames used. */
-    still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.render(t, 1 / FPS, true, samples, shutter); },
+    still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.renderFrame(t, 1 / FPS, true, samples, shutter); },
     /**
      * For `reel check`: render t collecting what the scenes report drawing, then measure the frame (its
      * brightness grid) and every text box against the pixels behind it. Returns the boxes, the stats and the
      * scene errors so far.
      */
     async inspect(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
+      await engine.prepare(t, 1 / FPS, samples, shutter);
       engine.collectBoxes = true;
       try { engine.render(t, 1 / FPS, true, samples, shutter); } finally { engine.collectBoxes = false; }
       const px = { data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE };
@@ -205,7 +208,7 @@ function setupExport() {
       c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
       const cells: { t: number; clips: string[]; subFrames: number }[] = [];
       for (const [i, t] of o.times.entries()) {
-        const k = engine.render(t, 1 / FPS, true, o.samples ?? 1, o.shutter ?? 0.5);
+        const k = await engine.renderFrame(t, 1 / FPS, true, o.samples ?? 1, o.shutter ?? 0.5);
         const x = pad + (i % cols) * (cw + pad), y = pad + Math.floor(i / cols) * (ch + lab + pad);
         c.drawImage(canvas, 0, 0, PW, PH, x, y + lab, cw, ch);
         const ids = clipsAt(t).filter((id) => id !== 'overlay');
@@ -243,11 +246,11 @@ function setupExport() {
       const S = opts.samples ?? 1, SH = opts.shutter ?? 0.5;
       // warm-up: render one frame before the range so the first frame is sequential for stateful scenes
       // (adaptive sampling only runs stateless scenes: one sample is enough for the warm-up)
-      if (n0 > 0 && lastStreamed !== n0 - 1) engine.render((n0 - 1) * dt, dt, false, typeof S === 'number' ? S : 1, SH);
+      if (n0 > 0 && lastStreamed !== n0 - 1) await engine.renderFrame((n0 - 1) * dt, dt, false, typeof S === 'number' ? S : 1, SH);
       const used: Record<number, number> = {}; // sub-frames per frame -> frames
       let pending = -1;
       for (let n = n0; n < n1; n++) {
-        const k = engine.render(n * dt, dt, false, S, SH);
+        const k = await engine.renderFrame(n * dt, dt, false, S, SH);
         used[k] = (used[k] ?? 0) + 1;
         engine.readStart(n & 1);
         if (pending >= 0) await snd.send((buf) => engine.readFinish(pending & 1, buf));
@@ -311,25 +314,33 @@ function setupPlayer() {
     if (ev.key === '[') { const es = TIMELINE.filter((x) => x.start < t - 0.3); const e = es[es.length - 1]; if (e) seek(e.start); }
   });
 
+  // fit the frame to the window (a transform: the canvas keeps its logical layout size)
+  const wrap = document.getElementById('wrap')!;
+  const fitView = () => { canvas.style.transform = `scale(${Math.min(wrap.clientWidth / W, wrap.clientHeight / H)})`; };
+  new ResizeObserver(fitView).observe(wrap);
+  fitView();
+
   let frames = 0, fpsT = performance.now(), fps = 0;
-  const tick = () => {
-    if (playing) {
-      // smooth the coarse audio clock with performance.now()
+  // (the next frame is asked for once this one is drawn: a frame's prepare may wait for a paint)
+  const tick = async () => {
+    try {
+      if (playing) {
+        // smooth the coarse audio clock with performance.now()
+        const now = performance.now();
+        if (audio.currentTime !== lastAudioT) { lastAudioT = audio.currentTime; lastPerf = now; }
+        t = lastAudioT + (audio.paused ? 0 : (now - lastPerf) / 1000);
+        if (loop && t >= loop[1]) seek(loop[0]);
+        if (audio.ended) playing = false;
+      }
+      await engine.renderFrame(t, 1 / FPS);
+      scrub.value = String(t);
+      frames++;
       const now = performance.now();
-      if (audio.currentTime !== lastAudioT) { lastAudioT = audio.currentTime; lastPerf = now; }
-      t = lastAudioT + (audio.paused ? 0 : (now - lastPerf) / 1000);
-      if (loop && t >= loop[1]) seek(loop[0]);
-      if (audio.ended) playing = false;
-    }
-    engine.render(t, 1 / FPS);
-    scrub.value = String(t);
-    frames++;
-    const now = performance.now();
-    if (now - fpsT > 500) { fps = (frames * 1000) / (now - fpsT); frames = 0; fpsT = now; }
-    const e = TIMELINE.find((x) => t >= x.start && t < x.end);
-    const l = engine.words.lineAt(t);
-    info.textContent = `${t.toFixed(2)}s  beat ${engine.audio.beatAt(t).toFixed(2)}  bar ${engine.audio.barAt(t).toFixed(2)}  [${e?.id ?? '—'}]  ${fps.toFixed(0)}fps   ${l ? '“' + l.text + '”' : ''}${loop ? '  LOOP' : ''}`;
-    requestAnimationFrame(tick);
+      if (now - fpsT > 500) { fps = (frames * 1000) / (now - fpsT); frames = 0; fpsT = now; }
+      const e = TIMELINE.find((x) => t >= x.start && t < x.end);
+      const l = engine.words.lineAt(t);
+      info.textContent = `${t.toFixed(2)}s  beat ${engine.audio.beatAt(t).toFixed(2)}  bar ${engine.audio.barAt(t).toFixed(2)}  [${e?.id ?? '—'}]  ${fps.toFixed(0)}fps   ${l ? '“' + l.text + '”' : ''}${loop ? '  LOOP' : ''}`;
+    } finally { requestAnimationFrame(tick); }
   };
   requestAnimationFrame(tick);
 
