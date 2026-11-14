@@ -25,6 +25,7 @@ const TOOLS: Record<string, string[]> = {
   align: ['bun', path.join(ENGINE, 'tools/align.ts')],
   mix: ['bun', path.join(ENGINE, 'tools/mix.ts')],
   subtitles: ['bun', path.join(ENGINE, 'tools/subtitles.ts')],
+  assets: ['bun', path.join(ENGINE, 'tools/assets.ts')],
   analyze: ['uv', 'run', path.join(ENGINE, 'tools/analyze.py')],
 };
 if (TOOLS[mode]) {

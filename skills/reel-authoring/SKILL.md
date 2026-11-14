@@ -15,7 +15,8 @@ scenes/<name>.ts    one Scene class per file (default export); shared helpers as
 narration.txt       (narrated) plates: "# name" then its lines
 data/words.json     (generated) every word with its time      audio/narration.flac (generated)
 data/audio.json     (generated) beats, envelopes, sections, the track to mux
-mix.json            music beds and cue sounds for `reel mix`
+mix.json            music beds, cue sounds and loudness for the mix
+assets.json         images and sounds to generate (`reel assets`)
 out/                renders (not committed)
 ```
 

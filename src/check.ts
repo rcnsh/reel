@@ -115,7 +115,7 @@ export function checkTimes(clips: ClipSpan[], duration: number, fps: number, fro
 // ---- findings ----
 export type Severity = 'error' | 'warning' | 'info';
 export interface Finding {
-  kind: CheckRule | 'sceneError';
+  kind: CheckRule | 'sceneError' | 'missingAsset';
   severity: Severity;
   /** The first sampled time it was seen, the last, and how many sampled frames showed it. */
   t: number;

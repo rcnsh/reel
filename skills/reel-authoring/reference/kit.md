@@ -79,7 +79,7 @@ photo = new ImageBox({ src: 'assets/ridge.jpg', alt: 'ridge', box: { x: W * 0.5,
   kenBurns: { from: { zoom: 1 }, to: { zoom: 1.15, x: 0.4, y: 0.2 } } });
 ```
 
-`src` (a path in the project), `fit` (`cover`, the default, fills and crops; `contain` shows all of it), `radius`, `kenBurns` (`true` for a slow push in, or a move from one framing to another across the window: `zoom` 1 is fitted, `x` and `y` pan from -1 to 1 across the room the zoom leaves), `alt`. Drawn in GL from the source file, so the pan is smooth and motion blurred; it loads before the first frame, and a file that does not load is an error. Default motion: a fade.
+`src` (a path in the project), `fit` (`cover`, the default, fills and crops; `contain` shows all of it), `radius`, `kenBurns` (`true` for a slow push in, or a move from one framing to another across the window: `zoom` 1 is fitted, `x` and `y` pan from -1 to 1 across the room the zoom leaves), `alt`. Drawn in GL from the source file, so the pan is smooth and motion blurred; it loads before the first frame, and a file that does not load is an error, unless `assets.json` declares it as a generated asset not made yet: then a labelled placeholder of its declared size stands in (and `reel check` reports it). Default motion: a fade.
 
 ## Charts and numbers
 

@@ -7,6 +7,7 @@ import type { AdaptiveSampling } from '../src/engine/engine';
 import { checkTimes, findingsOf, type Finding, type Sample } from '../src/check';
 import { UsageError, type PageOpts } from './args';
 import { isGone, type PageHandle, type Renderer } from './renderer';
+import { describe, missingAssets } from '../tools/asset-manifest';
 
 export type Op = 'info' | 'still' | 'sheet' | 'strip' | 'check' | 'events' | 'perf' | 'gpu';
 export interface Req {
@@ -153,6 +154,11 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
       writeB64(ctx, f.image, png);
       if (a.preview) previews.push(png);
     }
+    // generated assets declared in assets.json whose files are not there yet (renders show a placeholder)
+    for (const x of missingAssets(req.project)) findings.push({
+      kind: 'missingAsset', severity: 'warning', t: 0, until: m.duration, frames: 0, at: 0, clip: '', text: x.out,
+      message: `asset '${x.id}' (${describe(x)}) is declared in assets.json but ${x.out} does not exist: run \`reel assets\` with the provider's key, or make it from its prompt and save it there`,
+    });
     const summary = { error: 0, warning: 0, info: 0 };
     for (const f of findings) summary[f.severity]++;
     if (summary.error) ctx.error(`check: ${summary.error} error finding${summary.error > 1 ? 's' : ''} (${[...new Set(findings.filter((f) => f.severity === 'error').map((f) => f.kind))].join(', ')})`);

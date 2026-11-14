@@ -2,6 +2,7 @@
 // zoom that is a pure function of time (evaluated per sub-frame, so it is smooth and motion blurred).
 import * as THREE from 'three';
 import { FSPass, H } from '../engine/gl';
+import { assetPlaceholder, declaredAsset } from '../engine/assets';
 import { awaitBeforeFirstFrame } from '../engine/html';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
@@ -12,7 +13,10 @@ import { motionAt, safeBox, type Box, type ComponentOptions } from './common';
 export interface Framing { zoom?: number; x?: number; y?: number }
 
 export interface ImageBoxOptions extends Omit<ComponentOptions, 'css'> {
-  /** The image, a path in the project (`assets/photo.jpg`). Loaded before the first frame; one that does not load is an error. */
+  /**
+   * The image, a path in the project (`assets/photo.jpg`). Loaded before the first frame; one that does not load is
+   * an error, unless assets.json declares it: then a labelled placeholder of its declared size stands in.
+   */
   src: string;
   /** 'cover' (default) fills the box and crops; 'contain' shows all of it. */
   fit?: 'cover' | 'contain';
@@ -56,14 +60,16 @@ export class ImageBox {
   private o: ImageBoxOptions;
   private tex: THREE.Texture | null = null;
   private size: [number, number] = [1, 1];
+  /** The asset id when this is a placeholder for a missing generated asset. */
+  missing: string | null = null;
 
   constructor(o: ImageBoxOptions) {
     this.o = o;
     this.box = o.box ?? safeBox();
     const img = new Image();
     img.src = o.src;
-    awaitBeforeFirstFrame(img.decode().then(() => {
-      const t = new THREE.Texture(img);
+    const use = (src: HTMLImageElement | HTMLCanvasElement, w: number, h: number) => {
+      const t = new THREE.Texture(src);
       t.colorSpace = THREE.SRGBColorSpace;
       t.flipY = false;
       t.generateMipmaps = true;
@@ -72,8 +78,15 @@ export class ImageBox {
       t.anisotropy = 8;
       t.needsUpdate = true;
       this.tex = t;
-      this.size = [img.naturalWidth, img.naturalHeight];
-    }, () => { throw new Error(`image '${o.src}' did not load (a path in the project, served from its folder)`); }));
+      this.size = [w, h];
+    };
+    awaitBeforeFirstFrame(img.decode().then(() => use(img, img.naturalWidth, img.naturalHeight), async () => {
+      const a = await declaredAsset(o.src);
+      if (!a) throw new Error(`image '${o.src}' did not load (a path in the project, served from its folder)`);
+      this.missing = a.id;
+      const c = assetPlaceholder(a);
+      use(c, c.width, c.height);
+    }));
   }
 
   /** The framing at clip time lt: the Ken Burns move across the component's window, eased. */
@@ -106,7 +119,7 @@ export class ImageBox {
     if (reporting()) {
       // (contain: the image's own rectangle inside the box)
       const vw = Math.min(b.w, iw * s * fr.zoom), vh = Math.min(b.h, ih * s * fr.zoom);
-      report({ kind: 'image', x: x + (b.w - vw) / 2, y: y + (b.h - vh) / 2, w: vw, h: vh, alpha: m.opacity * (o.opacity ?? 1), label: this.o.label ?? this.o.alt ?? this.o.src });
+      report({ kind: 'image', x: x + (b.w - vw) / 2, y: y + (b.h - vh) / 2, w: vw, h: vh, alpha: m.opacity * (o.opacity ?? 1), label: this.missing ? `missing asset ${this.missing}` : this.o.label ?? this.o.alt ?? this.o.src });
     }
   }
 }
