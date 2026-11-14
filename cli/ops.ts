@@ -1,0 +1,189 @@
+// What the CLI, the warm renderer and the MCP server ask a project's page to do. A request is plain data (it
+// crosses a socket to the warm renderer): the op, the project, how to open the page, the sampling and the op's
+// arguments, with every path in it absolute. Each op returns the fields it adds to the result.
+import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+import type { AdaptiveSampling } from '../src/engine/engine';
+import { UsageError, type PageOpts } from './args';
+import { isGone, type PageHandle, type Renderer } from './renderer';
+
+export type Op = 'info' | 'still' | 'sheet' | 'events' | 'perf' | 'gpu';
+export interface Req {
+  op: Op;
+  project: string;
+  page: PageOpts;
+  samples: number | AdaptiveSampling;
+  shutter: number;
+  args: Record<string, any>;
+}
+/** What every command prints with --json; `errors` (scene, shader and page errors) make it exit 1, `usage` 2. */
+export interface Result { ok: boolean; errors: string[]; logs: string[]; warnings: string[]; usage?: boolean; [k: string]: unknown }
+
+export interface ClipInfo { id: string; start: number; end: number; track: number }
+export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; track: string | null; theme: string; W: number; H: number; fps: number; scale: number }
+
+export const meta = (h: PageHandle): Promise<PageMeta> => h.page.evaluate(() => {
+  const R = (window as any).__reel;
+  return { duration: R.duration, timeline: R.timeline, cues: R.cues, track: R.track, theme: R.theme, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
+});
+
+/** `dir/base.png`, or `dir/base-2.png`, `-3` … when that is taken: stills and sheets never overwrite each other. */
+export function freeName(dir: string, base: string, ext = '.png') {
+  let f = path.join(dir, base + ext);
+  for (let i = 2; existsSync(f); i++) f = path.join(dir, `${base}-${i}${ext}`);
+  return f;
+}
+
+/** A still's name: the clips on screen (the theme's overlay only when alone) and the time, `hello_2.500s`. */
+export function stillName(clips: string[], t: number) {
+  const ids = clips.length > 1 ? clips.filter((c) => c !== 'overlay') : clips;
+  return `${ids.map((c) => c.replace(/[^\w.-]+/g, '-')).join('+') || 'nothing'}_${t.toFixed(3)}s`;
+}
+
+/** Frame times n evenly spaced from `from` to `to`, both included. */
+export const spaced = (from: number, to: number, n: number) => Array.from({ length: n }, (_, i) => from + ((to - from) * i) / Math.max(1, n - 1));
+
+interface Ctx { r: Renderer; req: Req; warn: (s: string) => void; wrote: (file: string) => void }
+
+function writeB64(ctx: Ctx, file: string, b64: string) {
+  mkdirSync(path.dirname(file), { recursive: true });
+  writeFileSync(file, Buffer.from(b64, 'base64'));
+  ctx.wrote(file);
+}
+
+function checkTimes(ctx: Ctx, m: PageMeta, times: number[]) {
+  for (const t of times) if (t < 0 || t >= m.duration) ctx.warn(`t=${t} is outside the video (0 to ${m.duration.toFixed(3)} s): nothing is on screen`);
+}
+
+const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknown>>> = {
+  async info(h, ctx) {
+    const m = await meta(h);
+    const tracks = [...new Set(m.timeline.map((c) => c.track))].sort((a, b) => a - b);
+    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues };
+  },
+
+  async still(h, ctx) {
+    const { req } = ctx, a = req.args as { times: number[]; out?: string; maxSize?: number; preview?: number };
+    if (!a.times?.length) throw new UsageError('still needs --t <seconds>[,<seconds>...]');
+    const one = a.out?.toLowerCase().endsWith('.png');
+    if (one && a.times.length > 1) throw new UsageError(`--out ${a.out}: one file holds one still; give a folder for ${a.times.length} times`);
+    const dir = one ? path.dirname(a.out!) : a.out ?? path.join(req.project, 'out/stills');
+    checkTimes(ctx, await meta(h), a.times);
+    const frames: { t: number; file: string; clips: string[]; subFrames: number }[] = [], previews: string[] = [];
+    for (const t of a.times) {
+      const subFrames: number = await h.page.evaluate(([t, s, sh]) => (window as any).__reel.still(t, s, sh), [t, req.samples, req.shutter] as const);
+      const clips: string[] = await h.page.evaluate((t) => (window as any).__reel.clipsAt(t), t);
+      // (the pixel buffer the video export reads, not a screenshot of the page)
+      const png: string = await h.page.evaluate((o) => (window as any).__reel.png(o), { maxSize: a.maxSize });
+      const file = one ? a.out! : freeName(dir, stillName(clips, t));
+      writeB64(ctx, file, png);
+      frames.push({ t, file, clips, subFrames });
+      if (a.preview) previews.push(a.preview === a.maxSize ? png : await h.page.evaluate((o) => (window as any).__reel.png(o), { maxSize: a.preview }));
+    }
+    return { files: frames.map((f) => f.file), frames, ...(a.preview ? { previews } : {}) };
+  },
+
+  async sheet(h, ctx) {
+    const { req } = ctx, a = req.args as { from?: number; to?: number; n?: number; times?: number[]; cuts?: boolean; cols?: number; cell?: number; out?: string; maxSize?: number; preview?: number };
+    const m = await meta(h);
+    let times: number[];
+    if (a.cuts) {
+      // 4 frames around every cut: 2 before, 2 after
+      const starts = [...new Set(m.timeline.map((e) => e.start))].sort((x, y) => x - y).filter((s) => s > 0);
+      if (!starts.length) throw new UsageError('sheet --cuts: the timeline has no cuts');
+      times = starts.flatMap((s) => [s - 0.1, s - 1 / m.fps, s + 1 / m.fps, s + 0.1]);
+    } else if (a.times?.length) times = a.times;
+    else {
+      const from = a.from ?? 0, to = a.to ?? m.duration - 1 / m.fps;
+      if (!(to > from)) throw new UsageError(`--from ${from} --to ${to}: an empty range`);
+      times = spaced(from, to, a.n ?? 12);
+    }
+    checkTimes(ctx, m, times);
+    return grid(h, ctx, times, a.cols ?? 4, a.cell ?? 480, a.out ?? freeName(path.join(req.project, 'out/sheets'), `sheet_${times[0]!.toFixed(2)}-${times.at(-1)!.toFixed(2)}`), a);
+  },
+
+  async events(h, ctx) {
+    // sound-mix cues: the timeline (clip starts) and every cue() a scene recorded
+    const { duration, timeline, cues } = await meta(h);
+    const out = ctx.req.args.out ?? path.join(ctx.req.project, 'data/cues.json');
+    mkdirSync(path.dirname(out), { recursive: true });
+    writeFileSync(out, JSON.stringify({ duration, timeline, cues }, null, 1));
+    ctx.wrote(out);
+    return { file: out, clips: timeline.length, cues: cues.length };
+  },
+
+  async perf(h, ctx) {
+    const { req } = ctx;
+    return h.page.evaluate(async ({ from, to, samples, shutter }) => {
+      const P = (window as any).__reel, dt = 1 / P.fps;
+      const ms: number[] = [];
+      const buf = new Uint8Array(P.width * P.height * 4);
+      P.still(from);
+      const used: Record<number, number> = {};
+      for (let t = from; t < to; t += dt) {
+        const a = performance.now();
+        const k = P.engine.render(t, dt, false, samples, shutter);
+        used[k] = (used[k] ?? 0) + 1;
+        await P.engine.readPixelsAsync(buf);
+        ms.push(performance.now() - a);
+      }
+      ms.sort((a, b) => a - b);
+      return { frames: ms.length, avg: ms.reduce((a, b) => a + b, 0) / ms.length, p50: ms[ms.length >> 1]!, p95: ms[Math.floor(ms.length * 0.95)]!, max: ms[ms.length - 1]!, subFrames: used };
+    }, { from: req.args.from ?? 0, to: req.args.to ?? 5, samples: req.samples, shutter: req.shutter });
+  },
+
+  async gpu(h) {
+    const gpu = await h.page.evaluate(() => {
+      const gl = document.createElement('canvas').getContext('webgl2')!;
+      const ext = gl.getExtension('WEBGL_debug_renderer_info');
+      return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
+    });
+    return { gpu };
+  },
+};
+
+/** Frames in a labelled grid, written to `out`; with `preview`, also a copy at most that size (base64). */
+async function grid(h: PageHandle, ctx: Ctx, times: number[], cols: number, cell: number, out: string, a: { maxSize?: number; preview?: number }) {
+  const g: { png: string; width: number; height: number; cells: unknown[] } = await h.page.evaluate((o) => (window as any).__reel.grid(o), {
+    times, cols, cell, samples: ctx.req.samples, shutter: ctx.req.shutter, maxSize: a.maxSize,
+  });
+  writeB64(ctx, out, g.png);
+  const res: Record<string, unknown> = { file: out, times, size: [g.width, g.height], cells: g.cells };
+  if (a.preview) res.previews = [Math.max(g.width, g.height) <= a.preview ? g.png : await h.page.evaluate((m) => (window as any).__reel.lastGridPng(m), a.preview)];
+  return res;
+}
+
+/**
+ * Run a request on the renderer. A page that crashed or closed under it is replaced and the request run once
+ * more; anything else that throws becomes an error of the result.
+ */
+export async function run(r: Renderer, req: Req, wrote: (file: string) => void = () => {}): Promise<Result> {
+  const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
+  const ctx: Ctx = { r, req, warn: (s) => res.warnings.push(s), wrote };
+  if (!OPS[req.op]) throw new Error(`unknown op '${req.op}'`);
+  for (let attempt = 0; ; attempt++) {
+    let h: PageHandle | undefined;
+    try {
+      h = await r.page(req.page);
+      Object.assign(res, await OPS[req.op](h, ctx));
+      res.errors.push(...await h.errors());
+      res.logs.push(...h.logs);
+      break;
+    } catch (e) {
+      if (attempt === 0 && (h?.dead || isGone(e))) {
+        if (h) await r.drop(h);
+        res.warnings.push(`the page went away (${String((e as Error)?.message ?? e).split('\n')[0]}): ran the request again on a new one`);
+        continue;
+      }
+      if (h && !h.dead) res.errors.push(...await h.errors());
+      if (h) res.logs.push(...h.logs);
+      if (h?.dead) await r.drop(h);
+      if (e instanceof UsageError) res.usage = true;
+      res.errors.push(String((e as Error)?.message ?? e));
+      break;
+    }
+  }
+  res.errors = [...new Set(res.errors)];
+  res.ok = res.errors.length === 0;
+  return res;
+}

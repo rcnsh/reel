@@ -1,0 +1,159 @@
+// The command line: the help text, the flags each command takes, and checks of their values. Pure (no I/O), so
+// the CLI and its tests share it.
+import { parseArgs } from 'node:util';
+import type { AdaptiveSampling } from '../src/engine/engine';
+
+export const HELP = `reel <command> [flags]
+
+Looking at a project (headless Chrome; each exits 1 on a scene error)
+  info                       the project's format, duration, clips, tracks, cues and theme
+  still   --t 1.5,23[,..]    PNG stills, the pixels the video export produces. Named after the clips
+                             on screen and the time (hello_1.500s.png); never overwrites a file
+                             [--out <dir>|<file.png>] [--max-size <px>]
+  sheet                      a contact sheet: --from/--to with --n frames, or --times a,b,c, or --cuts
+                             (4 frames around every cut)                  [--cols 4] [--out <file.png>]
+  events                     write the sound-mix cues (the timeline and every cue() of the scenes)
+                             [--out data/cues.json]
+  perf    --from 0 --to 5    milliseconds per frame, including the export's pixel readback
+  gpu                        the GPU Chrome renders with
+
+Rendering
+  video                      the video: x264 through ffmpeg, with the project's audio track; runs its
+                             own browsers
+                             [--from 0] [--to <duration>] [--out <file.mp4>] [--crf 16] [--preset slow]
+                             [--x264 aq-mode=3] [--noaudio] [--workers 2] [--chunk 8] [--mem-gb 1]
+                             [--spool-gb 20] [--progress (JSON lines on stderr)]
+
+Working on a project
+  init <folder>              a new project that renders straight away; refuses a folder that holds anything
+                             [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
+  dev                        the preview player with live reload (prints its URL)  [--port <n>]
+  narrate                    time narration.txt with a scratch voice (macOS say)
+  align <recording|folder>   time narration.txt to a voice recording
+  analyze <song> [...]       beats, envelopes and sections of a song (flags: reel analyze --help)
+  mix <in.mp4> <out.mp4>     lay music and cue sounds under a render             [--from 0]
+
+Flags for every command that renders
+  --project <folder>   the project (default: the current folder)
+  --only a,b           load only these clips (faster; other clips render as nothing)
+  --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
+                       [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
+  --shutter 0.5        the share of the frame time the sub-frames span
+  --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project)
+  --size WxH, --fps N  override the project's frame size and rate
+  --theme <name>       render with a built-in theme (print, film, neutral) instead of the project's
+  --headed             show the browser
+  --json               machine-readable output: one JSON object { ok, errors, logs, ... }
+
+Chrome: $CHROME_PATH, else the installed Google Chrome. Exit codes: 0 done, 1 failed (a scene
+error), 2 bad command line or no project.`;
+
+const str = { type: 'string' } as const, bool = { type: 'boolean' } as const;
+type Opt = typeof str | typeof bool;
+
+/** Flags of every command that renders through a page. */
+const RENDER: Record<string, Opt> = {
+  project: str, json: bool, help: bool, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str,
+  shutter: str, scale: str, size: str, fps: str, theme: str, headed: bool,
+};
+const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
+
+/** Each command's flags (beyond RENDER for the rendering ones) and whether it takes positionals. */
+export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Opt>; positionals?: [min: number, max: number] }> = {
+  info: { render: true, opts: {} },
+  still: { render: true, opts: { t: str, ...IMAGE } },
+  sheet: { render: true, opts: { from: str, to: str, n: str, times: str, cuts: bool, cols: str, out: str } },
+  events: { render: true, opts: { out: str } },
+  perf: { render: true, opts: { from: str, to: str } },
+  gpu: { render: true, opts: {} },
+  video: { render: true, opts: { from: str, to: str, out: str, crf: str, preset: str, x264: str, noaudio: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
+  dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
+  init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
+};
+
+/** A bad command line: the CLI exits 2. */
+export class UsageError extends Error {}
+
+export type Values = Record<string, string | boolean | undefined>;
+export interface Parsed { mode: string; values: Values; positionals: string[] }
+
+/** Parse a command line for one of COMMANDS (strict: an unknown flag or a missing value is a UsageError). */
+export function parseCommand(argv: string[]): Parsed {
+  const mode = argv[0] ?? '';
+  const spec = COMMANDS[mode];
+  if (!spec) throw new UsageError(`unknown command '${mode}' (reel --help)`);
+  let a;
+  try {
+    a = parseArgs({ args: argv.slice(1), strict: true, allowPositionals: !!spec.positionals, options: spec.render ? { ...RENDER, ...spec.opts } : spec.opts });
+  } catch (e) { throw new UsageError(`${(e as Error).message} (reel --help)`); }
+  const values = a.values as Values, positionals = a.positionals;
+  if (spec.positionals && !values.help) {
+    const [lo, hi] = spec.positionals;
+    if (positionals.length < lo || positionals.length > hi) throw new UsageError(`${mode}: expected ${lo === hi ? lo : `${lo} to ${hi}`} argument${hi > 1 ? 's' : ''} (reel --help)`);
+  }
+  return { mode, values, positionals };
+}
+
+/** A numeric flag, or `d` when absent. */
+export function num(v: Values, k: string, d: number): number;
+export function num(v: Values, k: string, d?: undefined): number | undefined;
+export function num(v: Values, k: string, d?: number) {
+  const raw = v[k];
+  if (raw === undefined) return d;
+  const x = Number(raw);
+  if (typeof raw !== 'string' || raw.trim() === '' || !Number.isFinite(x)) throw new UsageError(`--${k} ${raw}: expected a number`);
+  return x;
+}
+
+/** A whole number flag at least `min`. */
+export function int(v: Values, k: string, d: number, min = 1) {
+  const x = num(v, k, d);
+  if (!Number.isInteger(x) || x < min) throw new UsageError(`--${k} ${v[k]}: expected a whole number of at least ${min}`);
+  return x;
+}
+
+/** A list of numbers: `--t 1,2.5,3`. */
+export function list(v: Values, k: string): number[] {
+  const raw = v[k];
+  if (raw === undefined) return [];
+  const xs = String(raw).split(',').map((s) => s.trim()).filter(Boolean);
+  const out = xs.map(Number);
+  if (!xs.length || out.some((x) => !Number.isFinite(x))) throw new UsageError(`--${k} ${raw}: expected numbers separated by commas`);
+  return out;
+}
+
+/** `--size WxH`: a width that is a multiple of 4 and an even height (the packed readback and yuv420). */
+export function sizeOf(s: string): [number, number] {
+  const m = /^(\d+)x(\d+)$/.exec(s);
+  const w = m ? Number(m[1]) : NaN, h = m ? Number(m[2]) : NaN;
+  if (!m || w < 16 || h < 16 || w > 8192 || h > 8192 || w % 4 || h % 2) throw new UsageError(`--size ${s}: expected WxH from 16 to 8192, the width a multiple of 4 and the height even`);
+  return [w, h];
+}
+
+/** The motion-blur sampling flags: a fixed count, or adaptive. */
+export function samplesOf(v: Values): number | AdaptiveSampling {
+  if (v.refine !== undefined && v.refine !== 'tiles' && v.refine !== 'frame') throw new UsageError(`--refine ${v.refine}: expected tiles or frame`);
+  if (v.samples === 'auto') return { min: int(v, 'min-samples', 4), max: int(v, 'max-samples', 324), tol: num(v, 'tol', 3), refine: (v.refine ?? 'tiles') as 'tiles' | 'frame' };
+  for (const k of ['min-samples', 'max-samples', 'refine']) if (v[k] !== undefined) throw new UsageError(`--${k} goes with --samples auto`);
+  return int(v, 'samples', 1);
+}
+
+/** What a page is opened with: the format overrides, the clips to load and a built-in theme. */
+export interface PageOpts { w?: number; h?: number; fps?: number; scale: number; only?: string; theme?: string }
+
+export function pageOf(v: Values): PageOpts {
+  const scale = num(v, 'scale', 1);
+  if (![1, 2, 3, 4].includes(scale)) throw new UsageError(`--scale ${v.scale}: expected 1 to 4`);
+  const o: PageOpts = { scale };
+  if (typeof v.size === 'string') [o.w, o.h] = sizeOf(v.size);
+  if (v.fps !== undefined) {
+    o.fps = num(v, 'fps');
+    if (!(o.fps! > 0 && o.fps! <= 240)) throw new UsageError(`--fps ${v.fps}: expected a frame rate up to 240`);
+  }
+  if (typeof v.only === 'string') {
+    if (!v.only.split(',').every(Boolean)) throw new UsageError(`--only ${v.only}: expected clip ids separated by commas`);
+    o.only = v.only;
+  }
+  if (typeof v.theme === 'string') o.theme = v.theme;
+  return o;
+}

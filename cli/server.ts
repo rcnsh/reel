@@ -2,7 +2,7 @@
 // project folder mapped in. The project's config is `@project/reel.config`, its scenes import the engine as
 // `reel` (and its scenes as `reel/scenes/<name>`), and its files (audio/, data/, assets/ ...) are served from the
 // site root. The config's format and theme reach the page as compile-time constants (__REEL_FORMAT__, __REEL_THEME__).
-import { createServer, type ViteDevServer } from 'vite';
+import type { ViteDevServer } from 'vite';
 import { existsSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf, type VideoConfig } from '../src/config';
@@ -43,12 +43,15 @@ export async function loadConfig(project: string): Promise<VideoConfig> {
 
 /**
  * Start the server for `project`. `hmr: false` for renders: a file saved mid-render must not reload the page.
- * `port: 0` picks a free port. `theme` names a built-in theme to use instead of the config's.
+ * `port: 0` picks a free port; a port with `strictPort: false` falls back to the next free one. `theme` names a
+ * built-in theme to use instead of the config's.
  */
-export async function startServer(project: string, opts: { port?: number; hmr?: boolean; theme?: string } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
+export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
   const config = await loadConfig(project);
   const format = formatOf(config);
   const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
+  // (imported here: a command that only talks to the warm renderer never loads Vite)
+  const { createServer } = await import('vite');
   const server = await createServer({
     configFile: false,
     root: ENGINE,
@@ -67,7 +70,8 @@ export async function startServer(project: string, opts: { port?: number; hmr?: 
       dedupe: ['three'],
     },
     optimizeDeps: { include: ['three', 'opentype.js'] },
-    server: { port: opts.port || 0, strictPort: !!opts.port, hmr: opts.hmr ?? false, fs: { allow: [ENGINE, project] } },
+    // (a render server keeps the page's console to itself: the CLI reports it per request)
+    server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project] } },
     build: { target: 'esnext' },
     plugins: [{
       name: 'reel-project-files',

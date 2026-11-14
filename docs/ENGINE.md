@@ -8,9 +8,9 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 
 `reel` is `bun <engine>/cli/reel.ts`; run it in the project folder or pass `--project <folder>`. `reel --help` lists everything. In a project made by `reel init`, `bun run reel …` does the same and `bun run typecheck` checks its scenes against the engine.
 
-- Preview: `reel dev`, then http://localhost:5173/?t=2.0 (space = play/pause, ←/→ = ±1 s, shift = ±5 s, `,`/`.` = ±1 frame, `[`/`]` = previous/next clip, `l` = loop the current clip, `h` = hide the UI).
+- Preview: `reel dev`, then the URL it prints with `?t=2.0` (space = play/pause, ←/→ = ±1 s, shift = ±5 s, `,`/`.` = ±1 frame, `[`/`]` = previous/next clip, `l` = loop the current clip, `h` = hide the UI).
 - Stills (the main way to check your work — then LOOK at the PNGs with the Read tool): `reel still --t 12.5,13.0,14.2 --only hello --out out/wip/hello`. They are the pixels the video export produces.
-- Contact sheet of a time range: `reel sheet --from 1.5 --to 9 --n 16 --cols 4 --only hello --out out/wip/hello/sheet.png`; `reel sheet --cuts` shows the frames around every cut.
+- Contact sheet of a time range, each frame labelled with its time and clips: `reel sheet --from 1.5 --to 9 --n 16 --cols 4 --only hello --out out/wip/hello/sheet.png`; `reel sheet --cuts` shows the frames around every cut.
 - Short video clip (to judge motion): `reel video --from 20 --to 25 --only hello --out out/wip/hello.mp4 --preset veryfast`
 - `--only a,b` loads only those clips (fast, and isolates you from other broken scenes). Clips that are not loaded draw nothing.
 - A scene that throws makes the command exit 1 and lists the error (`--json`: in `errors`); in a render it shows as a dark red frame.

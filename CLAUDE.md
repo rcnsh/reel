@@ -26,7 +26,8 @@ cli/server.ts: Vite serving index.html + src/main.ts, with the project mapped in
 Engine.init ─▶ load the clips' scenes (+ the theme's overlay clip) ─▶ each frame: scenes render HDR into targets
             ─▶ transitions per track ─▶ tracks stacked ─▶ post (defaults from the theme)
 src/main.ts: preview player (reel dev) or export API window.__reel (?export=1)
-cli/reel.ts drives window.__reel: info | still | sheet | video | events | perf | gpu
+cli/reel.ts (flags: cli/args.ts) drives window.__reel through cli/renderer.ts + cli/ops.ts: info | still | sheet | events | perf | gpu;
+            cli/video.ts: the video export
 reel events ─▶ data/cues.json ─▶ reel mix + mix.json ─▶ music and cue sounds under the video
 ```
 
@@ -80,10 +81,11 @@ No test suite exists yet; these renders are the tests.
 ## Environment and gotchas
 
 - **Chrome.** The CLI uses `CHROME_PATH`, else the installed Google Chrome (`channel: 'chrome'`). This Mac has no Google Chrome, so set `export CHROME_PATH="$HOME/Library/Caches/ms-playwright/chromium-1248/chrome-mac-arm64/Google Chrome for Testing.app/Contents/MacOS/Google Chrome for Testing"` (Chrome 156). Chrome for Testing 157, which has HTML-in-Canvas, is at `~/Library/Caches/reel-chrome/chrome/mac_arm-157.0.8103.78/…` (`bunx @puppeteer/browsers install chrome@157.0.8103.78 --path ~/Library/Caches/reel-chrome`). Rendering uses Metal through ANGLE (`--use-angle=metal`).
-- **Dev server.** Every rendering command starts its own Vite on a free port, without live reload, and stops it at the end, so a render never talks to another project's server and a file saved mid-render does not reload the page. `reel dev` is the one with live reload.
+- **Dev server.** Every rendering command uses a Vite of its own on a free port, without live reload, so a render never talks to another project's server and a file saved mid-render does not reload the page. `reel dev` is the one with live reload.
+- **Stills** are named after the clips on screen and the time (`out/stills/hello_2.500s.png`), and a name that is taken gets `-2`, `-3`: stills never overwrite each other. `--out <file.png>` writes exactly that file.
 - **Exit codes.** 0: done and no scene reported an error. 1: something failed (a scene's `init()` or `render()` threw, a shader did not compile, ffmpeg, the page). 2: bad command line or no project. `--json` puts the same in `{ ok, errors, logs }`. A scene that throws in `render()` shows as a dark red frame.
 - **Flags are strict.** An unknown flag is an error; `reel --help` is the list.
-- **Preview.** `reel dev --project <p>`, then `http://localhost:5173/?t=<seconds>`. Space plays, arrow keys seek, `,`/`.` step a frame, `[`/`]` jump clips, `l` loops the clip, `h` hides the UI. A missing track still plays silently: the clock runs on `performance.now()`.
+- **Preview.** `reel dev --project <p>`, then the URL it prints (5173 when free, else the next free port), with `?t=<seconds>`. Space plays, arrow keys seek, `,`/`.` step a frame, `[`/`]` jump clips, `l` loops the clip, `h` hides the UI. A missing track still plays silently: the clock runs on `performance.now()`.
 - **`--only a,b`** loads only those clips: faster, and isolates you from another scene's errors. Clips that are not loaded draw nothing.
 - **Stateful scenes** (`stateful = true`) are exported by one worker in order, whatever `--workers` says, and refuse `--samples auto`.
 - **Partial renders and the mix.** `reel mix --from <s>` must match the render's `--from`, or cues and music land in the wrong place.

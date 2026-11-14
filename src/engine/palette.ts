@@ -9,8 +9,15 @@ import { hexToLinear } from './util';
 
 declare const __REEL_THEME__: ResolvedTheme | undefined;
 
-/** The project's theme, resolved (without a dev server, e.g. under bun: `neutral`). */
-export const THEME: ResolvedTheme = typeof __REEL_THEME__ === 'undefined' || !__REEL_THEME__ ? resolveTheme('neutral') : __REEL_THEME__;
+/**
+ * The project's theme, resolved: a built-in theme named by the page URL (`?theme=film`, what `--theme` sets), else
+ * the config's (without a dev server, e.g. under bun: `neutral`).
+ */
+export const THEME: ResolvedTheme = (() => {
+  const q = typeof location === 'undefined' ? null : new URLSearchParams(location.search).get('theme');
+  if (q) return resolveTheme(q);
+  return typeof __REEL_THEME__ === 'undefined' || !__REEL_THEME__ ? resolveTheme('neutral') : __REEL_THEME__;
+})();
 
 /** A palette key: `bg`, `fg`, `accent`, `accentHi`, `accentLo`, or one the theme adds. */
 export type PaletteKey = string;

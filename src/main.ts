@@ -1,6 +1,7 @@
 // Entry: preview player (default) or export mode (?export=1, driven by cli/reel.ts).
 import { Engine, type AdaptiveSampling } from './engine/engine';
 import { W, H, PW, PH, SCALE, FPS } from './engine/gl';
+import { THEME } from './engine/palette';
 import config from '@project/reel.config';
 
 const params = new URLSearchParams(location.search);
@@ -89,6 +90,32 @@ function sender(url: string, inflight: number): Promise<Sender> {
   return s;
 }
 
+/** Bytes to base64 (in slices: a spread of a whole frame's bytes overflows the call stack). */
+function b64(b: Uint8Array) {
+  let s = '';
+  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
+  return btoa(s);
+}
+async function pngOf(cv: OffscreenCanvas) {
+  return b64(new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer()));
+}
+/** Output size for a w x h image whose long side may be at most `max` px (never enlarged). */
+function fit(w: number, h: number, max?: number) {
+  const k = max && Math.max(w, h) > max ? max / Math.max(w, h) : 1;
+  return [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))] as const;
+}
+/** A copy of `src` (x, y, w, h of it) at most `max` px on its long side, smoothed. */
+function scaled(src: OffscreenCanvas | HTMLCanvasElement, x: number, y: number, w: number, h: number, max?: number) {
+  const [ow, oh] = fit(w, h, max);
+  const out = new OffscreenCanvas(ow, oh), c = out.getContext('2d')!;
+  c.imageSmoothingEnabled = true;
+  c.imageSmoothingQuality = 'high';
+  c.drawImage(src, x, y, w, h, 0, 0, ow, oh);
+  return out;
+}
+let lastGrid: OffscreenCanvas | null = null;
+const clipsAt = (t: number) => TIMELINE.filter((e) => t >= e.start && t < e.end).sort((a, b) => (a.track ?? 0) - (b.track ?? 0)).map((e) => e.id);
+
 function setupExport() {
   document.body.classList.add('export');
   window.__reel = {
@@ -96,30 +123,88 @@ function setupExport() {
     duration: engine.duration,
     /** The sound the export muxes (a path in the project), or null for a silent video. */
     track: engine.audio.track,
-    errors: engine.errors,
+    /** Scene and shader errors: the page's load errors and the render errors since beginRequest(). */
+    get errors() { return engine.errors; },
+    /** Start a request on a warm page: render errors are reported again from here (once per clip). */
+    beginRequest() { engine.clearRenderErrors(); },
     /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24). */
     scale: SCALE,
     width: PW,
     height: PH,
+    /** The logical frame size scenes lay out in. */
+    W, H,
     fps: FPS,
+    theme: THEME.name,
     /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
     stateful: [...engine.loaded.values()].some((l) => l.scene?.stateful),
     timeline: TIMELINE.map(({ id, start, end, track }) => ({ id, start, end, track: track ?? 0 })),
+    /** Ids of the clips on screen at t, lowest track first. */
+    clipsAt,
     /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
-    /** Render a single frame at t (seeks as needed). */
+    /** Render a single frame at t (seeks as needed). Returns the sub-frames used. */
     still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.render(t, 1 / FPS, true, samples, shutter); },
-    /** The last rendered frame as a full-resolution (PW x PH) PNG, base64 (for stills at scale > 1). */
-    async png() {
+    /**
+     * The last rendered frame as a PNG (base64): the export's pixels at full resolution, or `crop` (x, y, w, h in
+     * logical px) of them, at most `maxSize` px on the long side, with `marks` (logical rectangles) outlined.
+     */
+    async png(o: { maxSize?: number; crop?: [number, number, number, number]; marks?: [number, number, number, number][] } = {}) {
       const px = await engine.readPixelsAsync(), row = PW * 4;
       const img = new ImageData(PW, PH);
       for (let y = 0; y < PH; y++) img.data.set(px.subarray((PH - 1 - y) * row, (PH - y) * row), y * row); // bottom-up -> top-down
-      const oc = new OffscreenCanvas(PW, PH);
-      oc.getContext('2d')!.putImageData(img, 0, 0);
-      const b = new Uint8Array(await (await oc.convertToBlob({ type: 'image/png' })).arrayBuffer());
-      let s = '';
-      for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
-      return btoa(s);
+      const full = new OffscreenCanvas(PW, PH);
+      full.getContext('2d')!.putImageData(img, 0, 0);
+      let [x, y, w, h] = o.crop ?? [0, 0, W, H];
+      x = Math.max(0, Math.floor(x)); y = Math.max(0, Math.floor(y));
+      w = Math.max(1, Math.min(W - x, Math.ceil(w))); h = Math.max(1, Math.min(H - y, Math.ceil(h)));
+      const out = scaled(full, x * SCALE, y * SCALE, w * SCALE, h * SCALE, o.maxSize);
+      if (o.marks?.length) {
+        const c = out.getContext('2d')!, k = out.width / w;
+        c.lineWidth = Math.max(2, Math.round(out.width / 400));
+        for (const [mx, my, mw, mh] of o.marks) {
+          c.strokeStyle = 'rgba(0,0,0,0.7)'; c.setLineDash([]);
+          c.strokeRect((mx - x) * k, (my - y) * k, mw * k, mh * k);
+          c.strokeStyle = '#ff2bd6'; c.setLineDash([c.lineWidth * 3, c.lineWidth * 2]);
+          c.strokeRect((mx - x) * k, (my - y) * k, mw * k, mh * k);
+        }
+      }
+      return pngOf(out);
+    },
+    /**
+     * Frames at `times` in a grid of `cols` columns, each `cell` px on its long side and labelled with its time
+     * and the clips on screen; the whole image at most `maxSize` px on its long side. PNG, base64.
+     */
+    async grid(o: { times: number[]; cols: number; cell: number; samples?: number | AdaptiveSampling; shutter?: number; maxSize?: number; gap?: number }) {
+      const [cw, ch] = fit(W, H, o.cell);
+      const cols = Math.max(1, Math.min(o.cols, o.times.length)), rows = Math.ceil(o.times.length / cols);
+      const pad = 4, lab = 20;
+      const cv = new OffscreenCanvas(cols * (cw + pad) + pad, rows * (ch + lab + pad) + pad);
+      const c = cv.getContext('2d')!;
+      c.fillStyle = '#1b1b1d'; c.fillRect(0, 0, cv.width, cv.height);
+      c.imageSmoothingEnabled = true; c.imageSmoothingQuality = 'high';
+      const cells: { t: number; clips: string[]; subFrames: number }[] = [];
+      for (const [i, t] of o.times.entries()) {
+        const k = engine.render(t, 1 / FPS, true, o.samples ?? 1, o.shutter ?? 0.5);
+        const x = pad + (i % cols) * (cw + pad), y = pad + Math.floor(i / cols) * (ch + lab + pad);
+        c.drawImage(canvas, 0, 0, PW, PH, x, y + lab, cw, ch);
+        const ids = clipsAt(t).filter((id) => id !== 'overlay');
+        c.fillStyle = '#e6e3dc'; c.font = '600 13px ui-monospace, Menlo, monospace';
+        c.fillText(`${t.toFixed(3)}s`, x + 2, y + 14);
+        c.fillStyle = '#9c978f'; c.font = '12px ui-monospace, Menlo, monospace';
+        const tw = c.measureText(`${t.toFixed(3)}s`).width + 10;
+        let label = ids.join('+') || '—';
+        while (label.length > 1 && c.measureText(label).width > cw - tw - 4) label = label.slice(0, -2) + '…';
+        c.fillText(label, x + 2 + tw, y + 14);
+        cells.push({ t, clips: clipsAt(t), subFrames: k });
+      }
+      lastGrid = cv;
+      const out = o.maxSize && Math.max(cv.width, cv.height) > o.maxSize ? scaled(cv, 0, 0, cv.width, cv.height, o.maxSize) : cv;
+      return { png: await pngOf(out), width: out.width, height: out.height, cells };
+    },
+    /** The last grid again, at most `maxSize` px on its long side (a preview without rendering it twice). */
+    async lastGridPng(maxSize: number) {
+      if (!lastGrid) throw new Error('no grid rendered yet');
+      return pngOf(scaled(lastGrid, 0, 0, lastGrid.width, lastGrid.height, maxSize));
     },
     /**
      * Render [from, to) at the frame rate and stream raw rgb24 frames (bottom-up) over a WebSocket, in order.

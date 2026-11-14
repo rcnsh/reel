@@ -51,7 +51,7 @@ Words for a sung track still go through `reel align` (Whisper word times), which
 - `src/engine/`: the engine: renderer, adaptive sampling, tracks and transitions (`engine.ts`), GL helpers (`gl.ts`), post-processing (`post.ts`), type and single-stroke fonts, GPU lines, the spark (`spark.ts`), the palette from the theme (`palette.ts`), shared GLSL. `src/index.ts` is what scenes import as `reel`; `src/config.ts` is `reel/config`.
 - `src/themes.ts`: the themes (`print`, `film`, `neutral`), `extendTheme` and the checks a theme goes through. `src/scenes/`: scenes any project can place, imported as `reel/scenes/<name>`: `hud` (crop marks and captions).
 - `src/main.ts`, `index.html`: the page a project runs in: the preview player and the export API (`window.__reel`).
-- `cli/reel.ts`: the `reel` command. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
+- `cli/reel.ts`: the `reel` command; `cli/args.ts` its flags and help. `cli/renderer.ts`: a project's dev server, Chrome and pages; `cli/ops.ts`: what a command asks a page to do; `cli/video.ts`: the video export. `cli/server.ts`: the dev server that maps a project into the page. `cli/init.ts`: `reel init`. `tsconfig.project.json` and `project.d.ts`: what a project's `tsconfig.json` extends.
 - `tools/`: `narration.ts` (scratch track), `align.ts` + `whisper_words.py` (time a recording), `analyze.py` (time a song), `mix.ts` (music and cue sounds under a render, configured by the project's `mix.json`), `make_fonts.py` (static font instances from the variable sources in `public/fonts/src/`).
 - `examples/`: projects. Each has `reel.config.ts` and `scenes/`; a narrated one also `narration.txt`, `mix.json`, `audio/` and `data/` (written by the tools). Renders go to its `out/` (ignored by git).
 - `docs/ENGINE.md`: the scene author's guide: the Scene API, rules for determinism and sampling, the toolbox, 4K.
@@ -67,12 +67,12 @@ alias reel="bun $PWD/cli/reel.ts"
 reel init ~/videos/first                       # a new project, ready to render
 cd examples/demo                               # or pass --project <folder> to any command
 
-reel dev                                       # preview at http://localhost:5173 (space plays, [ ] jump clips)
+reel dev                                       # preview at the URL it prints (space plays, [ ] jump clips)
 reel info                                      # format, duration, clips
-reel still --t 2.5,6                           # PNGs in out/stills
+reel still --t 2.5,6                           # out/stills/hello_2.500s.png …, never overwritten
 reel video --samples auto --shutter 0.2 --out out/raw.mp4
 reel events                                    # data/cues.json for the mix
 reel mix out/raw.mp4 out/final.mp4
 ```
 
-`--only a,b` loads only those clips, `--theme film` tries another built-in theme, `--scale 2` renders 4K, `--from/--to` render part of the video, `--json` prints one JSON object. Unknown flags are errors, and a command exits 1 if any scene threw. `reel --help` lists every command and flag; `bun run typecheck` checks the engine, the CLI and the examples.
+`--only a,b` loads only those clips, `--theme film` tries another built-in theme, `--scale 2` renders 4K, `--from/--to` render part of the video, `--max-size 800` writes smaller images to look at, `--json` prints one JSON object. Unknown flags are errors, and a command exits 1 if any scene threw. `reel --help` lists every command and flag; `bun run typecheck` checks the engine, the CLI and the examples.

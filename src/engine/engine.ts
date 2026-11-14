@@ -110,7 +110,18 @@ export class Engine {
   private accum: FSPass;
   private lastT = -1;
   lastPost: PostParams = { ...DEFAULT_POST };
-  errors: string[] = [];
+  /**
+   * Errors that hold for as long as the page does: a scene whose module or init() failed, a shader that did not
+   * compile (three.js compiles a program once). `renderErrors`: render() throws, once per clip until
+   * clearRenderErrors() (a warm renderer clears them per request, so each request reports its own).
+   */
+  loadErrors: string[] = [];
+  renderErrors: string[] = [];
+  get errors() { return [...this.loadErrors, ...this.renderErrors]; }
+  clearRenderErrors() {
+    this.renderErrors = [];
+    for (const rec of this.loaded.values()) rec.renderError = undefined;
+  }
 
   timeline: TimelineEntry[] = [];
   /** The clip whose scene is being initialised or drawn (names errors that surface inside three.js). */
@@ -135,7 +146,7 @@ export class Engine {
       };
       const log = [gl.getProgramInfoLog(program)?.trim(), quote(vs, gl.getShaderInfoLog(vs)), quote(fs, gl.getShaderInfoLog(fs))].filter(Boolean).join('\n');
       const msg = `${this.drawing ? `[${this.drawing}] ` : ''}shader failed to compile: ${log}`;
-      if (!this.errors.includes(msg)) { this.errors.push(msg); console.error(msg); }
+      if (!this.loadErrors.includes(msg)) { this.loadErrors.push(msg); console.error(msg); }
     };
     this.blit = new FSPass(`uniform sampler2D src; void main(){ fragColor = texture(src, vUv); }`, { src: { value: null } });
     this.xfade = new FSPass(`uniform sampler2D a; uniform sampler2D b; uniform float k;
@@ -364,7 +375,7 @@ export class Engine {
       for (const m of s.tileMasked) this.maskedRTs.set(m.rt, { margin: m.margin, moving: m.moving });
     } catch (err) {
       rec.error = String((err as Error)?.stack ?? err);
-      this.errors.push(`[${e.id}] ${rec.error}`);
+      this.loadErrors.push(`[${e.id}] ${rec.error}`);
       console.error(`scene ${e.id} failed`, err);
     }
   }
@@ -640,7 +651,7 @@ export class Engine {
         ov = s.render(this.frameFor(e, t, sceneSeeked ? 0 : dt, sceneSeeked && !s.stateful, false, idx > 0 ? under : null, tin, tout), rt);
       } catch (err) {
         const msg = `[${e.id}] render at ${t.toFixed(3)} s: ${String((err as Error)?.stack ?? err)}`;
-        if (!rec.renderError) { rec.renderError = msg; this.errors.push(msg); console.error(msg); }
+        if (!rec.renderError) { rec.renderError = msg; this.renderErrors.push(msg); console.error(msg); }
         clearRT(r, rt, [0.25, 0.0, 0.0]);
       }
       this.drawing = '';
