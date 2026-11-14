@@ -17,7 +17,8 @@ Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit,
     follower: rms, low (<200 Hz), mid (200 Hz-2 kHz), high (>2 kHz) of the mix; drums (percussive part),
     other (harmonic part), bass (harmonic <200 Hz) and vocal (harmonic 300 Hz-3.4 kHz) from a
     harmonic/percussive split. The last three are proxies, not separated stems;
-  * kick / snare / hat onsets from the percussive part (low, mid and high bands), strengths 0..1; raise a
+  * kick / snare / hat onsets from the percussive part (low, mid and high bands), and vocal onsets from the
+    harmonic 300 Hz-3.4 kHz band (a proxy like the vocal envelope), strengths 0..1; raise a
     band's --onset-delta (peak-picking threshold) if it fires on other instruments, lower it if it misses;
   * sections: from --sections (a JSON list of {"name", "bar"} or {"name", "start"} in seconds, in order),
     else kept from the existing data/audio.json with --keep-sections (a narrated video with a music bed),
@@ -31,6 +32,7 @@ sections stay as they were and --offset places the song's start on the video's t
 import argparse
 import json
 import math
+import re
 import shutil
 import sys
 from pathlib import Path
@@ -112,7 +114,7 @@ def beat_grid(y, duration, free):
     return 60.0 / period, [float(b) for b in grid]
 
 
-def refine_phase(beats, kick, free):
+def refine_phase(beats, kick, free, duration):
     """Move a fitted grid onto the strong kicks: the median offset of kicks within 60 ms of a beat."""
     if free or not kick:
         return beats
@@ -124,7 +126,7 @@ def refine_phase(beats, kick, free):
         return beats
     shift = float(np.median(d))
     period = b[1] - b[0]
-    return [float(x) for x in np.arange((b[0] + shift) % period, b[-1] + period / 2 + shift, period)]
+    return [float(x) for x in np.arange((b[0] + shift) % period, duration, period)]
 
 
 def at_beats(onsets_, beats, tol=0.05):
@@ -182,6 +184,8 @@ def main():
     ap.add_argument("--free-tempo", action="store_true", help="keep the tracked beats instead of fitting one tempo")
     ap.add_argument("--onset-delta", default="0.5,0.4,0.25", help="kick,snare,hat peak-picking thresholds")
     a = ap.parse_args()
+    if a.offset and not a.keep_sections:
+        sys.exit("analyze: --offset places a music bed on a narrated video's timeline; it needs --keep-sections")
 
     song = Path(a.song).resolve()
     out = ROOT / "data/audio.json"
@@ -206,13 +210,24 @@ def main():
     kick = onsets(band(perc, None, 150), delta=dk, min_gap=0.10)
     snare = onsets(band(perc, 150, 2500), delta=ds, min_gap=0.10)
     hat = onsets(band(perc, 6000, None), delta=dh, min_gap=0.05)
-    beats = refine_phase(beats, kick, a.free_tempo)
+    vocal = onsets(band(harm, 300, 3400), delta=0.3, min_gap=0.12)
+    beats = refine_phase(beats, kick, a.free_tempo, duration)
     p = downbeat_phase(y, harm, beats, kick, snare)
     downbeats = beats[p::4]
 
     if a.sections:
-        spec = json.loads(Path(a.sections).read_text())
-        starts = [{"name": s["name"], "start": s["start"] if "start" in s else downbeats[min(int(s["bar"]), len(downbeats) - 1)]} for s in spec]
+        starts = []
+        for s in json.loads(Path(a.sections).read_text()):
+            if "start" in s:
+                t = float(s["start"])
+            else:
+                bar = int(s["bar"])
+                if not 0 <= bar < len(downbeats):
+                    sys.exit(f"analyze: section '{s['name']}' is at bar {bar}; the song has bars 0-{len(downbeats) - 1}")
+                t = downbeats[bar]
+            if not 0 <= t < duration or (starts and t <= starts[-1]["start"]):
+                sys.exit(f"analyze: section '{s['name']}' starts at {t:.3f} s: sections must start inside the song ({duration:.3f} s) and in order")
+            starts.append({"name": s["name"], "start": t})
     elif prev:
         starts = None
     else:
@@ -241,21 +256,22 @@ def main():
             "bass": envelope(band(harm, None, 200), n),
             "vocal": envelope(band(harm, 300, 3400), n),
         },
-        "onsets": {"kick": kick, "snare": snare, "hat": hat},
+        "onsets": {"kick": kick, "snare": snare, "hat": hat, "vocal": vocal},
         "notes": f"tools/analyze.py on {song.name}" + (f", placed at {off} s" if off else ""),
     }
     if prev:
         if "track" in prev:
             doc["track"] = prev["track"]
     else:
-        dest = ROOT / "audio" / song.name
+        # (a plain file name: the preview fetches it by URL, where '#', '?' and '%' would break it)
+        dest = ROOT / "audio" / re.sub(r"[^A-Za-z0-9._-]+", "-", song.name)
         if dest.resolve() != song:
             dest.parent.mkdir(exist_ok=True)
             shutil.copyfile(song, dest)
-        doc["track"] = f"audio/{song.name}"
+        doc["track"] = f"audio/{dest.name}"
     out.write_text(json.dumps(doc, separators=(",", ":")))
     print(f"{out.relative_to(ROOT)}: {bpm:.2f} BPM, {len(beats)} beats, {len(downbeats)} bars, "
-          f"{len(kick)} kick / {len(snare)} snare / {len(hat)} hat onsets, sections: {', '.join(s['name'] for s in sections)}")
+          f"{len(kick)} kick / {len(snare)} snare / {len(hat)} hat / {len(vocal)} vocal onsets, sections: {', '.join(s['name'] for s in sections)}")
 
 
 if __name__ == "__main__":

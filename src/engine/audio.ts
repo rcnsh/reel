@@ -148,9 +148,12 @@ export class AudioData {
     return this.timeOfBeat(Math.round(this.beatAt(t)));
   }
 
-  /** The last beat at or before t (`tol` s of slack, for a word sung a hair before its beat): a cut that never lands after t. */
+  /**
+   * The last beat at or before t (`tol` s of slack, for a word sung a hair before its beat): a cut that never
+   * lands after t. Before the first beat, the grid's extrapolation, but never before 0.
+   */
   beatBefore(t: number, tol = 0.02): number {
-    return this.timeOfBeat(Math.floor(this.beatAt(t + tol)));
+    return Math.max(0, this.timeOfBeat(Math.floor(this.beatAt(t + tol))));
   }
 
   /** Nearest downbeat to t (t itself when there are none). */
