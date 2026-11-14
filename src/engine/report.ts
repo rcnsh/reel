@@ -28,11 +28,15 @@ export interface DrawnBox {
   exempt?: CheckRule[] | true;
 }
 
-/** A box as the check gets it: the clip that reported it, its colour resolved to #rrggbb. */
-export interface ReportedBox extends DrawnBox { clip: string; index: number }
+/**
+ * A box as the check gets it: the clip that reported it and the clip's track, its colour resolved to #rrggbb, its
+ * alpha including the clip's share of a transition and its track's opacity.
+ */
+export interface ReportedBox extends DrawnBox { clip: string; track?: number; index: number }
 
 let sink: ReportedBox[] | null = null;
 let clip = '';
+let track = 0;
 let paused = false;
 
 /** Whether this frame's boxes are being collected (to skip work that only feeds report()). */
@@ -41,7 +45,7 @@ export const reporting = () => sink !== null && !paused;
 /** Report a rectangle the scene drew this frame. */
 export function report(b: DrawnBox) {
   if (!sink || paused) return;
-  sink.push({ ...b, color: b.color === undefined ? undefined : cssHex(b.color) ?? b.color, clip, index: sink.filter((x) => x.clip === clip).length });
+  sink.push({ ...b, color: b.color === undefined ? undefined : cssHex(b.color) ?? b.color, clip, track, index: sink.filter((x) => x.clip === clip).length });
 }
 
 /**
@@ -84,7 +88,11 @@ const cssHex = (s: string) => parseCss(s)?.[0];
 /** The engine's side: collect the boxes of the next draws, naming the clip that draws. */
 export const boxes = {
   begin() { sink = []; paused = false; },
-  clip(id: string) { clip = id; },
+  clip(id: string, onTrack = 0) { clip = id; track = onTrack; },
+  /** Scale the alpha of what `id` reported by `k` (its weight in a crossfade, its track's opacity). */
+  fade(id: string, k: number) {
+    if (sink && k !== 1) for (const b of sink) if (b.clip === id) b.alpha = (b.alpha ?? 1) * k;
+  },
   /** Draws that are not the frame's own (a stateful scene fast-forwarding) report nothing. */
   pause(on: boolean) { paused = on; },
   end(): ReportedBox[] { const b = sink ?? []; sink = null; clip = ''; return b; },

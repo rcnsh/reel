@@ -240,6 +240,8 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
       const a = texts[i]!, b = texts[j]!;
       const w = Math.min(a.x + a.w, b.x + b.w) - Math.max(a.x, b.x), h = Math.min(a.y + a.h, b.y + b.h) - Math.max(a.y, b.y);
       if (w <= 1 || h <= 1 || w * h < 0.02 * Math.min(a.w * a.h, b.w * b.h)) continue;
+      // (two clips of one track share the screen only while one replaces the other in a transition)
+      if (a.clip !== b.clip && a.track !== undefined && a.track === b.track) continue;
       if (exempt('overlap', a.clip, a) || exempt('overlap', b.clip, b)) continue;
       const na = a.label ?? `text#${a.index}`, nb = b.label ?? `text#${b.index}`;
       add({

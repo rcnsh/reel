@@ -36,7 +36,7 @@ In practice a still frame stops at 12, ordinary camera motion at 36, whips and f
 
 ## Reporting and check
 
-`report.ts` holds a module-level sink. `Engine.render` with `collectBoxes` opens it around the composite (around the sub-frame nearest t when there are several; paused during a stateful scene's pre-roll) and names each box with the drawing clip; outside that, `report()` and `reportText()` return on their first line. `__reel.inspect(t)` renders with collection, reads the pixels back and measures them with the pure functions of `src/check.ts` (a brightness grid per frame, each text box's text and background luminance); the CLI turns the samples into findings with `findingsOf` from the same module.
+`report.ts` holds a module-level sink. `Engine.render` with `collectBoxes` opens it around the composite (around the sub-frame nearest t when there are several; paused during a stateful scene's pre-roll) and names each box with the drawing clip and its track, scaling its alpha by the clip's share of a crossfade and its track's opacity (so a clip fading out is not measured as if it were solid, and two clips of one track in a transition are not an overlap); outside that, `report()` and `reportText()` return on their first line. `__reel.inspect(t)` renders with collection, reads the pixels back and measures them with the pure functions of `src/check.ts` (a brightness grid per frame, each text box's text and background luminance); the CLI turns the samples into findings with `findingsOf` from the same module.
 
 ## Warm pages
 

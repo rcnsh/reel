@@ -620,6 +620,8 @@ export class Engine {
       const mode = top.blend ?? 'normal';
       let opacity = top.opacity ?? 1;
       if (before) opacity = (before.opacity ?? 1) + (opacity - (before.opacity ?? 1)) * Math.min(1, (t - top.start) / Math.max(1e-3, before.end - top.start));
+      // (what each clip reported shows at its share of the transition and the track's opacity)
+      clips.forEach((e, i) => boxes.fade(e.id, res.weights[i]! * opacity));
       // (the lowest track goes into the stack only when it is blended or something is drawn over it)
       if (ti === 0 && mode === 'normal' && opacity === 1) { outTex = res.outTex; return; }
       if (ti === 0) clearRT(r, this.stackRT, [0, 0, 0]);
@@ -632,9 +634,11 @@ export class Engine {
   }
 
   /** One track at t: its active clips in start order, the later ones transitioning in over the earlier. */
-  private compositeTrack(active: TimelineEntry[], t: number, dt: number, seeked: boolean, rt3: TrackRTs): { outTex: THREE.Texture; post: PostOverrides } {
+  private compositeTrack(active: TimelineEntry[], t: number, dt: number, seeked: boolean, rt3: TrackRTs): { outTex: THREE.Texture; post: PostOverrides; weights: number[] } {
     const r = this.renderer;
     let post: PostOverrides = {};
+    // each clip's share of the track's picture (1, unless crossfades mix it with the clips after it)
+    const weights = active.map(() => 1);
     let under: THREE.Texture | null = null;
     let outTex: THREE.Texture = rt3.rts[0]!.texture;
 
@@ -653,7 +657,7 @@ export class Engine {
       const s = rec.scene;
       // (sub-frames of one frame may step back within its shutter: not a seek)
       const sceneSeeked = seeked || rec.lastT < 0 || Math.abs(t - rec.lastT) > 0.25;
-      boxes.clip(e.id);
+      boxes.clip(e.id, e.track ?? 0);
       if (s.stateful && sceneSeeked) {
         boxes.pause(true);
         s.reset();
@@ -686,10 +690,12 @@ export class Engine {
         const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
         this.xfade.render(r, mix);
         outTex = mix.texture;
+        for (let j = 0; j < idx; j++) weights[j]! *= 1 - tin;
+        weights[idx] = tin;
       } else outTex = rt.texture;
       under = outTex;
     });
-    return { outTex, post };
+    return { outTex, post, weights };
   }
 
   /** RGBA8 pixels of the last rendered frame (bottom-up rows), PW x PH. */

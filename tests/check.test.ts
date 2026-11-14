@@ -92,6 +92,11 @@ describe('findingsOf', () => {
     expect(f.map((x) => x.kind).sort()).toEqual(['minSize', 'overlap', 'safeArea']);
     expect(f.every((x) => x.severity === 'warning')).toBe(true);
   });
+  test('two clips of one track crossfading do not overlap; clips on different tracks do', () => {
+    const one = box({ x: 400, text: 'one', clip: 'a', track: 0 });
+    expect(findingsOf([sample(1, [one, box({ x: 420, text: 'two', clip: 'b', track: 0 })])], opts)).toHaveLength(0);
+    expect(findingsOf([sample(1, [one, box({ x: 420, text: 'two', clip: 'b', track: 1 })])], opts).map((x) => x.kind)).toEqual(['overlap']);
+  });
   test('contrast from the measure, with a palette colour that reads', () => {
     const m = { fg: relLum(200, 200, 200), bg: relLum(220, 220, 220), ratio: 1.2, coverage: 0.3, bgHex: '#DCDCDC' };
     const f = findingsOf([sample(1, [box({ m })])], opts);
