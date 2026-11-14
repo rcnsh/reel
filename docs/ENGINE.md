@@ -81,7 +81,7 @@ A project picks its look with `theme` in `reel.config.ts`; `--theme <name>` swap
 
 Every palette has `bg`, `fg` and `accent`, and `accentHi`/`accentLo` (a lighter and a darker accent, derived from `accent` when a theme leaves them out); `print` and `film` add `ink`, `ink2`, `graphite`, `ash`, `bone`, `paper`, `rule`, `signal`, `ember`, `blood`. Write scenes against the semantic keys (`C_BG`, `rgba('fg')`, `LIN.accent`) and they follow any theme; a theme's own keys tie a scene to that theme. A key that is not in the palette throws in `rgba()` and `LIN`, and fails to compile in GLSL; either makes the command exit 1. `THEME` (`reel`) is the resolved theme: `THEME.name`, `THEME.palette` (hex per key); `TONE.light`/`TONE.dark` say which of `bg` and `fg` is the light one.
 
-A theme of your own is an object, or a built-in one changed with `extendTheme` (palette and post merged, overlay replaced), both from `reel/config`:
+A theme of your own is an object, or a built-in one changed with `extendTheme` (palette and post merged, overlay replaced; a new `accent` without its own `accentHi`/`accentLo` gets them derived from it), both from `reel/config`:
 
 ```ts
 import { defineVideo, extendTheme } from 'reel/config';

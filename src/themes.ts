@@ -74,11 +74,16 @@ export const themes: Record<ThemeName, Theme> = {
   },
 };
 
-/** A theme built on another: palette and post merged over the base's, overlay replaced when given. */
+/**
+ * A theme built on another: palette and post merged over the base's, overlay replaced when given. A new
+ * `accent` without its own `accentHi`/`accentLo` drops the base's, so they are derived from the new accent.
+ */
 export function extendTheme(base: ThemeName | Theme, over: Partial<Theme>): Theme {
   const b = typeof base === 'string' ? themeByName(base) : base;
+  const palette = { ...b.palette, ...over.palette };
+  if (over.palette && has(over.palette, 'accent')) for (const k of ['accentHi', 'accentLo']) if (!has(over.palette, k)) delete palette[k];
   return {
-    palette: { ...b.palette, ...over.palette },
+    palette,
     post: { ...b.post, ...over.post },
     overlay: over.overlay !== undefined ? over.overlay : b.overlay,
   };
