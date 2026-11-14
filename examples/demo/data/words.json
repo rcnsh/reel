@@ -5,42 +5,42 @@
    "plate": "hello",
    "text": "Every frame is a function of time.",
    "start": 0.6,
-   "end": 2.616,
+   "end": 2.405,
    "words": [
     {
      "w": "Every",
      "start": 0.6,
-     "end": 0.922
+     "end": 0.888
     },
     {
      "w": "frame",
-     "start": 0.949,
-     "end": 1.271
+     "start": 0.888,
+     "end": 1.275
     },
     {
      "w": "is",
-     "start": 1.299,
-     "end": 1.472
+     "start": 1.275,
+     "end": 1.388
     },
     {
      "w": "a",
-     "start": 1.487,
-     "end": 1.611
+     "start": 1.388,
+     "end": 1.475
     },
     {
      "w": "function",
-     "start": 1.622,
-     "end": 2.091
+     "start": 1.475,
+     "end": 1.838
     },
     {
      "w": "of",
-     "start": 2.132,
-     "end": 2.305
+     "start": 1.838,
+     "end": 1.925
     },
     {
      "w": "time.",
-     "start": 2.32,
-     "end": 2.593
+     "start": 1.925,
+     "end": 2.405
     }
    ]
   },
@@ -48,56 +48,56 @@
    "i": 1,
    "plate": "written",
    "text": "The pen writes each word while it is spoken.",
-   "start": 3.466,
-   "end": 5.76,
+   "start": 3.255,
+   "end": 5.345,
    "words": [
     {
      "w": "The",
-     "start": 3.466,
-     "end": 3.662
+     "start": 3.255,
+     "end": 3.33
     },
     {
      "w": "pen",
-     "start": 3.679,
-     "end": 3.875
+     "start": 3.33,
+     "end": 3.605
     },
     {
      "w": "writes",
-     "start": 3.892,
-     "end": 4.218
+     "start": 3.605,
+     "end": 3.905
     },
     {
      "w": "each",
-     "start": 4.246,
-     "end": 4.486
+     "start": 3.905,
+     "end": 4.13
     },
     {
      "w": "word",
-     "start": 4.507,
-     "end": 4.746
+     "start": 4.13,
+     "end": 4.43
     },
     {
      "w": "while",
-     "start": 4.767,
-     "end": 5.049
+     "start": 4.43,
+     "end": 4.593
     },
     {
      "w": "it",
-     "start": 5.074,
-     "end": 5.226
+     "start": 4.593,
+     "end": 4.668
     },
     {
      "w": "is",
-     "start": 5.24,
-     "end": 5.392
+     "start": 4.668,
+     "end": 4.755
     },
     {
      "w": "spoken.",
-     "start": 5.405,
-     "end": 5.731
+     "start": 4.755,
+     "end": 5.345
     }
    ]
   }
  ],
- "notes": "scratch track: say -v Daniel -r 172; proportional word timing"
+ "notes": "voice kokoro:af_heart, speed 1; word times from the voice's timestamps, snapped to pauses"
 }

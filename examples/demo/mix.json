@@ -1,4 +1,4 @@
 {
   "music": [],
-  "cues": { "tick": { "file": "tick.wav", "db": -6 } }
+  "cues": { "tick": { "file": "tick", "db": -6 } }
 }

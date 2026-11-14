@@ -1,55 +1,55 @@
 {
- "duration": 7.36,
+ "duration": 6.945,
  "timeline": [
   {
    "id": "hello",
    "start": 0,
-   "end": 3.466,
+   "end": 3.005,
    "track": 0
   },
   {
    "id": "written",
-   "start": 3.466,
-   "end": 7.36,
+   "start": 3.005,
+   "end": 6.945,
    "track": 0
   }
  ],
  "cues": [
   {
    "kind": "tick",
-   "t": 3.466
+   "t": 3.255
   },
   {
    "kind": "tick",
-   "t": 3.679
+   "t": 3.33
   },
   {
    "kind": "tick",
-   "t": 3.892
+   "t": 3.605
   },
   {
    "kind": "tick",
-   "t": 4.246
+   "t": 3.905
   },
   {
    "kind": "tick",
-   "t": 4.507
+   "t": 4.13
   },
   {
    "kind": "tick",
-   "t": 4.767
+   "t": 4.43
   },
   {
    "kind": "tick",
-   "t": 5.074
+   "t": 4.593
   },
   {
    "kind": "tick",
-   "t": 5.24
+   "t": 4.668
   },
   {
    "kind": "tick",
-   "t": 5.405
+   "t": 4.755
   }
  ]
 }

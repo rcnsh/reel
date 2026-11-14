@@ -7,8 +7,7 @@ dist/
 
 # working files the narration tools write in a project
 **/audio/.align/
-**/audio/.work/
-**/audio/narration.scratch.mp3
+**/audio/.narration/
 .reel.config.*.mjs
 
 # local working notes
