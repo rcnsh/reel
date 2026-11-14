@@ -46,20 +46,17 @@ test.skipIf(!hasChrome)('diff: identical renders exit 0, a different frame exits
   expect(existsSync(other.json().file)).toBe(true);
 }, 120_000);
 
-test.skipIf(!hasChrome)('check passes the demo at 16:9 and fails it vertical, naming the text that runs off', async () => {
-  const wide = await reel(['check', '--json', '--project', demo.dir]);
-  expect(wide.code).toBe(0);
-  expect(wide.json().findings.filter((f: { severity: string }) => f.severity === 'error')).toEqual([]);
-  const tall = await reel(['check', '--size', '1080x1920', '--json', '--project', demo.dir]);
-  expect(tall.code).toBe(1);
-  const errors = tall.json().findings.filter((f: { severity: string }) => f.severity === 'error');
-  expect(errors.map((f: { kind: string; clip: string }) => `${f.kind} ${f.clip}`).sort()).toEqual(['offFrame hello', 'offFrame written']);
-  for (const f of errors) expect(existsSync(f.image)).toBe(true);
+test.skipIf(!hasChrome)('check passes the demo at 16:9 and vertical (its text wraps to the frame)', async () => {
+  for (const size of ['1920x1080', '1080x1920']) {
+    const r = await reel(['check', '--size', size, '--json', '--project', demo.dir]);
+    expect(r.code).toBe(0);
+    expect(r.json().findings.filter((f: { severity: string }) => f.severity !== 'info')).toEqual([]);
+  }
 }, 180_000);
 
 test.skipIf(!hasChrome)('a syntax error in a scene is reported with its line through the warm renderer, and its fix is picked up', async () => {
   const file = path.join(layers.dir, 'scenes/title.ts'), good = readFileSync(file, 'utf8');
-  writeFileSync(file, good.replace('clearRT(renderer, out, [0, 0, 0], 0);', 'clearRT(renderer, out, [0, 0, 0], 0'));
+  writeFileSync(file, good.replace('clearRT(this.ctx.renderer, out, [0, 0, 0], 0);', 'clearRT(this.ctx.renderer, out, [0, 0, 0], 0'));
   try {
     const bad = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
     expect(bad.code).toBe(1);

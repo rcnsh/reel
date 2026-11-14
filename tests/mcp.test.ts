@@ -4,9 +4,9 @@ import { existsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PNG } from 'pngjs';
-import { hasChrome, reel, REEL, scratchCopy } from './helpers';
+import { fixture, hasChrome, OFF_FRAME, reel, REEL, scratchCopy } from './helpers';
 
-const demo = scratchCopy('demo'), layers = scratchCopy('layers');
+const demo = scratchCopy('demo'), layers = scratchCopy('layers'), wide = fixture('offframe', OFF_FRAME);
 let client: Client;
 
 beforeAll(async () => {
@@ -15,7 +15,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await client?.close();
-  for (const p of [demo, layers]) { await reel(['daemon', 'stop', '--project', p.dir]); p.cleanup(); }
+  for (const p of [demo, layers, wide]) { await reel(['daemon', 'stop', '--project', p.dir]); p.cleanup(); }
 });
 
 type Block = { type: string; text?: string; data?: string; mimeType?: string };
@@ -53,13 +53,13 @@ test.skipIf(!hasChrome)('render_still returns downscaled images and the files on
   for (const f of r.json.files) expect(existsSync(f)).toBe(true);
 }, 120_000);
 
-test.skipIf(!hasChrome)('check_video finds the demo running off a vertical frame', async () => {
-  const r = await call('check_video', { project: demo.dir, size: '1080x1920' });
+test.skipIf(!hasChrome)('check_video finds a line running off the frame, and passes the demo', async () => {
+  const r = await call('check_video', { project: wide.dir });
   expect(r.isError).toBe(true);
   const off = r.json.findings.filter((f: { kind: string; severity: string }) => f.kind === 'offFrame' && f.severity === 'error');
-  expect(off.map((f: { clip: string }) => f.clip).sort()).toEqual(['hello', 'written']);
-  expect(r.images.length).toBeGreaterThanOrEqual(2);
-  const ok = await call('check_video', { project: demo.dir });
+  expect(off.map((f: { clip: string }) => f.clip)).toEqual(['wide']);
+  expect(r.images.length).toBeGreaterThanOrEqual(1);
+  const ok = await call('check_video', { project: demo.dir, size: '1080x1920' });
   expect(ok.isError).toBe(false);
   expect(ok.json.summary.error).toBe(0);
 }, 120_000);
