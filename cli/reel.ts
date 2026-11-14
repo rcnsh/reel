@@ -81,7 +81,9 @@ if (mode === 'init') {
 }
 
 let PROJECT = '';
-try { PROJECT = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail((e as Error).message); }
+// (diff of two files needs no project)
+const needsProject = !(mode === 'diff' && A.t === undefined);
+try { PROJECT = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { if (needsProject) fail((e as Error).message); }
 
 if (mode === 'dev') {
   const { startServer } = await import('./server');
@@ -151,13 +153,54 @@ function argsOf(v: Values): Record<string, unknown> {
   }
 }
 
-const { Renderer } = await import('./renderer');
-const { run } = await import('./ops');
-const r = new Renderer(PROJECT, { headed: !!A.headed });
-let res: Result;
-try { res = await run(r, req); } finally { await r.close(); }
+/** Run a request on a renderer of this command's own. */
+async function render(q: Req): Promise<Result> {
+  const { Renderer } = await import('./renderer');
+  const { run } = await import('./ops');
+  const r = new Renderer(PROJECT, { headed: !!A.headed });
+  try { return await run(r, q); } finally { await r.close(); }
+}
 
-finish(res!, (x) => {
+if (mode === 'diff') {
+  const { readPng, writePng, diffImages, describeDiff } = await import('./png');
+  const { freeName } = await import('./ops');
+  const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
+  try {
+    const tol = int(A, 'tol', 0, 0), threshold = num(A, 'threshold', 0);
+    let a: string, b: string;
+    if (A.t !== undefined) {
+      if (P.positionals.length !== 1) throw new UsageError('diff --t <seconds> compares a render with one image: reel diff --t 2.5 <b.png>');
+      const ts = list(A, 't');
+      if (ts.length !== 1) throw new UsageError(`--t ${A.t}: diff renders one time`);
+      b = path.resolve(P.positionals[0]!);
+      const ref = readPng(b);
+      // (rendered at the reference's size when that is smaller than the frame: goldens are downscaled)
+      const still = await render({ ...req, op: 'still', args: { times: ts, maxSize: Math.max(ref.width, ref.height) } });
+      res.errors.push(...still.errors); res.logs.push(...still.logs); res.warnings.push(...still.warnings);
+      if (!still.ok) throw new Error('the render failed');
+      a = (still.files as string[])[0]!;
+    } else {
+      if (P.positionals.length !== 2) throw new UsageError('diff compares two images: reel diff <a.png> <b.png> (or --t <seconds> <b.png>)');
+      [a, b] = P.positionals.map((p) => path.resolve(p)) as [string, string];
+    }
+    const { stats, image } = diffImages(readPng(a), readPng(b), tol);
+    const name = `${path.basename(a, '.png')}-vs-${path.basename(b, '.png')}`;
+    const out = abs(A.out) ?? (PROJECT ? freeName(path.join(PROJECT, 'out/diffs'), name) : freeName(path.dirname(a), `${name}.diff`));
+    writePng(out, image);
+    Object.assign(res, { a, b, file: out, ...stats });
+    if (stats.fraction > threshold) res.errors.push(`${describeDiff(stats)}: over --threshold ${threshold}`);
+    else say(describeDiff(stats));
+  } catch (e) {
+    if (e instanceof UsageError) fail(e.message);
+    if (!res.errors.length || String((e as Error).message) !== 'the render failed') res.errors.push(String((e as Error)?.message ?? e));
+  }
+  res.ok = !res.errors.length;
+  finish(res, (x) => say(String(x.file)));
+}
+
+const res: Result = await render(req);
+
+finish(res, (x) => {
   if (mode === 'info') {
     const tl = x.timeline as { id: string; start: number; end: number; track: number }[], [w, h] = x.size as number[];
     say(`${PROJECT}\n${w}x${h} at ${x.fps} fps, ${(x.duration as number).toFixed(3)} s, ${x.track ?? 'no audio track'}, theme ${x.theme}`);

@@ -12,6 +12,7 @@ The video is a web app (TypeScript + three.js, run with bun + Vite) that renders
 - Stills (the main way to check your work — then LOOK at the PNGs with the Read tool): `reel still --t 12.5,13.0,14.2 --only hello --out out/wip/hello`. They are the pixels the video export produces.
 - Contact sheet of a time range, each frame labelled with its time and clips: `reel sheet --from 1.5 --to 9 --n 16 --cols 4 --only hello --out out/wip/hello/sheet.png`; `reel sheet --cuts` shows the frames around every cut.
 - Motion in one image: `reel strip --from 3.4 --to 4.2 --n 8 --only hello` (evenly spaced, both ends included) or `--frames 6` (consecutive frames from `--from`), side by side and labelled.
+- Before and after a change: `reel diff <a.png> <b.png>`, or `reel diff --t 2.5 <before.png>` to render now and compare; it prints the changed pixels and the box around them and writes a diff image. Grain differs from frame to frame, so compare the same time, and `--tol 8` ignores it.
 - Short video clip (to judge motion): `reel video --from 20 --to 25 --only hello --out out/wip/hello.mp4 --preset veryfast`
 - `--only a,b` loads only those clips (fast, and isolates you from other broken scenes). Clips that are not loaded draw nothing.
 - A scene that throws makes the command exit 1 and lists the error (`--json`: in `errors`); in a render it shows as a dark red frame.

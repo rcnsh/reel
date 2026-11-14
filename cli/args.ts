@@ -16,6 +16,10 @@ Looking at a project (headless Chrome; each exits 1 on a scene error)
   strip                      frames side by side in one row, to judge motion and easing: --n evenly
                              spaced from --from to --to (both included), or --frames N consecutive
                              frames from --from     [--cell 360] [--out <file.png>] [--max-size <px>]
+  diff    <a.png> <b.png>    compare two images: changed pixels, max and mean difference, the box
+          --t <s> <b.png>    around the change and a diff image; --t renders that time (at <b.png>'s
+                             size) and compares it; exits 1 when more than --threshold of the pixels
+                             changed                    [--tol 0] [--threshold 0] [--out <diff.png>]
   events                     write the sound-mix cues (the timeline and every cue() of the scenes)
                              [--out data/cues.json]
   perf    --from 0 --to 5    milliseconds per frame, including the export's pixel readback
@@ -50,7 +54,7 @@ Flags for every command that renders
   --json               machine-readable output: one JSON object { ok, errors, logs, ... }
 
 Chrome: $CHROME_PATH, else the installed Google Chrome. Exit codes: 0 done, 1 failed (a scene
-error), 2 bad command line or no project.`;
+error, a diff over its threshold), 2 bad command line or no project.`;
 
 const str = { type: 'string' } as const, bool = { type: 'boolean' } as const;
 type Opt = typeof str | typeof bool;
@@ -67,6 +71,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   info: { render: true, opts: {} },
   still: { render: true, opts: { t: str, ...IMAGE } },
   sheet: { render: true, opts: { from: str, to: str, n: str, times: str, cuts: bool, cols: str, cell: str, ...IMAGE } },
+  diff: { render: true, opts: { t: str, tol: str, threshold: str, out: str }, positionals: [1, 2] },
   strip: { render: true, opts: { from: str, to: str, n: str, frames: str, cell: str, ...IMAGE } },
   events: { render: true, opts: { out: str } },
   perf: { render: true, opts: { from: str, to: str } },
