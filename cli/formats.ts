@@ -135,12 +135,18 @@ export function defaultOut(project: string, f: FormatSpec, draft = false) {
 const TAGS709 = ['-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709'];
 const SRGB = 'setparams=color_trc=iec61966-2-1:color_primaries=bt709';
 const TAG709 = 'setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709';
-/** Full-range RGB to limited-range BT.709 YUV: chroma averaged over its block, accurate rounding, tagged. */
-export const toYuv709 = (pixFmt: string) => `scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=${pixFmt},setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709`;
+/**
+ * Full-range RGB to limited-range BT.709 YUV: chroma averaged over its block, accurate rounding, tagged. `gain` is
+ * what this ffmpeg's swscale multiplies 16-bit RGB by on the way to YUV (ffmpegDeepGain): divided out first, so the
+ * deep formats come out at the levels the page rendered.
+ */
+export const toYuv709 = (pixFmt: string, gain = 1) => `${Math.abs(gain - 1) > 1e-5 ? `lutrgb=${['r', 'g', 'b'].map((c) => `${c}=val*${(1 / gain).toFixed(7)}`).join(':')},` : ''}scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=${pixFmt},setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709`;
 
 export interface FfmpegInput { width: number; height: number; fps: number; out: string; audio?: { file: string; from: number; duration: number } | null; startNumber?: number; webpFrames?: string;
   /** Whether this ffmpeg tracks alpha modes (8 and later), which EXR's premultiplied alpha must name; default true. */
-  alphaModes?: boolean }
+  alphaModes?: boolean;
+  /** What swscale multiplies 16-bit RGB by on its way to YUV (ffmpegDeepGain); default 1. */
+  deepGain?: number }
 
 /**
  * The ffmpeg command that reads raw frames (bottom-up, `plan.rawFormat`) on stdin and writes the format, with the
@@ -153,7 +159,8 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
   if (sound) a.push('-ss', String(i.audio!.from), '-t', String(i.audio!.duration), '-i', i.audio!.file);
   const v: string[] = [];
   // (frames already converted to yuv420p on the GPU are only tagged, and repacked for an encoder that wants nv12)
-  const yuv = (pix: string) => (plan.pixels === 'yuv420' ? `${pix === 'yuv420p' ? '' : `format=${pix},`}${TAG709}` : toYuv709(pix));
+  const deep = plan.pixels === 'rgb16' || plan.pixels === 'rgba16' ? i.deepGain ?? 1 : 1;
+  const yuv = (pix: string) => (plan.pixels === 'yuv420' ? `${pix === 'yuv420p' ? '' : `format=${pix},`}${TAG709}` : toYuv709(pix, deep));
   switch (f.id) {
     case 'h264': {
       if (o.draft === 'videotoolbox') {
@@ -169,16 +176,16 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
       break;
     }
     case 'hevc':
-      v.push('-vf', `vflip,${toYuv709('yuv420p10le')}`, '-c:v', 'libx265', '-preset', o.preset ?? 'medium', '-crf', String(o.crf ?? 18), '-pix_fmt', 'yuv420p10le', '-profile:v', 'main10', '-tag:v', 'hvc1',
+      v.push('-vf', `vflip,${toYuv709('yuv420p10le', deep)}`, '-c:v', 'libx265', '-preset', o.preset ?? 'medium', '-crf', String(o.crf ?? 18), '-pix_fmt', 'yuv420p10le', '-profile:v', 'main10', '-tag:v', 'hvc1',
         '-x265-params', ['log-level=error', 'colorprim=bt709', 'transfer=bt709', 'colormatrix=bt709', 'range=limited', o.params].filter(Boolean).join(':'), ...TAGS709);
       break;
     case 'prores':
-      v.push('-vf', `vflip,${toYuv709('yuv422p10le')}`, '-c:v', 'prores_ks', '-profile:v', '3', '-vendor', 'apl0', '-pix_fmt', 'yuv422p10le', ...TAGS709);
+      v.push('-vf', `vflip,${toYuv709('yuv422p10le', deep)}`, '-c:v', 'prores_ks', '-profile:v', '3', '-vendor', 'apl0', '-pix_fmt', 'yuv422p10le', ...TAGS709);
       break;
     case 'prores4444': {
       // (straight alpha in the alpha plane; ProRes 4444 is read as straight by editors and ffmpeg)
       const pix = plan.alpha ? 'yuva444p10le' : 'yuv444p10le';
-      v.push('-vf', `vflip,${toYuv709(pix)}`, '-c:v', 'prores_ks', '-profile:v', '4', '-vendor', 'apl0', '-pix_fmt', pix, ...(plan.alpha ? ['-alpha_bits', '16'] : []), ...TAGS709);
+      v.push('-vf', `vflip,${toYuv709(pix, deep)}`, '-c:v', 'prores_ks', '-profile:v', '4', '-vendor', 'apl0', '-pix_fmt', pix, ...(plan.alpha ? ['-alpha_bits', '16'] : []), ...TAGS709);
       break;
     }
     case 'webm': {
@@ -307,7 +314,6 @@ export function draftName(out: string, draft: boolean) {
 }
 
 const encoders = new Set<string>();
-/** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
 let alphaModes: boolean | undefined;
 /** Whether the ffmpeg on PATH tracks alpha modes (its setparams filter has alpha_mode: ffmpeg 8 and later). */
 export function ffmpegHasAlphaModes() {
@@ -315,6 +321,24 @@ export function ffmpegHasAlphaModes() {
   return alphaModes;
 }
 
+let deepGain: number | undefined;
+/**
+ * What the ffmpeg on PATH multiplies 16-bit RGB by when swscale converts it to YUV: measured once per process on a
+ * grey of 60000. swscale scales 16-bit input as if its full scale were 255 x 256 rather than 65535 (ffmpeg 7 to 9
+ * give 1.0039, which brightens a 10-bit export by up to 3.4 codes), so the deep formats divide it out first.
+ */
+export function ffmpegDeepGain() {
+  if (deepGain === undefined) {
+    const grey = new Uint8Array(16 * 16 * 6);
+    for (let k = 0; k < grey.length; k += 2) { grey[k] = 60000 & 255; grey[k + 1] = 60000 >> 8; }
+    const r = Bun.spawnSync(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', '16x16', '-i', 'pipe:0', '-vf', 'scale=in_range=pc:out_range=pc:out_color_matrix=bt709:flags=accurate_rnd,format=yuv444p16le', '-f', 'rawvideo', 'pipe:1'], { stdin: grey, stdout: 'pipe', stderr: 'ignore' });
+    const y = r.stdout.length >= 2 ? r.stdout[0]! | (r.stdout[1]! << 8) : 0;
+    deepGain = y > 0 ? y / 60000 : 1;
+  }
+  return deepGain;
+}
+
+/** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
 export function hasFfmpegEncoder(name: string) {
   if (!encoders.size) {
     const out = Bun.spawnSync(['ffmpeg', '-hide_banner', '-encoders'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString();

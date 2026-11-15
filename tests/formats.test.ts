@@ -1,7 +1,7 @@
 // The output formats: which one a command line means, what each asks of the page, and the ffmpeg command for each.
 import { expect, test } from 'bun:test';
 import { UsageError } from '../cli/args';
-import { defaultOut, draftEncoder, draftName, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type FormatId } from '../cli/formats';
+import { defaultOut, draftEncoder, draftName, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
 import { containerOf } from '../tools/mix';
 
 test('the format comes from --format, else the --out extension, else H.264', () => {
@@ -78,6 +78,22 @@ test('YUV formats convert full-range RGB to limited-range BT.709 explicitly and 
     expect(a).toContain('-color_range tv -colorspace bt709 -color_primaries bt709 -color_trc bt709');
     expect(a).toStartWith('ffmpeg -y -loglevel error -f rawvideo -pix_fmt');
   }
+});
+
+test("16-bit frames have swscale's gain divided out before the YUV conversion; 8-bit and image formats do not", () => {
+  const deep = (id: FormatId, o: EncodeOpts = {}) => {
+    const plan = planOf(FORMATS[id], o, 30);
+    return { plan, a: ffmpegArgs(plan, o, { width: 1280, height: 720, fps: 30, out: `/o/x${FORMATS[id].ext}`, deepGain: 1.0039166 }).join(' ') };
+  };
+  for (const [id, o] of [['hevc', {}], ['prores', {}], ['prores4444', {}], ['h264', { depth: 10 }], ['h264', { chroma: '444', depth: 10 }]] as [FormatId, EncodeOpts][]) {
+    const { plan, a } = deep(id, o);
+    expect(plan.pixels).toMatch(/^rgba?16$/);
+    expect(a).toContain('vflip,lutrgb=r=val*0.9960987:g=val*0.9960987:b=val*0.9960987,scale=in_range=pc');
+  }
+  for (const [id, o] of [['h264', {}], ['h264', { chroma: '444' }], ['png16', {}], ['exr', {}], ['webm', {}]] as [FormatId, EncodeOpts][]) expect(deep(id, o).a).not.toContain('lutrgb');
+  // (an ffmpeg without the gain gets nothing added)
+  const plan = planOf(FORMATS.hevc, {}, 30);
+  expect(ffmpegArgs(plan, {}, { width: 64, height: 64, fps: 30, out: '/o/x.mp4', deepGain: 1 }).join(' ')).not.toContain('lutrgb');
 });
 
 test('each format has its codec, pixel format and sound', () => {

@@ -3,6 +3,7 @@
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
+import { readPng } from '../cli/png';
 import { fixture, hasChrome, reel } from './helpers';
 
 const proj = fixture('formats', {
@@ -62,11 +63,17 @@ test.skipIf(!hasChrome)('H.264: 8-bit 4:2:0 with AAC, and 10-bit 4:4:4, tagged B
   expect([s[0]!.pix_fmt, s[0]!.profile]).toEqual(['yuv444p10le', 'High 4:4:4 Predictive']);
 }, 60_000);
 
-test.skipIf(!hasChrome)('HEVC Main10 and ProRes 422 HQ: 10-bit from the deep readback', async () => {
+test.skipIf(!hasChrome)('HEVC Main10 and ProRes 422 HQ: 10-bit from the deep readback, at the levels of the still', async () => {
   await render('h.mp4', '--format', 'hevc');
   const [v] = probe(out('h.mp4'));
   expect([v!.codec_name, v!.pix_fmt, v!.profile]).toEqual(['hevc', 'yuv420p10le', 'Main 10']);
   expect(bt709(v!)).toEqual(['tv', 'bt709', 'bt709', 'bt709']);
+  // the background's luma is the still's grey in limited range (swscale's gain on 16-bit input divided out)
+  const still = await reel(['still', '--project', proj.dir, '--no-daemon', '--t', '0.5', '--out', out('bg.png')]);
+  expect(still.code).toBe(0);
+  const grey = readPng(out('bg.png')).data[0]!;
+  const y = Bun.spawnSync(['ffmpeg', '-loglevel', 'error', '-i', out('h.mp4'), '-vf', 'select=eq(n\\,5)', '-frames:v', '1', '-f', 'rawvideo', '-pix_fmt', 'yuv420p10le', '-']).stdout;
+  expect(Math.abs((y[0]! | (y[1]! << 8)) - (64 + (876 * grey) / 255))).toBeLessThan(1.5);
   await render('p.mov');
   const [p, a] = probe(out('p.mov'));
   expect([p!.codec_name, p!.pix_fmt, p!.profile]).toEqual(['prores', 'yuv422p10le', 'HQ']);
