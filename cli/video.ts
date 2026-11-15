@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
 import { PIXELS } from '../src/engine/pixels';
-import { ffmpegArgs, hasFfmpegEncoder as hasEncoder, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
+import { ffmpegArgs, ffmpegHasAlphaModes, hasFfmpegEncoder as hasEncoder, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
 import { launchChrome, openPage, pageUrl, type Format } from './renderer';
 
 export interface VideoOpts {
@@ -77,7 +77,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     if (!Bun.which('img2webp')) throw new Error('webp: this ffmpeg has no libwebp encoder and img2webp (libwebp\'s tools: brew install webp, apt install webp) is not installed');
     mkdirSync(webpFrames, { recursive: true });
   }
-  const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: o.out, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames });
+  const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: o.out, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames, alphaModes: o.plan.format.id !== 'exr' || ffmpegHasAlphaModes() });
   const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
 
   const chunk = Math.max(1, o.chunk);

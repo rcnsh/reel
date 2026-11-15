@@ -104,6 +104,8 @@ test('each format has its codec, pixel format and sound', () => {
   expect(args('png16', { alpha: true })).toContain('-pix_fmt rgba64be');
   expect(args('jpeg', { quality: 100 })).toContain('format=yuvj444p -c:v mjpeg -q:v 2');
   expect(args('exr', { alpha: true })).toContain('setparams=alpha_mode=premultiplied,format=gbrapf32le,vflip -c:v exr -format 1');
+  const old = planOf(FORMATS.exr, { alpha: true }, 30);
+  expect(ffmpegArgs(old, { alpha: true }, { width: 64, height: 64, fps: 30, out: '/o/x.exr', alphaModes: false }).join(' ')).toContain('-vf format=gbrapf32le,vflip -c:v exr');
   expect(args('h264', { draft: 'videotoolbox', comment: 'reel draft' })).toContain('-c:v h264_videotoolbox');
   expect(args('h264', { draft: 'videotoolbox', comment: 'reel draft' })).toContain('-metadata comment=reel draft');
 });

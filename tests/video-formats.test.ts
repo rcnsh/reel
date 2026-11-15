@@ -1,7 +1,7 @@
 // `reel video` end to end in every output format family: a second of a small project with a sound track, the stream
 // checked with ffprobe (codec, pixel format, colour tags, alpha, sound) and a decoded frame checked for transparency.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fixture, hasChrome, reel } from './helpers';
 
@@ -119,8 +119,24 @@ test.skipIf(!hasChrome)('image sequences: PNG with alpha, 16-bit PNG, JPEG and l
   // (frames are numbered by their place in the video: a render from 0.5 s at 10 fps starts at 5)
   expect(existsSync(out('x/f_000005.exr'))).toBe(true);
   const [x] = probe(out('x/f_000005.exr'));
-  expect([x!.codec_name, x!.pix_fmt, x!.color_transfer]).toEqual(['exr', 'gbrapf16le', 'linear']);
+  expect([x!.codec_name, x!.color_transfer]).toEqual(['exr', 'linear']);
+  // (ffmpeg 8 decodes half floats as gbrapf16le, older ones widen them to 32-bit: the file's channel list says)
+  expect(x!.pix_fmt).toMatch(/^gbrapf(16|32)le$/);
+  expect(exrChannels(out('x/f_000005.exr'))).toEqual([['A', 1], ['B', 1], ['G', 1], ['R', 1]]);
 }, 90_000);
+
+/** An EXR's channels and pixel types (0 uint, 1 half, 2 float), from its header's channels attribute. */
+function exrChannels(file: string): [string, number][] {
+  const b = readFileSync(file);
+  let i = b.indexOf('channels\0chlist\0') + 16 + 4;
+  const out: [string, number][] = [];
+  while (b[i] !== 0) {
+    const end = b.indexOf(0, i);
+    out.push([b.toString('latin1', i, end), b.readInt32LE(end + 1)]);
+    i = end + 1 + 16;
+  }
+  return out;
+}
 
 test.skipIf(!hasChrome)('--mix and --subtitles are refused for formats that carry no sound', async () => {
   const r = await reel(['video', '--project', proj.dir, '--format', 'gif', '--mix']);

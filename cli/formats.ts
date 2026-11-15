@@ -138,7 +138,9 @@ const TAG709 = 'setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_
 /** Full-range RGB to limited-range BT.709 YUV: chroma averaged over its block, accurate rounding, tagged. */
 export const toYuv709 = (pixFmt: string) => `scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=${pixFmt},setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709`;
 
-export interface FfmpegInput { width: number; height: number; fps: number; out: string; audio?: { file: string; from: number; duration: number } | null; startNumber?: number; webpFrames?: string }
+export interface FfmpegInput { width: number; height: number; fps: number; out: string; audio?: { file: string; from: number; duration: number } | null; startNumber?: number; webpFrames?: string;
+  /** Whether this ffmpeg tracks alpha modes (8 and later), which EXR's premultiplied alpha must name; default true. */
+  alphaModes?: boolean }
 
 /**
  * The ffmpeg command that reads raw frames (bottom-up, `plan.rawFormat`) on stdin and writes the format, with the
@@ -213,8 +215,9 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
       v.push('-vf', 'vflip,scale=in_range=pc:out_range=pc:out_color_matrix=bt601:flags=accurate_rnd+full_chroma_int,format=yuvj444p', '-c:v', 'mjpeg', '-q:v', String(jpegQ(o.quality ?? 92)), '-start_number', String(i.startNumber ?? 0));
       break;
     case 'exr':
-      // (the linear frame's alpha is premultiplied, as EXR's is: said so, ffmpeg converts nothing)
-      v.push('-vf', `setparams=alpha_mode=premultiplied,format=${plan.alpha ? 'gbrapf32le' : 'gbrpf32le'},vflip`, '-c:v', 'exr', '-format', '1', '-compression', '3', '-start_number', String(i.startNumber ?? 0));
+      // (the linear frame's alpha is premultiplied, as EXR's is: said so, ffmpeg converts nothing; an ffmpeg older
+      // than 8 has no alpha modes and passes the values through as they are)
+      v.push('-vf', `${i.alphaModes === false ? '' : 'setparams=alpha_mode=premultiplied,'}format=${plan.alpha ? 'gbrapf32le' : 'gbrpf32le'},vflip`, '-c:v', 'exr', '-format', '1', '-compression', '3', '-start_number', String(i.startNumber ?? 0));
       break;
   }
   a.push(...v);
@@ -305,6 +308,13 @@ export function draftName(out: string, draft: boolean) {
 
 const encoders = new Set<string>();
 /** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
+let alphaModes: boolean | undefined;
+/** Whether the ffmpeg on PATH tracks alpha modes (its setparams filter has alpha_mode: ffmpeg 8 and later). */
+export function ffmpegHasAlphaModes() {
+  alphaModes ??= Bun.spawnSync(['ffmpeg', '-hide_banner', '-h', 'filter=setparams'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString().includes('alpha_mode');
+  return alphaModes;
+}
+
 export function hasFfmpegEncoder(name: string) {
   if (!encoders.size) {
     const out = Bun.spawnSync(['ffmpeg', '-hide_banner', '-encoders'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString();
