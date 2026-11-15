@@ -4,7 +4,7 @@
 import { chromium, type Browser, type Page } from 'playwright-core';
 import { formatOf } from '../src/config';
 import { resolveTheme } from '../src/themes';
-import { readdirSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { ENGINE, loadConfig, startServer } from './server';
 import { checkChromeVersion, findChrome, glArgs, glBackend, missingLibsMessage, type GlBackend } from './chrome';
@@ -60,12 +60,27 @@ export async function openPage(browser: Browser, url: string, f: Format, o: Pick
   const logs: string[] = [];
   page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { logs.push(`[${m.type()}] ${m.text()}`); log(logs.at(-1)!); } });
   page.on('pageerror', (e) => { logs.push(`[pageerror] ${e.message}`); log(logs.at(-1)!); });
+  // (modules the server refused: Renderer.explain puts Vite's reason in place of each)
+  const refused: string[] = [];
+  // (504: Vite bundled a dependency again while the page was loading, and answers the old URLs with this until
+  // the page is loaded again, which its live reload would do and a render server has none)
+  let outdated = false;
+  page.on('response', (r) => {
+    if (r.status() === 504) outdated = true;
+    else if (r.status() >= 400 && r.request().resourceType() === 'script') refused.push(`module did not load: ${r.url()}`);
+  });
+  const started = () => page.waitForFunction(() => (window as any).__reel?.ready || (window as any).__reel?.error, null, { timeout: 120000 })
+    .catch(() => { throw new Error(`the page did not start:\n${[...refused, ...logs].join('\n')}`); });
   try {
     await page.goto(url);
-    await page.waitForFunction(() => (window as any).__reel?.ready || (window as any).__reel?.error, null, { timeout: 120000 })
-      .catch(() => { throw new Error(`the page did not start:\n${logs.join('\n')}`); });
+    await started();
+    for (let i = 0; outdated && i < 3; i++) {
+      outdated = false; logs.length = 0; refused.length = 0;
+      await page.reload();
+      await started();
+    }
     const err = await page.evaluate(() => (window as any).__reel.error);
-    if (err) throw new Error(`the project failed to load:\n${err}`);
+    if (err) throw new Error(`the project failed to load:\n${refused.length ? refused.join('\n') : err}`);
     const size: [number, number] = await page.evaluate(() => [(window as any).__reel.width, (window as any).__reel.height]);
     if (size[0] !== f.w * f.scale || size[1] !== f.h * f.scale) throw new Error(`the page renders ${size[0]}x${size[1]}, expected ${f.w * f.scale}x${f.h * f.scale}`);
     if (o.only) {
@@ -104,6 +119,7 @@ export class Renderer {
   /** Bumped when the project's files change: a page loaded before is reloaded before its next use. */
   private gen = 0;
   private configDirty = false;
+  private restart = false;
   private uses = 0;
 
   /** What the project's files looked like at the last request (path -> mtime and size). */
@@ -141,7 +157,10 @@ export class Renderer {
     if (first || !changed.length) return;
     this.gen++;
     this.configDirty = true;
-    for (const f of changed) this.moduleErrors.delete(f);
+    // (after a module failed, a fresh server: the fix for an import that did not resolve is a new file, not an
+    // edit to the importer, and Vite's resolver remembers that the file was not there)
+    if (this.moduleErrors.size) this.restart = true;
+    this.moduleErrors.clear();
     const g = this.srv?.server.moduleGraph;
     if (g) for (const f of changed) for (const m of g.getModulesByFile(f) ?? []) g.invalidateModule(m);
   }
@@ -150,17 +169,17 @@ export class Renderer {
   private moduleErrors = new Map<string, string>();
 
   /**
-   * The page only learns that a scene's import failed ("Failed to fetch dynamically imported module: <url>"):
-   * put Vite's error for that file (the syntax error, its line and code frame) in its place.
+   * The page only learns that a scene's import failed ("Failed to fetch dynamically imported module: <url>"), and
+   * openPage only that the server refused a module ("module did not load: <url>"): put Vite's error for that file
+   * (the syntax error with its line and code frame, or the import it could not resolve) in its place.
    */
   explain(errors: string[]): string[] {
-    if (!this.moduleErrors.size) return errors;
-    return errors.map((e) => e.replace(/(?:TypeError: )?Failed to fetch dynamically imported module: (\S+)/, (all, url: string) => {
+    return errors.map((e) => e.replace(/(?:(?:TypeError: )?Failed to fetch dynamically imported module|module did not load): (\S+)/g, (all, url: string) => {
       let p: string;
       try { p = decodeURIComponent(new URL(url).pathname); } catch { return all; }
       const file = p.startsWith('/@fs/') ? p.slice(4) : path.join(ENGINE, p);
       const m = this.moduleErrors.get(file);
-      return m ? `could not load ${m}` : all;
+      return m ? `could not load ${m}` : existsSync(file) ? all : `could not load ${path.relative(this.project, file)}: the file is not there`;
     }));
   }
 
@@ -172,13 +191,13 @@ export class Renderer {
       this.configDirty = false;
       const c = await loadConfig(this.project);
       const same = JSON.stringify([formatOf(c), resolveTheme(c.theme ?? 'neutral')]) === JSON.stringify([this.srv.format, this.srv.theme]);
-      if (!same) {
+      if (!same || this.restart) {
         await this.closePages();
         await this.srv.stop().catch(() => {});
         this.srv = undefined;
       }
     }
-    this.configDirty = false;
+    this.configDirty = this.restart = false;
     this.srv ??= await startServer(this.project, { onModuleError: (e) => this.moduleErrors.set(e.file, e.message) });
     return this.srv;
   }

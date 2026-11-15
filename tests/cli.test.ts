@@ -76,6 +76,23 @@ test.skipIf(!hasChrome)('a syntax error in a scene is reported with its line thr
   expect(fixed.json().errors).toEqual([]);
 }, 120_000);
 
+test.skipIf(!hasChrome)('a config naming a scene file that is not there fails at once with the import, and the new file is picked up', async () => {
+  const file = path.join(layers.dir, 'reel.config.ts'), good = readFileSync(file, 'utf8'), scene = path.join(layers.dir, 'scenes/later.ts');
+  writeFileSync(file, good.replace("import('./scenes/title')", "import('./scenes/later')"));
+  try {
+    const t0 = Date.now();
+    const bad = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
+    expect(bad.code).toBe(1);
+    expect(bad.json().errors.join('\n')).toMatch(/could not load reel\.config\.ts: Failed to resolve import "\.\/scenes\/later"/);
+    expect(Date.now() - t0).toBeLessThan(30_000);
+    writeFileSync(scene, readFileSync(path.join(layers.dir, 'scenes/title.ts')));
+    const made = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
+    expect(made.json().errors).toEqual([]);
+  } finally { writeFileSync(file, good); rmSync(scene, { force: true }); }
+  const fixed = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
+  expect(fixed.json().errors).toEqual([]);
+}, 120_000);
+
 test.skipIf(!hasChrome)('the warm renderer shows in daemon status and stops', async () => {
   await reel(['info', '--project', layers.dir]);
   const projects = () => reel(['daemon', 'status', '--json']).then((r) => r.json().daemons.map((d: { project: string }) => d.project));

@@ -326,7 +326,7 @@ try {
       }
     } catch (e) {
       if (e instanceof UsageError) throw e;
-      res.errors.push(String((e as Error)?.message ?? e));
+      res.errors.push(...r.explain([String((e as Error)?.message ?? e)]));
     } finally { await r.close(); release(); }
     res.ok = !res.errors.length;
     finish(res, () => {});

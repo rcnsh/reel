@@ -30,6 +30,8 @@
   <div id="info"></div>
 </div>
 <pre id="errs"></pre>
-<script type="module" src="/src/main.ts"></script>
+<!-- (a module of the page's static graph that fails to load, such as a config naming a scene file that is not there,
+     never runs main.ts: say so at once instead of leaving the renderer waiting) -->
+<script type="module" src="/src/main.ts" onerror="window.__reel = { error: 'a module of the page did not load' }; var e = document.getElementById('errs'); e.style.display = 'block'; e.textContent = 'A module did not load (a syntax error, or an import of a file that is not there): the terminal running reel dev names it.';"></script>
 </body>
 </html>
