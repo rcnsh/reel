@@ -51,7 +51,7 @@ Rendering
                                webm        .webm VP9 with alpha, Opus sound [--crf 24] (--opaque)
                                gif         .gif  a palette per video, Sierra dither [--max-fps 25]
                                                  [--max-size 640 (long side, px)]
-                               webp        .webp animated [--max-fps 30] [--max-size 1080] [--quality 80]
+                               webp        .webp animated [--max-fps 30] [--max-size 1080] [--quality 88]
                                                  [--alpha]
                                png, png16  .png  numbered frames, 8 or 16 bits per channel [--alpha]
                                jpeg        .jpg  numbered frames [--quality 92]

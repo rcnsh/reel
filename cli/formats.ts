@@ -209,7 +209,7 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
         a.push('-vf', `vflip${size}`, '-c:v', 'png', '-pix_fmt', plan.alpha ? 'rgba' : 'rgb24', path.join(i.webpFrames, '%06d.png'));
         return a;
       }
-      v.push('-vf', `vflip${size},format=${plan.alpha ? 'yuva420p' : 'yuv420p'}`, '-c:v', 'libwebp_anim', '-lossless', '0', '-quality', String(o.quality ?? 80), '-loop', '0');
+      v.push('-vf', `vflip${size},format=${plan.alpha ? 'yuva420p' : 'yuv420p'}`, '-c:v', 'libwebp_anim', '-lossless', '0', '-quality', String(o.quality ?? WEBP_QUALITY), '-loop', '0');
       break;
     }
     case 'png':
@@ -244,6 +244,9 @@ function loopScale(w: number, h: number, max: number) {
   return `,scale=${even(w)}:${even(h)}:flags=lanczos`;
 }
 
+/** Animated WebP's default quality: at 80 flat dark areas (a night sky, a gradient) show blocks. */
+export const WEBP_QUALITY = 88;
+
 /** ffmpeg's mjpeg -q:v (2 best .. 31) for a quality of 1 to 100. */
 export const jpegQ = (q: number) => Math.max(2, Math.min(31, Math.round(2 + ((100 - q) / 99) * 29)));
 
@@ -252,7 +255,7 @@ export const jpegQ = (q: number) => Math.max(2, Math.min(31, Math.round(2 + ((10
  * the running total stays on the frame clock (a 30 fps loop alternates 33 and 34 ms).
  */
 export function webpArgs(dir: string, n: number, fps: number, o: EncodeOpts, out: string) {
-  const a = ['img2webp', '-loop', '0', '-lossy', '-q', String(o.quality ?? 80), '-m', '4'];
+  const a = ['img2webp', '-loop', '0', '-lossy', '-q', String(o.quality ?? WEBP_QUALITY), '-m', '4'];
   for (let k = 0; k < n; k++) {
     const d = Math.round(((k + 1) * 1000) / fps) - Math.round((k * 1000) / fps);
     a.push('-d', String(d), path.join(dir, `${String(k + 1).padStart(6, '0')}.png`));
