@@ -1,6 +1,6 @@
 // Which GL backend Chrome renders with, per platform, and its flags.
 import { expect, test } from 'bun:test';
-import { glArgs, glBackend } from '../cli/chrome';
+import { glArgs, glBackend, parseMissingLibs } from '../cli/chrome';
 import { chromeArgs } from '../cli/renderer';
 
 test('Metal on macOS; on Linux EGL with a GPU render node, else SwiftShader; REEL_GL overrides', () => {
@@ -22,4 +22,16 @@ test('each backend has its ANGLE flags, and every Chrome gets the common ones', 
   expect(a).toContain('--disable-frame-rate-limit');
   expect(a).toContain('--use-angle=swiftshader');
   expect(a.filter((x) => x.startsWith('--use-angle'))).toHaveLength(1);
+});
+
+test('ldd output gives the libraries Chrome lacks', () => {
+  const ldd = [
+    '\tlinux-vdso.so.1 (0x00007ffd)',
+    '\tlibnss3.so => not found',
+    '\tlibdl.so.2 => /lib/x86_64-linux-gnu/libdl.so.2 (0x00007f)',
+    '\tlibgbm.so.1 => not found',
+    '\tlibnss3.so => not found',
+  ].join('\n');
+  expect(parseMissingLibs(ldd)).toEqual(['libnss3.so', 'libgbm.so.1']);
+  expect(parseMissingLibs('\tlibc.so.6 => /lib/libc.so.6 (0x1)')).toEqual([]);
 });

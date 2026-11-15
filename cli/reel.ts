@@ -109,6 +109,8 @@ if (mode === 'chrome') {
     }).catch((e) => finish({ ok: false, errors: [`reel chrome install: ${(e as Error).message}`], logs: [], warnings: [] }, () => {}));
     if (!json) process.stderr.write('\n');
     const warnings = process.env.CHROME_PATH ? [`CHROME_PATH is set (${process.env.CHROME_PATH}), so renders use that instead: unset it to use this one`] : [];
+    const libs = c.missingLibsMessage(file as string);
+    if (libs) warnings.push(libs);
     finish({ ok: true, errors: [], logs: [], warnings, file, build: c.CHROME_BUILD }, () => console.log(file));
   }
   if (sub === 'path') {

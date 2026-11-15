@@ -55,6 +55,27 @@ export function checkChromeVersion(version: string, choice: ChromeChoice) {
   throw new Error(`Chrome ${version || '(unknown version)'} at ${choice.path} is too old: reel needs Chrome ${CHROME_MIN_MAJOR} or later (HTML-in-Canvas, for HTML layers); ${fix}`);
 }
 
+/** The Debian and Ubuntu packages that hold the shared libraries Chrome needs (headless, no desktop). */
+export const CHROME_APT = 'libnss3 libnspr4 libatk1.0-0 libatk-bridge2.0-0 libcups2 libdrm2 libxkbcommon0 libxcomposite1 libxdamage1 libxfixes3 libxrandr2 libgbm1 libpango-1.0-0 libcairo2 libasound2 libdbus-1-3';
+
+/** The shared libraries `ldd` output reports as not found. */
+export function parseMissingLibs(ldd: string): string[] {
+  return [...new Set(ldd.split('\n').map((l) => /^\s*(\S+)\s+=>\s+not found/.exec(l)?.[1]).filter((x): x is string => !!x))];
+}
+
+/** On Linux, the libraries the Chrome binary needs that the system lacks (empty elsewhere, or when ldd is missing). */
+export function missingLibs(bin: string): string[] {
+  if (process.platform !== 'linux') return [];
+  const r = Bun.spawnSync(['ldd', bin], { stderr: 'ignore' });
+  return r.success ? parseMissingLibs(r.stdout.toString()) : [];
+}
+
+/** A message naming missing libraries and the packages that hold them, or '' when none are missing. */
+export function missingLibsMessage(bin: string): string {
+  const libs = missingLibs(bin);
+  return libs.length ? `Chrome needs system libraries this machine lacks (${libs.join(', ')}); on Debian or Ubuntu: sudo apt-get install -y ${CHROME_APT}` : '';
+}
+
 /** Download the pinned build into the cache (a no-op when it is there). Returns its binary. */
 export async function installChrome(onProgress?: (done: number, total: number) => void): Promise<string> {
   const platform = detectBrowserPlatform();

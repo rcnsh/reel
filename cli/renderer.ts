@@ -7,7 +7,7 @@ import { resolveTheme } from '../src/themes';
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { ENGINE, loadConfig, startServer } from './server';
-import { checkChromeVersion, findChrome, glArgs, glBackend, type GlBackend } from './chrome';
+import { checkChromeVersion, findChrome, glArgs, glBackend, missingLibsMessage, type GlBackend } from './chrome';
 import type { PageOpts } from './args';
 
 /** Paths in a project whose changes never matter to its pages (renders, tools' working files, the config loader's). */
@@ -26,7 +26,13 @@ export function chromeArgs(backend: GlBackend = glBackend()) {
 /** Start the Chrome reel renders with (cli/chrome.ts), refusing one too old for HTML layers. */
 export async function launchChrome(headed = false) {
   const choice = findChrome();
-  const browser = await chromium.launch({ executablePath: choice.path, headless: !headed, args: chromeArgs() });
+  let browser: Browser;
+  try {
+    browser = await chromium.launch({ executablePath: choice.path, headless: !headed, args: chromeArgs() });
+  } catch (e) {
+    const libs = missingLibsMessage(choice.path);
+    throw libs ? new Error(libs) : e;
+  }
   try { checkChromeVersion(browser.version(), choice); } catch (e) { await browser.close().catch(() => {}); throw e; }
   return browser;
 }
