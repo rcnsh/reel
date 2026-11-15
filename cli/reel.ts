@@ -194,13 +194,22 @@ const hist = (h: Record<string, number>) => Object.entries(h).sort((a, b) => +a[
 
 let req!: Req;
 try {
-  const page = pageOf(A), samples = samplesOf(A), shutter = num(A, 'shutter', 0.5);
+  const page = pageOf(A), shutter = num(A, 'shutter', 0.5);
+  let samples = samplesOf(A);
   if (mode === 'video') {
     const { exportVideo } = await import('./video');
     const { Renderer } = await import('./renderer');
     const F = await import('./formats');
     const format = F.formatOf(A.format as string | undefined, abs(A.out));
     const enc = F.encodeOptsOf(A, format);
+    if (A.draft) {
+      // a quick look: half size (the layout of the full size), one sample, the fastest encoder; named and tagged a draft
+      if (A.samples !== undefined || A.scale !== undefined) throw new UsageError('--draft renders at half size with one sample: leave out --samples and --scale');
+      page.scale = 0.5;
+      samples = 1;
+      enc.draft = F.draftEncoder();
+      enc.comment = 'reel draft: half size, one sample, not for delivery';
+    }
     const mixed = !!A.mix || A.subtitles === true;
     if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
     const r = new Renderer(PROJECT, { headed: !!A.headed });
@@ -208,7 +217,7 @@ try {
     try {
       const m = await r.meta();
       const plan = F.planOf(format, enc, page.fps ?? m.format.fps);
-      const out = abs(A.out) ?? F.defaultOut(PROJECT, format);
+      const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
       // (with --mix the picture is rendered beside the output and the mix writes the output)
       const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;
       // (the subtitles first: a project without timed words fails before it renders, not after)
@@ -223,11 +232,12 @@ try {
         },
       });
       const file = format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file;
+      if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: 0.5, samples: 1 };
       Object.assign(res, { file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
       res.errors.push(...r.explain(v.errors));
       res.logs.push(...r.explain(v.logs));
       say(`\nwrote ${file} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
-      say(`sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
+      say(A.draft ? `a draft (${(res.draft as { encoder: string }).encoder}, half size, one sample): not for delivery` : `sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
       if (mixed && !res.errors.length) {
         const { mixVideo } = await import('../tools/mix');
         try {

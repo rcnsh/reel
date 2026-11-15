@@ -22,7 +22,10 @@ function read() {
   if (!(fps > 0 && fps <= 240)) throw new Error(`?fps=${q.get('fps')}: expected a frame rate up to 240`);
   const bits = int('bits', 8, 8, 16);
   if (![8, 10, 12, 16].includes(bits)) throw new Error(`?bits=${bits}: expected 8, 10, 12 or 16`);
-  return { w, h, fps, scale: int('scale', 1, 1, 4), alpha: q.get('alpha') === '1', bits };
+  // (0.5: the draft tier's half size, laid out exactly as at 1)
+  const scale = q.get('scale') === '0.5' ? 0.5 : int('scale', 1, 1, 4);
+  if ((w * scale) % 4 || (h * scale) % 2) throw new Error(`frame size ${w}x${h} at scale ${scale} is ${w * scale}x${h * scale}: the width must be a multiple of 4 and the height even`);
+  return { w, h, fps, scale, alpha: q.get('alpha') === '1', bits };
 }
 const f = read();
 
@@ -31,7 +34,7 @@ export const W = f.w;
 export const H = f.h;
 /** Output frames per second. */
 export const FPS = f.fps;
-/** Physical pixels per logical pixel of the output (integer 1..4, default 1). */
+/** Physical pixels per logical pixel of the output (1 to 4, default 1; 0.5 for a draft). */
 export const SCALE = f.scale;
 /**
  * A render with a transparent background (`?alpha=1`, which `reel video` sets for formats that carry alpha): the

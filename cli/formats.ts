@@ -74,8 +74,8 @@ export interface EncodeOpts {
   maxSize?: number;
   /** JPEG and WebP quality, 1 to 100. */
   quality?: number;
-  /** The draft tier's encoder: the hardware H.264 encoder (VideoToolbox on macOS) or x264 ultrafast. */
-  draft?: 'videotoolbox' | 'x264';
+  /** The draft tier's encoder: WebCodecs H.264 in the page, or the raw pipe into VideoToolbox (macOS) or x264 ultrafast. */
+  draft?: 'webcodecs' | 'videotoolbox' | 'x264';
   /** Text for the file's comment tag (drafts say they are drafts). */
   comment?: string;
 }
@@ -273,4 +273,34 @@ export function encodeOptsOf(v: Values, f: FormatSpec): EncodeOpts {
   if (v['max-fps'] !== undefined) { const mf = o.maxFps = num(v, 'max-fps', 0); if (!(mf > 0)) throw new UsageError(`--max-fps ${v['max-fps']}: expected a frame rate over 0`); }
   if (v['max-size'] !== undefined) o.maxSize = int(v, 'max-size', 640, 16);
   return o;
+}
+
+/**
+ * The draft tier's encoder: H.264 encoded in the page with WebCodecs (fastest: no raw frames leave the page; hardware
+ * where the browser has it), falling back to the raw pipe into VideoToolbox or x264 ultrafast when the browser cannot.
+ * REEL_DRAFT_ENCODER (webcodecs, videotoolbox or x264) picks one.
+ */
+export function draftEncoder(has: (encoder: string) => boolean = hasFfmpegEncoder): 'webcodecs' | 'videotoolbox' | 'x264' {
+  const env = process.env.REEL_DRAFT_ENCODER;
+  if (env === 'webcodecs' || env === 'x264') return env;
+  if (env === 'videotoolbox') return has('h264_videotoolbox') ? env : 'x264';
+  return 'webcodecs';
+}
+
+/** A draft's file name: `.draft` before the extension (added when missing), so a draft is never taken for a final. */
+export function draftName(out: string, draft: boolean) {
+  if (!draft || /\.draft\.[^./]+$/.test(out)) return out;
+  const ext = path.extname(out);
+  return out.slice(0, out.length - ext.length) + '.draft' + ext;
+}
+
+const encoders = new Set<string>();
+/** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
+export function hasFfmpegEncoder(name: string) {
+  if (!encoders.size) {
+    const out = Bun.spawnSync(['ffmpeg', '-hide_banner', '-encoders'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString();
+    for (const m of out.matchAll(/^\s*[VAS][.A-Z]{5}\s+(\S+)/gm)) encoders.add(m[1]!);
+    encoders.add('');
+  }
+  return encoders.has(name);
 }

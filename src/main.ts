@@ -237,6 +237,51 @@ function setupExport() {
       return pngOf(scaled(lastGrid, 0, 0, lastGrid.width, lastGrid.height, maxSize));
     },
     /**
+     * The draft tier: render [from, to) at the frame rate (one sample) and encode it here with WebCodecs, H.264 from
+     * the canvas (hardware where the browser has it, else its software encoder), sending the Annex B stream over a
+     * WebSocket in order, one message per encoded frame. The receiver acknowledges with the running count of
+     * messages taken; at most `inflight` are unacknowledged. Returns the frames encoded and the encoder used, or
+     * `{ unsupported }` when this browser can encode neither way (the CLI then pipes raw frames instead).
+     */
+    async encode(opts: { from: number; to: number; ws: string; bitrate: number; inflight?: number }) {
+      const VE = (window as any).VideoEncoder, VF = (window as any).VideoFrame;
+      if (!VE) return { unsupported: 'no WebCodecs' };
+      const base = { codec: 'avc1.640028', width: PW, height: PH, bitrate: opts.bitrate, framerate: FPS, avc: { format: 'annexb' }, latencyMode: 'quality' };
+      let cfg: Record<string, unknown> | null = null;
+      for (const hw of ['prefer-hardware', 'prefer-software']) {
+        const c = { ...base, hardwareAcceleration: hw };
+        if ((await VE.isConfigSupported(c)).supported) { cfg = c; break; }
+      }
+      if (!cfg) return { unsupported: `this browser cannot encode H.264 at ${PW}x${PH}` };
+      const ws = new WebSocket(opts.ws);
+      ws.binaryType = 'arraybuffer';
+      let acked = 0, sent = 0, failed = '', wake: (() => void) | null = null;
+      const notify = () => { const f = wake; wake = null; f?.(); };
+      await new Promise<void>((res, rej) => { ws.onopen = () => res(); ws.onerror = () => rej(new Error('websocket error')); });
+      ws.onmessage = (e) => { acked = Math.max(acked, +e.data || 0); notify(); };
+      ws.onclose = () => { failed ||= 'websocket closed'; notify(); };
+      const enc = new VE({
+        output: (c: { byteLength: number; copyTo(b: Uint8Array): void }) => { const b = new Uint8Array(c.byteLength); c.copyTo(b); ws.send(b); sent++; },
+        error: (e: unknown) => { failed = `encoder: ${e}`; notify(); },
+      });
+      enc.configure(cfg);
+      const dt = 1 / FPS, n0 = Math.round(opts.from * FPS), n1 = Math.round(opts.to * FPS), inflight = opts.inflight ?? 8;
+      for (let n = n0; n < n1; n++) {
+        if (failed) throw new Error(failed);
+        await engine.renderFrame(n * dt, dt, true, 1, 0.5);
+        const f = new VF(canvas, { timestamp: Math.round((n - n0) * dt * 1e6), duration: Math.round(dt * 1e6) });
+        enc.encode(f, { keyFrame: (n - n0) % Math.round(FPS * 2) === 0 });
+        f.close();
+        while (!failed && (enc.encodeQueueSize > 2 || sent - acked >= inflight)) await new Promise<void>((r) => { wake = r; setTimeout(notify, 2); });
+      }
+      await enc.flush();
+      enc.close();
+      while (!failed && acked < sent) await new Promise<void>((r) => { wake = r; setTimeout(notify, 5); });
+      ws.close();
+      if (failed && failed !== 'websocket closed') throw new Error(failed);
+      return { frames: n1 - n0, encoder: (cfg.hardwareAcceleration as string).replace('prefer-', '') };
+    },
+    /**
      * Render [from, to) at the frame rate and stream raw rgb24 frames (bottom-up) over a WebSocket, in order.
      * Returns when all frames were handed to the socket, with a histogram of sub-frames per frame. The
      * receiver acknowledges each frame it has taken (a text message with its running count) and at most

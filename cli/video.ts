@@ -4,7 +4,7 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
 import { PIXELS } from '../src/engine/pixels';
-import { ffmpegArgs, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
+import { ffmpegArgs, hasFfmpegEncoder as hasEncoder, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
 import { launchChrome, openPage, pageUrl, type Format } from './renderer';
 
 export interface VideoOpts {
@@ -31,7 +31,7 @@ export interface VideoOpts {
   onProgress?: (p: { frames: number; total: number; fps: number; eta: number }) => void;
 }
 
-export interface VideoResult { file: string; frames: number; seconds: number; workers: number; subFrames: Record<string, number>; spoolPeak: number; errors: string[]; logs: string[]; events: { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[] } }
+export interface VideoResult { encoder?: string; file: string; frames: number; seconds: number; workers: number; subFrames: Record<string, number>; spoolPeak: number; errors: string[]; logs: string[]; events: { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[] } }
 
 /**
  * Render [from, to) into one encoder. `workers` headless Chromes (each its own GPU process) take chunks of
@@ -42,6 +42,12 @@ export interface VideoResult { file: string; frames: number; seconds: number; wo
  * Throws when the range is empty or something fails; scene errors come back in `errors`.
  */
 export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
+  if (o.enc.draft === 'webcodecs') {
+    const d = await exportEncoded(o);
+    if (d) return d;
+    // (this browser encodes no H.264: the raw pipe into ffmpeg's fastest encoder instead)
+    o = { ...o, enc: { ...o.enc, draft: hasEncoder('h264_videotoolbox') ? 'videotoolbox' : 'x264' } };
+  }
   const logs: string[] = [];
   // (a loop's frame rate may be capped below the project's)
   const fmt: Format = { ...o.fmt, fps: o.plan.fps };
@@ -227,13 +233,67 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   return { file: o.out, frames: written, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers, subFrames: used, spoolPeak, errors: [...sceneErrors], logs, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
 }
 
-const encoders = new Map<string, boolean>();
-/** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
-export function hasEncoder(name: string) {
-  if (!encoders.size) {
-    const out = Bun.spawnSync(['ffmpeg', '-hide_banner', '-encoders'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString();
-    for (const m of out.matchAll(/^\s*[VAS][.A-Z]{5}\s+(\S+)/gm)) encoders.set(m[1]!, true);
-    encoders.set('', true);
+
+/**
+ * The draft tier's fast path: one page renders at the draft's size and encodes H.264 itself with WebCodecs (the
+ * page's `encode`), and ffmpeg only muxes the Annex B stream it sends, with the project's sound, into an MP4. Returns
+ * null when the browser cannot encode H.264 (the caller falls back to the raw pipe).
+ */
+async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
+  const logs: string[] = [], t0 = performance.now();
+  const fmt: Format = { ...o.fmt, fps: o.plan.fps };
+  const browser = await launchChrome(o.headed);
+  let ff: ReturnType<typeof Bun.spawn> | null = null, server: ReturnType<typeof Bun.serve> | null = null, ok = false;
+  try {
+    const page = await openPage(browser, pageUrl(o.url, fmt, o), fmt, o, (l) => logs.push(l));
+    const m: { duration: number; track: string | null; timeline: VideoResult['events']['timeline']; cues: VideoResult['events']['cues']; sounds: VideoResult['events']['sounds'] } = await page.evaluate(() => { const P = (window as any).__reel; return { duration: P.duration, track: P.track, timeline: P.timeline, cues: P.cues, sounds: P.sounds }; });
+    const from = o.from ?? 0, to = o.to ?? m.duration, fps = fmt.fps;
+    if (!(to > from)) throw new Error(`--from ${from} --to ${to}: nothing to render`);
+    const total = Math.round(to * fps) - Math.round(from * fps);
+    mkdirSync(path.dirname(o.out), { recursive: true });
+    const audio = m.track && existsSync(path.join(o.project, m.track)) && !o.noaudio ? path.join(o.project, m.track) : null;
+    // (the Annex B stream has no timestamps: muxed alone at the frame rate first, then with the sound, which ffmpeg
+    // drops when it is muxed with an untimed stream in one pass)
+    const pic = audio ? `${o.out}.picture.mp4` : o.out;
+    const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'h264', '-r', String(fps), '-i', 'pipe:0', '-c:v', 'copy', ...(o.enc.comment ? ['-metadata', `comment=${o.enc.comment}`] : []), '-movflags', '+faststart', '-f', 'mp4', pic];
+    const proc = ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
+    let count = 0, frames = 0;
+    const step = Math.max(1, Math.round(total / 100));
+    server = Bun.serve({
+      port: 0,
+      fetch(req, srv) { return srv.upgrade(req, { data: {} }) ? undefined : new Response('ws only', { status: 400 }); },
+      websocket: {
+        maxPayloadLength: 64 * 1024 * 1024,
+        async message(ws, msg) {
+          proc.stdin.write(msg as Uint8Array);
+          await proc.stdin.flush();
+          ws.send(String(++count));
+          frames = count;
+          if (frames % step === 0 || frames === total) {
+            const el = (performance.now() - t0) / 1000;
+            o.onProgress?.({ frames, total, fps: +(frames / el).toFixed(2), eta: +((total - frames) / (frames / el)).toFixed(1) });
+          }
+        },
+      },
+    });
+    const r: { frames?: number; encoder?: string; unsupported?: string } = await page.evaluate((x) => (window as any).__reel.encode(x), {
+      from, to, ws: `ws://localhost:${server.port}/`, bitrate: Math.round(fmt.w * fmt.scale * fmt.h * fmt.scale * fps * 0.2),
+    });
+    if (r.unsupported) { logs.push(`draft: ${r.unsupported}`); proc.kill(9); return null; }
+    const errors: string[] = await page.evaluate(() => (window as any).__reel.errors as string[]).catch(() => []);
+    proc.stdin.end();
+    const code = await proc.exited;
+    if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`);
+    if (audio) {
+      const mux = Bun.spawnSync(['ffmpeg', '-y', '-loglevel', 'error', '-i', pic, '-ss', String(from), '-t', String(to - from), '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-shortest', '-map_metadata', '0', '-movflags', '+faststart', o.out], { stderr: 'pipe' });
+      rmSync(pic, { force: true });
+      if (mux.exitCode !== 0) throw new Error(`ffmpeg (muxing the sound): ${mux.stderr.toString().slice(-800)}`);
+    }
+    ok = true;
+    return { file: o.out, frames: r.frames!, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers: 1, subFrames: { 1: r.frames! }, spoolPeak: 0, errors, logs, encoder: `WebCodecs H.264 in the page (${r.encoder})`, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
+  } finally {
+    if (!ok) ff?.kill(9);
+    server?.stop(true);
+    await browser.close().catch(() => {});
   }
-  return encoders.has(name);
 }

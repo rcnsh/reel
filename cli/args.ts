@@ -60,6 +60,10 @@ Rendering
                              Sequences are named after --out with the video frame number (f.png ->
                              f_000120.png). Transparent renders clear the theme's bg to transparent
                              and write straight alpha. Every YUV stream is limited-range BT.709, tagged.
+                             --draft: a quick look, not a deliverable: half size (the same layout), one
+                             sample, H.264 encoded in the page with WebCodecs (hardware where there is
+                             one); written as <name>.draft.mp4 and tagged a draft in its comment
+                             (REEL_DRAFT_ENCODER=videotoolbox|x264: the raw pipe instead)
                              --mix: the finished file in one go: the render, then reel mix (the
                              track, music and cues of mix.json, at the loudness target); --subtitles:
                              as --mix, with the timed words as a soft subtitle track (mp4, mov, webm)
@@ -98,7 +102,7 @@ Flags for every command that renders
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
   --shutter 0.5        the share of the frame time the sub-frames span
-  --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project)
+  --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project; 0.5 = half size)
   --size WxH, --fps N  override the project's frame size and rate
   --theme <name>       render with a built-in theme (print, film, neutral) instead of the project's
   --no-daemon          render in a browser of its own, started and stopped by this command
@@ -131,7 +135,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   events: { render: true, opts: { out: str } },
   perf: { render: true, opts: { from: str, to: str, pixels: str } },
   gpu: { render: true, opts: {} },
-  video: { render: true, opts: { from: str, to: str, out: str, format: str, crf: str, preset: str, x264: str, x265: str, chroma: str, depth: str, alpha: bool, opaque: bool, quality: str, 'max-fps': str, 'max-size': str, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
+  video: { render: true, opts: { from: str, to: str, out: str, format: str, crf: str, preset: str, x264: str, x265: str, chroma: str, depth: str, alpha: bool, opaque: bool, quality: str, 'max-fps': str, 'max-size': str, draft: bool, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
@@ -214,7 +218,7 @@ export interface PageOpts { w?: number; h?: number; fps?: number; scale: number;
 
 export function pageOf(v: Values): PageOpts {
   const scale = num(v, 'scale', 1);
-  if (![1, 2, 3, 4].includes(scale)) throw new UsageError(`--scale ${v.scale}: expected 1 to 4`);
+  if (![0.5, 1, 2, 3, 4].includes(scale)) throw new UsageError(`--scale ${v.scale}: expected 1 to 4, or 0.5 (half size, the same layout)`);
   const o: PageOpts = { scale };
   if (typeof v.size === 'string') [o.w, o.h] = sizeOf(v.size);
   if (v.fps !== undefined) {

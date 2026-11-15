@@ -1,7 +1,7 @@
 // The output formats: which one a command line means, what each asks of the page, and the ffmpeg command for each.
 import { expect, test } from 'bun:test';
 import { UsageError } from '../cli/args';
-import { defaultOut, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type FormatId } from '../cli/formats';
+import { defaultOut, draftEncoder, draftName, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type FormatId } from '../cli/formats';
 import { containerOf } from '../tools/mix';
 
 test('the format comes from --format, else the --out extension, else H.264', () => {
@@ -122,4 +122,18 @@ test('the mix goes into the containers that carry sound, with their codecs', () 
   expect(containerOf('/a.mov')).toEqual({ audio: ['-c:a', 'pcm_s24le'], subtitles: 'mov_text', flags: ['-movflags', '+faststart'] });
   expect(containerOf('/a.webm').subtitles).toBe('webvtt');
   expect(() => containerOf('/a.gif')).toThrow('carries no sound');
+});
+
+test('drafts are named and encoded as drafts', () => {
+  expect(draftName('/o/video.mp4', true)).toBe('/o/video.draft.mp4');
+  expect(draftName('/o/video.draft.mp4', true)).toBe('/o/video.draft.mp4');
+  expect(draftName('/o/video.mp4', false)).toBe('/o/video.mp4');
+  const env = process.env.REEL_DRAFT_ENCODER;
+  try {
+    delete process.env.REEL_DRAFT_ENCODER;
+    expect(draftEncoder(() => true)).toBe('webcodecs');
+    process.env.REEL_DRAFT_ENCODER = 'videotoolbox';
+    expect(draftEncoder(() => false)).toBe('x264');
+    expect(draftEncoder(() => true)).toBe('videotoolbox');
+  } finally { if (env === undefined) delete process.env.REEL_DRAFT_ENCODER; else process.env.REEL_DRAFT_ENCODER = env; }
 });
