@@ -110,14 +110,24 @@ function fit(w: number, h: number, max?: number) {
   const k = max && Math.max(w, h) > max ? max / Math.max(w, h) : 1;
   return [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))] as const;
 }
-/** A copy of `src` (x, y, w, h of it) at most `max` px on its long side, smoothed. */
+/**
+ * A copy of `src` (x, y, w, h of it) at most `max` px on its long side, smoothed. A large reduction goes in halvings
+ * (each a 2x2 average) before the last step: one drawImage samples a few source pixels per output pixel on a GPU
+ * canvas, so thin lines and text vanish or alias in a small copy, and differently on every backend.
+ */
 function scaled(src: OffscreenCanvas | HTMLCanvasElement, x: number, y: number, w: number, h: number, max?: number) {
   const [ow, oh] = fit(w, h, max);
-  const out = new OffscreenCanvas(ow, oh), c = out.getContext('2d')!;
-  c.imageSmoothingEnabled = true;
-  c.imageSmoothingQuality = 'high';
-  c.drawImage(src, x, y, w, h, 0, 0, ow, oh);
-  return out;
+  let cur: OffscreenCanvas | HTMLCanvasElement = src, cx = x, cy = y, cw = w, ch = h;
+  for (;;) {
+    const last = cw <= ow * 2 && ch <= oh * 2;
+    const nw = last ? ow : Math.max(ow, Math.ceil(cw / 2)), nh = last ? oh : Math.max(oh, Math.ceil(ch / 2));
+    const out = new OffscreenCanvas(nw, nh), c = out.getContext('2d')!;
+    c.imageSmoothingEnabled = true;
+    c.imageSmoothingQuality = 'high';
+    c.drawImage(cur, cx, cy, cw, ch, 0, 0, nw, nh);
+    if (last) return out;
+    cur = out; cx = 0; cy = 0; cw = nw; ch = nh;
+  }
 }
 let lastGrid: OffscreenCanvas | null = null;
 const clipsAt = (t: number) => TIMELINE.filter((e) => t >= e.start && t < e.end).sort((a, b) => (a.track ?? 0) - (b.track ?? 0)).map((e) => e.id);
