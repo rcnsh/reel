@@ -32,7 +32,7 @@ reuses; each exits 1 on a scene error)
   events                     write the sound-mix cues (the timeline and every cue() of the scenes)
                              [--out data/cues.json]
   perf    --from 0 --to 5    milliseconds per frame: rendering and the export's pixel readback, apart
-                             [--pixels rgb8|rgba8|rgb16|rgba16|linear: the readback to time]
+                             [--pixels rgb8|yuv420|rgba8|rgb16|rgba16|linear: the readback to time]
   gpu                        the GPU Chrome renders with and the GL backend (software: SwiftShader)
 
 Rendering

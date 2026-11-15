@@ -293,7 +293,7 @@ function argsOf(v: Values): Record<string, unknown> {
     case 'events': return { out: abs(v.out) };
     case 'perf': {
       const pixels = (v.pixels as string | undefined) ?? 'rgb8';
-      if (!['rgb8', 'rgba8', 'rgb16', 'rgba16', 'linear'].includes(pixels)) throw new UsageError(`--pixels ${v.pixels}: expected rgb8, rgba8, rgb16, rgba16 or linear`);
+      if (!['rgb8', 'yuv420', 'rgba8', 'rgb16', 'rgba16', 'linear'].includes(pixels)) throw new UsageError(`--pixels ${v.pixels}: expected rgb8, yuv420, rgba8, rgb16, rgba16 or linear`);
       return { from: num(v, 'from', 0), to: num(v, 'to', 5), pixels };
     }
     default: return {};
