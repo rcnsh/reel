@@ -324,8 +324,9 @@ export function ffmpegHasAlphaModes() {
 let deepGain: number | undefined;
 /**
  * What the ffmpeg on PATH multiplies 16-bit RGB by when swscale converts it to YUV: measured once per process on a
- * grey of 60000. swscale scales 16-bit input as if its full scale were 255 x 256 rather than 65535 (ffmpeg 7 to 9
- * give 1.0039, which brightens a 10-bit export by up to 3.4 codes), so the deep formats divide it out first.
+ * grey of 60000. Some builds' swscale scales 16-bit input as if its full scale were 255 x 256 rather than 65535
+ * (Homebrew's ffmpeg 9 gives 1.0039, which brightens a 10-bit export by up to 3.4 codes; a static ffmpeg 7 build
+ * gives 1), so the deep formats divide it out first.
  */
 export function ffmpegDeepGain() {
   if (deepGain === undefined) {
