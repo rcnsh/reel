@@ -105,7 +105,8 @@ Flags for every command that renders
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
   --shutter 0.5        the share of the frame time the sub-frames span
-  --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project; 0.5 = half size)
+  --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project; 0.5 = half size,
+                       for a width that is a multiple of 8 and a height of 4, else refused with exit 2)
   --size WxH, --fps N  override the project's frame size and rate
   --theme <name>       render with a built-in theme (print, film, neutral) instead of the project's
   --no-daemon          render in a browser of its own, started and stopped by this command
@@ -209,6 +210,20 @@ export function sizeOf(s: string): [number, number] {
   const w = m ? Number(m[1]) : NaN, h = m ? Number(m[2]) : NaN;
   if (!m || w < 16 || h < 16 || w > 8192 || h > 8192 || w % 4 || h % 2) throw new UsageError(`--size ${s}: expected WxH from 16 to 8192, the width a multiple of 4 and the height even`);
   return [w, h];
+}
+
+/** Whether a frame of w x h logical px at `scale` still packs into the readback: the physical width a multiple of 4, the height even. */
+export const scaleFits = (w: number, h: number, scale: number) => (w * scale) % 4 === 0 && (h * scale) % 2 === 0;
+
+/**
+ * Refuse a `--scale` that does not fit a frame of w x h logical px, naming a frame size that would (only 0.5 can
+ * miss: every size already packs at 1 to 4). Checked before a browser starts.
+ */
+export function checkScale(w: number, h: number, scale: number) {
+  if (scaleFits(w, h, scale)) return;
+  const m = Math.round(1 / scale);
+  const fw = w - (w % (4 * m)), fh = h - (h % (2 * m));
+  throw new UsageError(`--scale ${scale}: a ${w}x${h} frame would be ${w * scale}x${h * scale}, and the readback needs a width that is a multiple of 4 and an even height; ${fw}x${fh} (--size ${fw}x${fh}) renders at --scale ${scale}, or leave out --scale for full size`);
 }
 
 /** The motion-blur sampling flags: a fixed count, or adaptive. */

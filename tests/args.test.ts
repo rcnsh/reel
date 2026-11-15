@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test';
-import { COMMANDS, HELP, int, list, num, pageOf, parseCommand, samplesOf, sizeOf, UsageError } from '../cli/args';
+import { checkScale, COMMANDS, HELP, int, list, num, pageOf, parseCommand, samplesOf, scaleFits, sizeOf, UsageError } from '../cli/args';
 
 test('every command is in the help', () => {
   for (const c of Object.keys(COMMANDS)) expect(HELP).toMatch(new RegExp(`^  ${c}\\b`, 'm'));
@@ -49,4 +49,16 @@ test('sampling and page options', () => {
   expect(() => pageOf({ scale: '5' })).toThrow('1 to 4');
   expect(() => pageOf({ fps: '0' })).toThrow('frame rate');
   expect(() => pageOf({ only: 'a,,b' })).toThrow('clip ids');
+});
+
+test('a scale that does not pack is refused with a frame size that would', () => {
+  for (const s of [1, 2, 3, 4]) expect(scaleFits(1076, 1078, s)).toBe(true);
+  expect(scaleFits(1920, 1080, 0.5)).toBe(true);
+  expect(scaleFits(1080, 1350, 0.5)).toBe(false);
+  expect(() => checkScale(1920, 1080, 0.5)).not.toThrow();
+  expect(() => checkScale(1080, 1350, 0.5)).toThrow(UsageError);
+  expect(() => checkScale(1080, 1350, 0.5)).toThrow('a 1080x1350 frame would be 540x675');
+  expect(() => checkScale(1076, 1078, 0.5)).toThrow('1072x1076 (--size 1072x1076) renders at --scale 0.5');
+  // the size it names does fit
+  expect(scaleFits(1072, 1076, 0.5)).toBe(true);
 });

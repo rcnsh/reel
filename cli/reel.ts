@@ -4,7 +4,7 @@
 // folder) and --json (one JSON object on stdout: { ok, errors, logs, warnings, ... }). Exit codes: 0 done,
 // 1 something failed (scene errors included), 2 a bad command line or no project.
 import path from 'node:path';
-import { HELP, int, list, num, pageOf, parseCommand, samplesOf, UsageError, type Values } from './args';
+import { checkScale, HELP, int, list, num, pageOf, parseCommand, samplesOf, UsageError, type PageOpts, type Values } from './args';
 import { ENGINE, projectDir } from './server';
 import type { Req, Result } from './ops';
 
@@ -199,9 +199,20 @@ function printCheck(x: Result) {
 
 const hist = (h: Record<string, number>) => Object.entries(h).sort((a, b) => +a[0] - +b[0]).map(([k, v]) => `${k}:${v}`).join(' ');
 
+/** The logical frame size a page will have: --size, else the config's, read outside the browser (null when the config does not load: the renderer reports that). */
+async function frameSize(page: PageOpts): Promise<[number, number] | null> {
+  if (page.w && page.h) return [page.w, page.h];
+  try {
+    const f = (await import('../src/config')).formatOf(await (await import('./server')).loadConfig(PROJECT));
+    return [f.w, f.h];
+  } catch { return null; }
+}
+
 let req!: Req;
 try {
   const page = pageOf(A), shutter = num(A, 'shutter', 0.5);
+  // (a scale that does not pack is refused here, before a browser starts; only half size can miss)
+  if (page.scale === 0.5) { const s = await frameSize(page); if (s) checkScale(s[0], s[1], page.scale); }
   let samples = samplesOf(A);
   if (mode === 'video') {
     const { exportVideo } = await import('./video');
@@ -214,6 +225,10 @@ try {
       if (A.samples !== undefined || A.scale !== undefined) throw new UsageError('--draft renders at half size with one sample: leave out --samples and --scale');
       samples = 1;
       enc.draft = F.draftEncoder();
+      // (half size when the frame's halves pack into the readback, else full size: still one sample)
+      const s = await frameSize(page);
+      page.scale = s ? F.draftScale(s[0], s[1]) : 1;
+      enc.comment = `reel draft: ${page.scale === 0.5 ? 'half size' : 'full size'}, one sample, not for delivery`;
     }
     const mixed = !!A.mix || A.subtitles === true;
     if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
@@ -222,11 +237,6 @@ try {
     let release = () => {};
     try {
       const m = await r.meta();
-      // (half size when the frame's halves pack into the readback, else full size: still one sample)
-      if (A.draft) {
-        page.scale = F.draftScale(page.w ?? m.format.w, page.h ?? m.format.h);
-        enc.comment = `reel draft: ${page.scale === 0.5 ? 'half size' : 'full size'}, one sample, not for delivery`;
-      }
       const sc = page.scale, plan = F.planOf(format, enc, page.fps ?? m.format.fps, [(page.w ?? m.format.w) * sc, (page.h ?? m.format.h) * sc]);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
       // (with --mix the picture is rendered beside the output and the mix writes the output)

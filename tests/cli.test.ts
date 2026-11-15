@@ -4,7 +4,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { hasChrome, reel, scratchCopy } from './helpers';
+import { ENGINE, hasChrome, reel, scratchCopy } from './helpers';
 
 const demo = scratchCopy('demo'), layers = scratchCopy('layers');
 const fresh = realpathSync(mkdtempSync(path.join(tmpdir(), 'reel-test-init-')));
@@ -22,6 +22,16 @@ test('--help exits 0 and lists the commands; a bad command line exits 2', async 
   expect(bad.err).toContain("Unknown option '--bogus'");
   expect((await reel(['still', '--t', '1', '--project', fresh])).code).toBe(2);
   expect((await reel(['nonsense'])).code).toBe(2);
+});
+
+test('a --scale that does not fit the frame exits 2 before a browser starts', async () => {
+  // (no Chrome to be had: a refusal after launch would be exit 1)
+  const env = { CHROME_PATH: '/nonexistent/chrome' };
+  for (const args of [['still', '--t', '1'], ['video', '--out', path.join(fresh, 'x.mp4')]]) {
+    const r = await reel([...args, '--scale', '0.5', '--size', '1080x1350', '--project', layers.dir], ENGINE, env);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain('1080x1348 (--size 1080x1348) renders at --scale 0.5');
+  }
 });
 
 test.skipIf(!hasChrome)('stills are named after clip and time and never overwrite each other', async () => {

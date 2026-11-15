@@ -3,7 +3,7 @@
 // ffmpeg command that encodes it. Pure (no I/O), so the CLI and its tests share it.
 import path from 'node:path';
 import { yuvFits, type Pixels } from '../src/engine/pixels';
-import { int, num, UsageError, type Values } from './args';
+import { int, num, scaleFits, UsageError, type Values } from './args';
 
 export type FormatId = 'h264' | 'hevc' | 'prores' | 'prores4444' | 'webm' | 'gif' | 'webp' | 'png' | 'png16' | 'jpeg' | 'exr';
 
@@ -313,7 +313,7 @@ export function draftEncoder(has: (encoder: string) => boolean = hasFfmpegEncode
  * the readback (its width a multiple of 4 and its height even: a frame width that is a multiple of 8 and a height that
  * is a multiple of 4, as 1920x1080 and 1080x1920 are), else full size (1080x1350 and 1100x1100 are not).
  */
-export const draftScale = (w: number, h: number): 0.5 | 1 => (w % 8 === 0 && h % 4 === 0 ? 0.5 : 1);
+export const draftScale = (w: number, h: number): 0.5 | 1 => (scaleFits(w, h, 0.5) ? 0.5 : 1);
 
 /** A draft's file name: `.draft` before the extension (added when missing), so a draft is never taken for a final. */
 export function draftName(out: string, draft: boolean) {

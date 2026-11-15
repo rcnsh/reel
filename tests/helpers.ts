@@ -18,8 +18,8 @@ export function scratchCopy(example: string) {
 }
 
 /** Run the CLI; returns its exit code, stdout and stderr. */
-export async function reel(args: string[], cwd = ENGINE) {
-  const p = Bun.spawn(['bun', REEL, ...args], { cwd, stdout: 'pipe', stderr: 'pipe', env: process.env });
+export async function reel(args: string[], cwd = ENGINE, env: Record<string, string> = {}) {
+  const p = Bun.spawn(['bun', REEL, ...args], { cwd, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...env } });
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   return { code, out, err, json: () => JSON.parse(out) };
 }
