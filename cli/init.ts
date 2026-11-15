@@ -187,14 +187,14 @@ Read before acting (the skills are copied into \`.claude/skills\`; \`bun run ree
 
 - \`reel.config.ts\` is the edit: ${o.size[0]}×${o.size[1]} at ${o.fps} fps, the \`${o.theme}\` theme, ${o.narrated ? 'one clip per plate of `narration.txt` that has a scene of the same name' : 'the clips on the timeline'}. Scenes live in \`scenes/\`, one default-exported \`Scene\` class per file.${o.narrated ? `
 - Narration: \`narration.txt\` holds the plates (\`# name\` and its lines). \`bun run reel narrate\` voices and times it (\`narration\` in the config or \`--voice\` picks the voice; plates are cached); \`bun run reel align <recording>\` times a real one. Both write \`audio/narration.flac\`, \`data/words.json\` and \`data/audio.json\`: regenerate them, never edit them by hand. Scenes find their timing by text (\`ctx.words.get('…')\`).
-- Sound: scenes call \`cue(kind, t)\`; \`mix.json\` maps kinds to files in \`audio/\`. \`bun run reel events\`, then \`bun run reel mix <raw.mp4> <out.mp4>\`.` : ''}
+- Sound: scenes call \`cue(kind, t)\`; \`mix.json\` maps kinds to files in \`audio/\`. \`bun run reel video --mix\` renders and mixes in one go; \`bun run reel events\`, then \`bun run reel mix <raw.mp4> <out.mp4>\` re-mixes a render.` : ''}
 
 ## Checks
 
 1. \`bun run typecheck\`.
 2. Stills of every clip you touched (its first, middle and last frame) and a strip of its motion, looked at: \`bun run reel still --t <times> --only <clip>\`, \`bun run reel strip --from <s> --to <s> --only <clip>\`.
 3. \`bun run reel check\` with no errors (and \`--size 1080x1920\` if the video may go vertical).
-4. Motion blur and timing: \`bun run reel video --samples auto --preset veryfast --out out/draft.mp4\`.
+4. Timing against the sound: \`bun run reel video --draft\` (half size, one sample, quick; never a deliverable). Motion blur: \`bun run reel video --samples auto --preset veryfast\`${o.narrated ? ' (add \`--mix\` for the finished sound)' : ''}.
 
 \`bun run reel …\` is \`bun ${path.join(ENGINE, 'cli/reel.ts')} …\` in this folder; it starts a warm renderer for the project on first use. Chrome: \`CHROME_PATH\`, else the Chrome for Testing build \`bun run reel chrome install\` downloads (157 or later).
 `;
