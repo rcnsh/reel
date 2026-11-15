@@ -9,6 +9,7 @@ Where to read before acting:
 - **Writing or changing a scene or a config**: `skills/reel-authoring/SKILL.md` and the reference files beside it (the Scene API, determinism and sampling rules, themes, the toolbox, timing); 3D in `skills/reel-3d/SKILL.md`. **Checking it**: `skills/reel-review-loop/SKILL.md`.
 - **Changing the engine**: `docs/ENGINE.md` (the page, a frame's pipeline, adaptive sampling, readback, reporting).
 - **Making a video, the layout, render commands**: `README.md`, and `bun cli/reel.ts --help` for every command and flag.
+- **Briefing an agent to make a video** (the prompt's parts, a template): `PLAYBOOK.md`. A change to the MCP tools or to what an agent can deliver updates it.
 - **A project's config**: the types in `src/config.ts` (`VideoConfig`, `Clip`). **Analysis flags**: `reel analyze --help`. **Mix config**: the comment at the top of `tools/mix.ts`.
 
 ## Words

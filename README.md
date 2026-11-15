@@ -85,7 +85,7 @@ The agent's side: `reel notes` lists them (`--open`, `--json`), each open one wi
 Register it with Claude Code (after `reel chrome install`; pass `CHROME_PATH` only to render with another Chrome 157+):
 
 ```sh
-claude mcp add reel -- bun <path to reel>/cli/reel.ts mcp
+claude mcp add --scope user reel -- bun <path to reel>/cli/reel.ts mcp
 ```
 
 or, for a client configured with JSON:
@@ -102,6 +102,8 @@ or, for a client configured with JSON:
 ```
 
 `tests/mcp.test.ts` drives it with the official MCP client over stdio.
+
+The tools take strict arguments (one a tool does not have is an error), and the server exits when its client goes away. [PLAYBOOK.md](PLAYBOOK.md) says how to brief an agent that makes a video with them: what a prompt must give (the video, the look, the ingredients, the deliverables, the limits, what done means), a template, and the kinds of job.
 
 ## Layout
 
