@@ -63,7 +63,7 @@ Stills and strips settle layout and most motion. Render video when you need to j
 
 You cannot watch a video file; judge its frames with `reel strip` at the same times, and use the video for the person you are working with.
 
-One export runs at a time on a machine: a second `reel video` (or `video_start`) fails while one is running, naming it. Wait for it rather than forcing a second beside it. On a Linux machine without a GPU everything renders in software (SwiftShader): stills, `check` and drafts work but take about half a second a frame, and a final `--samples auto` export takes seconds a frame, so keep exports there short (`--from/--to`) and render finals where there is a GPU.
+One export runs at a time on a machine: a second `reel video` (or `video_start`) fails while one is running, naming it. Wait for it rather than forcing a second beside it. On a Linux machine without a GPU everything renders in software (SwiftShader): stills, `check` and drafts work but take half a second to a few seconds a frame (more on a busy host), and a final `--samples auto` export takes from seconds to minutes a frame, so keep exports there short (`--from/--to`) and render finals where there is a GPU.
 
 ## Cheap looking
 
