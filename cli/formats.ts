@@ -46,7 +46,9 @@ export function formatOf(format: string | undefined, out: string | undefined): F
     if (!f || !Object.prototype.hasOwnProperty.call(FORMATS, format)) throw new UsageError(`--format ${format}: expected one of ${Object.keys(FORMATS).join(', ')}`);
     if (out) {
       const ext = path.extname(out).toLowerCase(), want = BY_EXT[ext] ? FORMATS[BY_EXT[ext]!].ext : ext;
-      if (f.kind !== 'sequence' && ext && want !== f.ext && !(f.ext === '.mp4' && ext === '.m4v')) throw new UsageError(`--out ${out}: a ${f.id} file is ${f.ext}`);
+      // (a file without an extension gives ffmpeg no container to write, and the mix none to carry the sound)
+      if (f.kind !== 'sequence' && !ext) throw new UsageError(`--out ${out}: a ${f.id} file needs its extension, ${f.ext}`);
+      if (f.kind !== 'sequence' && want !== f.ext && !(f.ext === '.mp4' && ext === '.m4v')) throw new UsageError(`--out ${out}: a ${f.id} file is ${f.ext}`);
       if (f.kind === 'sequence' && ext && ext !== f.ext && !(f.id === 'jpeg' && ext === '.jpeg')) throw new UsageError(`--out ${out}: ${f.id} frames are ${f.ext} files`);
     }
     return f;

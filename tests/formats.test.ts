@@ -18,6 +18,10 @@ test('the format comes from --format, else the --out extension, else H.264', () 
   expect(() => formatOf('hevc', '/x/a.mov')).toThrow('a hevc file is .mp4');
   expect(() => formatOf('png16', '/x/f.jpg')).toThrow('.png files');
   expect(() => formatOf('toString', undefined)).toThrow('--format toString');
+  // a video or loop file without an extension; a sequence takes the format's
+  expect(() => formatOf('h264', '/x/video')).toThrow('needs its extension, .mp4');
+  expect(() => formatOf('gif', '/x/loop')).toThrow('needs its extension, .gif');
+  expect(formatOf('png', '/x/frames/f').id).toBe('png');
 });
 
 test('each format asks the page for the readback, depth and alpha it needs', () => {
