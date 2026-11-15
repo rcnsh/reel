@@ -159,6 +159,7 @@ test.skipIf(!hasChrome)('--draft: half size, one sample, encoded in the page, na
   const p = JSON.parse(r.stdout.toString());
   expect(p.streams.map((s: Stream) => s.codec_name)).toEqual(['h264', 'aac']);
   expect(p.streams[0].width).toBe(160);
+  expect(bt709(p.streams[0])).toEqual(['tv', 'bt709', 'bt709', 'bt709']);
   expect(p.format.tags.comment).toContain('reel draft');
   const bad = await reel(['video', '--project', proj.dir, '--draft', '--samples', 'auto']);
   expect(bad.code).toBe(2);

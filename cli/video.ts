@@ -256,8 +256,9 @@ async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
     // (the Annex B stream has no timestamps: muxed alone at the frame rate first, then with the sound, which ffmpeg
     // drops when it is muxed with an untimed stream in one pass)
     const pic = audio ? `${o.out}.picture.mp4` : o.out;
-    // (the browser tags the stream with the canvas's sRGB transfer: retagged BT.709, as every other YUV stream reel writes)
-    const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'h264', '-r', String(fps), '-i', 'pipe:0', '-c:v', 'copy', '-bsf:v', 'h264_metadata=transfer_characteristics=1', ...(o.enc.comment ? ['-metadata', `comment=${o.enc.comment}`] : []), '-movflags', '+faststart', '-f', 'mp4', pic];
+    // (the browser tags the stream with the canvas's sRGB transfer: retagged BT.709, as every other YUV stream reel writes,
+    // in the bitstream and in the container's colr box, which is written from the input's tags otherwise)
+    const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'h264', '-r', String(fps), '-i', 'pipe:0', '-c:v', 'copy', '-bsf:v', 'h264_metadata=transfer_characteristics=1', '-color_trc', 'bt709', ...(o.enc.comment ? ['-metadata', `comment=${o.enc.comment}`] : []), '-movflags', '+faststart', '-f', 'mp4', pic];
     const proc = ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
     let count = 0, frames = 0;
     const step = Math.max(1, Math.round(total / 100));
