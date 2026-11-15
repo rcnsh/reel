@@ -222,7 +222,8 @@ export class Stage3D {
     c.up.set(0, 1, 0);
     c.lookAt(...pose.target);
     if (pose.roll) c.rotateZ((pose.roll * Math.PI) / 180);
-    if (pose.fov !== undefined && pose.fov !== c.fov) c.fov = pose.fov;
+    // (a pose without a field of view is the stage's own, whatever pose came before: frames render in any order)
+    c.fov = pose.fov ?? this.o.fov ?? 35;
     c.updateProjectionMatrix();
     c.updateMatrixWorld();
     return this;
