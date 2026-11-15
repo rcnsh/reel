@@ -266,8 +266,8 @@ export async function serveMcp() {
 
   server.registerTool('mix_audio', {
     title: 'Mix music and cues',
-    description: "The finished sound under a rendered video, into a new MP4: the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render. (video_start with mix: true renders and mixes in one job.)",
-    inputSchema: { project, input: z.string().describe('The rendered .mp4.'), output: z.string().describe('The mixed .mp4 to write.'), from: z.number().min(0).optional() },
+    description: "The finished sound under a rendered video, into a new file of the same container (.mp4 with AAC, .mov with PCM, .webm with Opus): the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render. (video_start with mix: true renders and mixes in one job.)",
+    inputSchema: { project, input: z.string().describe('The rendered .mp4, .mov or .webm.'), output: z.string().describe('The mixed file to write (.mp4, .mov or .webm).'), from: z.number().min(0).optional() },
   }, (a) => guard(async () => {
     // (the cues the mix needs, from the project as it is now)
     const ev = await call(reqOf('events', a, {}));

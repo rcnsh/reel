@@ -12,8 +12,9 @@ timing through `this.ctx.words` and `this.ctx.audio` (and `f.a`, `f.beat`), neve
 `assets`, and `video_start` with `mix`).
 
 Nothing leaves the machine unless a hosted provider's key is in the environment: `ELEVENLABS_API_KEY`,
-`FISH_API_KEY`, `OPENAI_API_KEY`. Local models run on Apple Silicon (MLX) and download once (Kokoro ~350 MB, the
-forced aligner ~1.2 GB, the music models ~250 MB) into their normal caches.
+`FISH_API_KEY`, `OPENAI_API_KEY`. Local models run through MLX on Apple Silicon and PyTorch on the CPU elsewhere
+(slower: on Linux allow a minute for a short narration or a song), and download once (Kokoro ~350 MB, the forced
+aligner ~1.2 GB, the music models ~250 MB) into their normal caches.
 
 ## Narration: `reel narrate`
 
@@ -94,7 +95,8 @@ A scene asks for a sound with `cue(kind, t)` in `init()` (times from words or be
 - **`reel video --samples auto --mix`** renders and mixes into the finished file and prints its LUFS and true peak.
   To re-mix a render without re-rendering: `reel events` (writes `data/cues.json`), then
   `reel mix out/raw.mp4 out/final.mp4` (a partial render with the same `--from`).
-- The track is read from its lossless file; the only lossy step is the final AAC. The same project mixes to the same
+- The track is read from its lossless file; the only lossy step is the final encode (AAC in .mp4, Opus in .webm;
+  a .mov gets 24-bit PCM, lossless). The same project mixes to the same
   bytes every time, and a silent project mixes too.
 
 ## Subtitles

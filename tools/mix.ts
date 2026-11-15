@@ -1,7 +1,8 @@
 // `reel mix <in.mp4> <out.mp4> [--from 0]`: the finished sound under a rendered video. The project's track (the
 // narration, or a song) is read from its lossless file rather than from the render, music beds and cue sounds are
 // laid with it, and the sum is brought to a loudness target in two passes (EBU R128: measure, then a linear gain
-// under a true-peak ceiling) and encoded to AAC once. The picture is copied. `reel video --mix` runs this after
+// under a true-peak ceiling) and encoded once, in the output container's codec (AAC in MP4, 24-bit PCM in MOV, Opus
+// in WebM). The picture is copied. `reel video --mix` runs this after
 // rendering, so one command makes the finished file.
 //
 // mix.json in the project root says what to lay where (every key optional):
@@ -34,7 +35,8 @@ export const MIX_HELP = `reel mix <in.mp4> <out.mp4> [--from 0]: the finished so
 
 Lays the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json
 (cues from data/cues.json: run \`reel events\` first) and brings the sum to the loudness target (default -14 LUFS
-integrated, -1 dBTP; \`loudness\` in mix.json), encoded to AAC once; the picture is copied. --from is the render's
+integrated, -1 dBTP; \`loudness\` in mix.json), encoded once (AAC in .mp4, PCM in .mov, Opus in .webm); the
+picture is copied. --from is the render's
 --from. \`reel video --mix\` renders and mixes in one go. The format of mix.json: the comment in tools/mix.ts.`;
 
 if (import.meta.main) {
