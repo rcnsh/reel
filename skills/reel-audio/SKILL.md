@@ -86,7 +86,9 @@ A scene asks for a sound with `cue(kind, t)` in `init()` (times from words or be
 
 - Files are the project's (`audio/`), or the bundled cue sounds by name: `tick`, `click`, `pop`, `whoosh`,
   `swell`, `impact`. A cue kind named after a bundled sound needs no entry (it plays at -6 dB).
-- Music runs from clip `from` to clip `to`, looped, ducked under the track. `entryCues` add a cue at clip starts.
+- Music runs from the start of clip `from` (without it, the start of the video) to the start of clip `to` (without
+  it, the end of the video), looped, ducked under the track. `entryCues` add a cue of that kind at the start of each
+  listed clip; they are added by the mix, so `reel events` counts only the cues scenes made.
 - Sounds placed on the timeline go in the config, not `mix.json`: `sounds: [{ file: 'audio/door.wav', at: 4.2, db: -3 }]`
   (or `(src) => […]` with times from words or beats; fields `from`, `duration`, `loop`, `speed`, `fadeIn`, `fadeOut`),
   or `sound({ … })` from a scene's `init()`. They are laid as they are, not ducked.
@@ -101,7 +103,7 @@ A scene asks for a sound with `cue(kind, t)` in `init()` (times from words or be
 
 ## Subtitles
 
-`reel subtitles` writes `out/subtitles/subtitles.srt` and `.vtt` from `data/words.json` (two lines of 42 characters
+`reel subtitles` writes `subtitles.srt` and `subtitles.vtt` into `out/subtitles` (`--out` names another folder) from `data/words.json` (two lines of 42 characters
 at most, 7 s at most, broken after punctuation). `reel video --subtitles` mixes and adds them as a soft track.
 Burned-in captions are the kit's `Captions` component.
 

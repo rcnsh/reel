@@ -104,7 +104,8 @@ Working on a project
   analyze <song> [...]       beats, envelopes and sections of a song (flags: reel analyze --help)
   mix <in.mp4> <out.mp4>     the finished sound under a render: the track, music and cue sounds
                              (mix.json), at -14 LUFS; re-mix without re-rendering   [--from 0]
-  subtitles                  SRT and VTT of the timed words      [--out out/subtitles] [--from] [--to]
+  subtitles                  SRT and VTT of the timed words, as subtitles.srt and subtitles.vtt
+                             in the folder --out (default out/subtitles)        [--from] [--to]
   assets                     the generated assets of assets.json: generates the missing ones with a
                              provider's key, else lists what each needs; exits 1 while any is missing
                              [--list] [--force] [--json]  (reel assets --help)

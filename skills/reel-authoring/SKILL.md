@@ -136,11 +136,20 @@ What a scene gets:
 1. **Pure in `f.t`.** Same `t`, same pixels, in any order: the export renders sub-frames out of order and any number of times. No `Math.random()`, `Date.now()`, `performance.now()` for visuals, no counting `render()` calls, no state carried between calls (unless `stateful`, which then cannot use `--samples auto`). Randomness: `mulberry32(seed)`, `hash(a, b, …)`, `noise1/2/3`, seeded by indices.
 2. **Per-frame jitter uses `frameIdx(t)`**, constant over a frame's shutter; `Math.floor(t * FPS)` double-exposes two states. Step frames by `1 / FPS`, never `1 / 60`.
 3. **Anchor to words, not numbers.** `this.ctx.words.get('some words')` finds a line by its text (and throws if it is gone, so a script edit fails loudly); use its `start`, `end` and `words[i].start`. A typed time breaks when the voice is re-timed.
-4. **Lay out from `W` and `H`** (logical px). In HTML, use widths in % of the layer and sizes in `vmin` or `clamp()`; in Canvas2D, size text with `fitSize` to a width derived from `W`; never from 1920 or 1080. Check the layout at `--size 1080x1920`. Logical px hold at every output scale; `PW`/`PH`, `gl_FragCoord` and canvas backing sizes are physical (reference/sampling.md, "Output scale").
+4. **Lay out from `W` and `H`** (logical px). In HTML, use widths in % of the layer and sizes in `vmin` or `clamp()`; in Canvas2D, size text with `fitSize` to a width derived from `W`; never from 1920 or 1080. Check the layout at `--size 1080x1920` ("Two aspect ratios" below). Logical px hold at every output scale; `PW`/`PH`, `gl_FragCoord` and canvas backing sizes are physical (reference/sampling.md, "Output scale").
 5. **Colours from the theme**, linear: `C_<KEY>` in GLSL (`accentHi` is `C_ACCENT_HI`), `LIN.<key>` for GL uniforms, `rgba('<key>', alpha)` for Canvas2D. `bg`, `fg`, `accent`, `accentHi`, `accentLo` exist in every theme; a theme's own keys tie the scene to it. A missing key throws (and fails the command).
 6. **Report what you draw.** HTML layers report their text and images by themselves (`data-label`, `data-exempt` on elements). Text you draw yourself: after `fillText`, `reportText(c, text, x, y, { label })`; after `drawStrokeText`, `reportStrokeText(c, st, len, text, { label })`; for glyph atlases, images and shapes, `report({ kind, x, y, w, h, text?, size?, color?, alpha?, label? })` in logical frame px. Free outside `reel check`; guard extra work with `if (reporting())`. Mark intended rule breaks: `exempt: ['offFrame']` on a box, `check: { exempt: ['blank'] }` on a clip (rules: `blank frozen offFrame safeArea overlap minSize contrast overflow clipped tiny empty`).
 7. **Sound by cue.** `cue(kind, t)` in `init()` (from word times); `mix.json` maps kinds to files. Scenes never play audio.
 8. **Values over ~0.85 bloom** under themes with bloom (`film`). Keep text below that unless it should glow.
+
+## Two aspect ratios from one project
+
+Every render command takes `--size WxH` (and the MCP tools `size`), so a 16:9 project also delivers 9:16 or 1:1 without a second config: `reel video --size 1080x1920 --out out/vertical.mp4`. `W` and `H` are that size while it renders, so one scene lays out both:
+
+- Let proportions do most of it: boxes from `W`, `H` and `UNIT` (the short side), kit components' default boxes, HTML in % and `vmin`.
+- Where the composition must change (side by side becomes stacked, a 3D subject moves up to leave room for text), branch once at module level, `const PORTRAIT = H > W;`, and pick boxes, camera framing and font sizes from it. Keep the timing identical: both cuts share the narration.
+- Captions and lower thirds default to the safe area of whatever size is rendered; give a vertical cut more room at the bottom for a platform's own interface if it is going to one.
+- Check each: `reel check` and `reel check --size 1080x1920`, a `reel sheet` of both, and name the outputs yourself with `--out` (the default name is the same for every size).
 
 ## Themes in one paragraph
 

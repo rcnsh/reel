@@ -128,9 +128,10 @@ if (!p.behind) this.tag.draw(this.ctx.renderer, out, { x: p.x + 40, y: p.y - 22 
 ## Performance and memory
 
 - A stage with a few hundred thousand triangles renders in a few ms at 1080p (`reel perf`): `examples/product3d` runs at 8 ms a frame at 1x and 21 ms at `--scale 2` with one sample.
-- Export with `--samples auto` pays per sub-frame for the shadow maps and the geometry; only fragment shading is skipped in converged tiles (the stage puts them at the near plane of its own depth test). Depth of field and soft shadows converge slowly on glossy highlights, so such a stage usually runs to 324 sub-frames: about 0.19 s a frame at 1080p and 0.65 s at 4K for the product example. Cap it with `maxSamples: 108` on the clip if that is too slow, or drop the jitter (no `fstop`, `softness: 0`).
+- Export with `--samples auto` pays per sub-frame for the shadow maps and the geometry; only fragment shading is skipped in converged tiles (the stage puts them at the near plane of its own depth test). Depth of field and soft shadows converge slowly on glossy highlights, so such a stage usually runs to 324 sub-frames: about 0.19 s a frame at 1080p and 0.65 s at 4K for the product example. A stage with neither does too when its surfaces carry fine detail (a bump or normal map, a noisy texture, a starfield): the anti-aliasing jitter alone keeps those tiles changing. `reel still --t <s> --samples auto --json` prints `subFrames` for a frame; when it says 324 for a slow shot, put `maxSamples: 108` on the clip (at 4K, 108 cannot be told from 324), or 36 for a locked-off camera.
 - Memory: the stage's target is 8 bytes a pixel plus depth (100 MB at 4K) and its MSAA target four times that (400 MB at 4K, only in one-sample renders). Shadow maps are 16 MB each at 2048. Free them in `dispose()`.
 - Keep geometry modest (under ~1M triangles) and textures 2K; one shadow-casting light (the rigs cast from the key only).
+- A texture map is as sharp as its texels: a 4K map wrapped round a planet is fine from orbit and a flat blur from a metre above the ground. There is no terrain or detail-texture helper: for a close-up, give the surface a `ShaderMaterial` of its own (prepend `GLSL_COMMON` for the noise functions) or a tiling detail map.
 
 ## What to look for in stills
 
