@@ -60,7 +60,8 @@ Rendering
                              Sequences are named after --out with the video frame number (f.png ->
                              f_000120.png). Transparent renders clear the theme's bg to transparent
                              and write straight alpha. Every YUV stream is limited-range BT.709, tagged.
-                             --draft: a quick look, not a deliverable: half size (the same layout), one
+                             --draft: a quick look, not a deliverable: half size (the same layout; full
+                             size when the width is not a multiple of 8 or the height not of 4), one
                              sample, H.264 encoded in the page with WebCodecs (hardware where there is
                              one); written as <name>.draft.mp4 and tagged a draft in its comment
                              (REEL_DRAFT_ENCODER=videotoolbox|x264: the raw pipe instead)

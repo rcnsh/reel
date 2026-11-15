@@ -1,7 +1,7 @@
 // The output formats: which one a command line means, what each asks of the page, and the ffmpeg command for each.
 import { expect, test } from 'bun:test';
 import { UsageError } from '../cli/args';
-import { defaultOut, draftEncoder, draftName, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
+import { defaultOut, draftEncoder, draftName, draftScale, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
 import { containerOf } from '../tools/mix';
 
 test('the format comes from --format, else the --out extension, else H.264', () => {
@@ -163,6 +163,11 @@ test('drafts are named and encoded as drafts', () => {
   expect(draftName('/o/video.mp4', true)).toBe('/o/video.draft.mp4');
   expect(draftName('/o/video.draft.mp4', true)).toBe('/o/video.draft.mp4');
   expect(draftName('/o/video.mp4', false)).toBe('/o/video.mp4');
+  // half size when the half frame packs into the readback, else full size
+  expect(draftScale(1920, 1080)).toBe(0.5);
+  expect(draftScale(1080, 1920)).toBe(0.5);
+  expect(draftScale(1080, 1350)).toBe(1);
+  expect(draftScale(1100, 1100)).toBe(1);
   const env = process.env.REEL_DRAFT_ENCODER;
   try {
     delete process.env.REEL_DRAFT_ENCODER;

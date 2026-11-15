@@ -212,10 +212,8 @@ try {
     if (A.draft) {
       // a quick look: half size (the layout of the full size), one sample, the fastest encoder; named and tagged a draft
       if (A.samples !== undefined || A.scale !== undefined) throw new UsageError('--draft renders at half size with one sample: leave out --samples and --scale');
-      page.scale = 0.5;
       samples = 1;
       enc.draft = F.draftEncoder();
-      enc.comment = 'reel draft: half size, one sample, not for delivery';
     }
     const mixed = !!A.mix || A.subtitles === true;
     if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
@@ -224,6 +222,11 @@ try {
     let release = () => {};
     try {
       const m = await r.meta();
+      // (half size when the frame's halves pack into the readback, else full size: still one sample)
+      if (A.draft) {
+        page.scale = F.draftScale(page.w ?? m.format.w, page.h ?? m.format.h);
+        enc.comment = `reel draft: ${page.scale === 0.5 ? 'half size' : 'full size'}, one sample, not for delivery`;
+      }
       const sc = page.scale, plan = F.planOf(format, enc, page.fps ?? m.format.fps, [(page.w ?? m.format.w) * sc, (page.h ?? m.format.h) * sc]);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
       // (with --mix the picture is rendered beside the output and the mix writes the output)
@@ -241,12 +244,12 @@ try {
         },
       });
       const file = format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file;
-      if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: 0.5, samples: 1 };
+      if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: page.scale, samples: 1 };
       Object.assign(res, { gl: (await import('./chrome')).glBackend(), file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
       res.errors.push(...r.explain(v.errors));
       res.logs.push(...r.explain(v.logs));
       say(`\nwrote ${file} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
-      say(A.draft ? `a draft (${(res.draft as { encoder: string }).encoder}, half size, one sample): not for delivery` : `sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
+      say(A.draft ? `a draft (${(res.draft as { encoder: string }).encoder}, ${page.scale === 0.5 ? 'half size' : 'full size: half would not pack'}, one sample): not for delivery` : `sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
       if (mixed && !res.errors.length) {
         const { mixVideo } = await import('../tools/mix');
         try {

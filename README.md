@@ -58,7 +58,7 @@ The audio stays lossless until the last step: the narration is FLAC, `reel analy
 
 One export runs at a time on a machine: an export holds several Chromes, their GPU processes and the encoder, and a few 4K exports at once have frozen a 24 GB Mac. Each running export leaves a claim in the temp folder (`reel-exports/`), and another `reel video` refuses while one is live unless given `--force`.
 
-`reel video --draft` is for looking, not delivering: half the size with the same layout, one sample, and H.264 encoded inside the browser with WebCodecs (hardware where there is one), so only the encoded stream leaves the page; it writes `<name>.draft.mp4` with a comment tag saying it is a draft. On an M-series Mac a draft of the examples renders at 230 to 290 frames a second; at half size the raw pipe into x264 `ultrafast` or VideoToolbox (`REEL_DRAFT_ENCODER`) is as fast, since frames leave the page as 4:2:0, but WebCodecs keeps the raw frames off the WebSocket altogether.
+`reel video --draft` is for looking, not delivering: half the size with the same layout (full size for a frame whose half would not pack into the readback: a width that is not a multiple of 8 or a height not of 4, as 1080x1350), one sample, and H.264 encoded inside the browser with WebCodecs (hardware where there is one), so only the encoded stream leaves the page; it writes `<name>.draft.mp4` with a comment tag saying it is a draft. On an M-series Mac a draft of the examples renders at 230 to 290 frames a second; at half size the raw pipe into x264 `ultrafast` or VideoToolbox (`REEL_DRAFT_ENCODER`) is as fast, since frames leave the page as 4:2:0, but WebCodecs keeps the raw frames off the WebSocket altogether.
 
 ### Cutting to music
 

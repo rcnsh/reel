@@ -210,7 +210,7 @@ export async function serveMcp() {
       alpha: z.boolean().optional().describe('A transparent background for webp, png, png16 and exr (prores4444 and webm have it unless opaque).'), opaque: z.boolean().optional().describe('prores4444 or webm without alpha.'),
       quality: z.number().int().min(1).max(100).optional().describe('jpeg and webp quality.'), max_fps: z.number().positive().optional().describe('gif/webp: the highest frame rate (default 25 / 30).'), max_size: z.number().int().min(16).optional().describe('gif/webp: the longest side in px (default 640 / 1080).'),
       noaudio: z.boolean().optional().describe('Leave the audio track out.'),
-      draft: z.boolean().optional().describe('A quick look while iterating, never a deliverable: half size with the same layout, one sample, H.264 encoded in the browser; written as <name>.draft.mp4. Leave out samples and scale.'),
+      draft: z.boolean().optional().describe('A quick look while iterating, never a deliverable: half size with the same layout (full size when half would not pack), one sample, H.264 encoded in the browser; written as <name>.draft.mp4. Leave out samples and scale.'),
       mix: z.boolean().optional().describe('The finished file: render, then mix the track, music and cues at the loudness target (mp4, mov, webm).'), subtitles: z.boolean().optional().describe('Like mix, with the timed words as a soft subtitle track.'),
     },
   }, (a) => guard(async () => {

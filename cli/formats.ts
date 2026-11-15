@@ -308,6 +308,13 @@ export function draftEncoder(has: (encoder: string) => boolean = hasFfmpegEncode
   return 'webcodecs';
 }
 
+/**
+ * A draft's scale for a frame of w x h logical px: half size (the same layout) when the half frame still packs into
+ * the readback (its width a multiple of 4 and its height even: a frame width that is a multiple of 8 and a height that
+ * is a multiple of 4, as 1920x1080 and 1080x1920 are), else full size (1080x1350 and 1100x1100 are not).
+ */
+export const draftScale = (w: number, h: number): 0.5 | 1 => (w % 8 === 0 && h % 4 === 0 ? 0.5 : 1);
+
 /** A draft's file name: `.draft` before the extension (added when missing), so a draft is never taken for a final. */
 export function draftName(out: string, draft: boolean) {
   if (!draft || /\.draft\.[^./]+$/.test(out)) return out;
