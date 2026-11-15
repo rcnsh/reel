@@ -71,17 +71,26 @@ export function report(b: DrawnBox) {
 export function reportText(c: CanvasRenderingContext2D, text: string, x: number, y: number, o: Pick<DrawnBox, 'label' | 'exempt' | 'color' | 'alpha'> = {}) {
   if (!sink || paused || !text) return;
   const m = c.measureText(text);
-  const l = x - m.actualBoundingBoxLeft, r = x + m.actualBoundingBoxRight, t = y - m.actualBoundingBoxAscent, b = y + m.actualBoundingBoxDescent;
+  const px = /(\d+(?:\.\d+)?)px/.exec(c.font);
+  reportDrawn(c, text, [x - m.actualBoundingBoxLeft, y - m.actualBoundingBoxAscent, x + m.actualBoundingBoxRight, y + m.actualBoundingBoxDescent], px ? Number(px[1]) : undefined, c.fillStyle, o);
+}
+
+/**
+ * Report text drawn into a Canvas2D context as paths: its rectangle [left, top, right, bottom] and `size` in the
+ * context's own coordinates (the transform is applied here), its colour from `style` (a fillStyle or strokeStyle)
+ * and globalAlpha.
+ */
+export function reportDrawn(c: CanvasRenderingContext2D, text: string, [l, t, r, b]: [number, number, number, number], size: number | undefined, style: unknown, o: Pick<DrawnBox, 'label' | 'exempt' | 'color' | 'alpha'> = {}) {
+  if (!sink || paused || !text) return;
   const T = c.getTransform();
   const pts = [[l, t], [r, t], [l, b], [r, b]].map(([px, py]) => [T.a * px! + T.c * py! + T.e, T.b * px! + T.d * py! + T.f] as const);
   const xs = pts.map((p) => p[0]), ys = pts.map((p) => p[1]);
-  const px = /(\d+(?:\.\d+)?)px/.exec(c.font);
-  const fill = typeof c.fillStyle === 'string' ? c.fillStyle : undefined;
+  const fill = typeof style === 'string' ? style : undefined;
   const [, a0] = fill ? parseCss(fill) ?? [null, 1] : [null, 1];
   report({
     kind: 'text', text, label: o.label, exempt: o.exempt,
     x: Math.min(...xs), y: Math.min(...ys), w: Math.max(...xs) - Math.min(...xs), h: Math.max(...ys) - Math.min(...ys),
-    size: px ? Number(px[1]) * Math.sqrt(Math.abs(T.a * T.d - T.b * T.c)) : undefined,
+    size: size === undefined ? undefined : size * Math.sqrt(Math.abs(T.a * T.d - T.b * T.c)),
     color: o.color ?? fill,
     alpha: o.alpha ?? c.globalAlpha * (a0 as number),
   });

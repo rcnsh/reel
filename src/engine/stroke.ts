@@ -3,6 +3,7 @@
 // and no curly quotes: pairs are kerned optically (see `pairKern`) and ’ ‘ “ ” … are built from their
 // own ' and . glyphs.
 import { type V2, polylineLengths } from './util';
+import { reportDrawn, reporting, type DrawnBox } from './report';
 
 export const STROKE_FONTS = {
   script: 'EMSAllure.svg', // flowing cursive
@@ -305,6 +306,23 @@ export function drawStrokeText(c: CanvasRenderingContext2D, st: StrokeText, len:
   }
   c.stroke();
   return head;
+}
+
+/**
+ * Report to `reel check` the text just drawn with `drawStrokeText(c, st, len)` (same context, same transform):
+ * the box around the strokes written so far, so a line half written is measured where its ink is, with its
+ * colour from strokeStyle and globalAlpha. Free outside a check.
+ */
+export function reportStrokeText(c: CanvasRenderingContext2D, st: StrokeText, len: number, text: string, o: Pick<DrawnBox, 'label' | 'exempt' | 'color' | 'alpha'> = {}) {
+  if (!reporting()) return;
+  let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+  st.strokes.forEach((pts, i) => pts.forEach((p, j) => {
+    if (st.startLen[i]! + st.lens[i]![j]! > len) return;
+    x0 = Math.min(x0, p.x); y0 = Math.min(y0, p.y); x1 = Math.max(x1, p.x); y1 = Math.max(y1, p.y);
+  }));
+  if (x1 < x0) return;
+  const pad = c.lineWidth / 2;
+  reportDrawn(c, text, [x0 - pad, y0 - pad, x1 + pad, y1 + pad], st.size, c.strokeStyle, o);
 }
 
 /**

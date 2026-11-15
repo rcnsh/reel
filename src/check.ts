@@ -261,7 +261,7 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
           add({
             ...base, kind: 'contrast', severity: r < 3 || b.m.coverage < 0.01 ? 'error' : 'warning', value: +r.toFixed(2),
             message: b.m.coverage < 0.01
-              ? `${quote(b.text)} cannot be seen: almost none of its box looks like its colour against the background (${b.m.bgHex}). ${fix}`
+              ? `${quote(b.text)} cannot be seen: almost none of its box looks like its colour against the background (${b.m.bgHex}). If it is plainly there, the box reported is much larger than what is drawn (report the part drawn: reportStrokeText for text being written); else ${fix}`
               : `${quote(b.text)} has a contrast of ${r.toFixed(2)}:1 with what is behind it (${b.m.bgHex}); ${large ? 'large' : 'body'} text needs ${need}:1. ${fix}`,
           }, name, -r);
         }
