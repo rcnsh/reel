@@ -33,6 +33,15 @@ test('each format asks the page for the readback, depth and alpha it needs', () 
   expect(p('png', { alpha: true })).toEqual(['rgba8', 8, true, 'rgba']);
   expect(p('png16', { alpha: true })).toEqual(['rgba16', 16, true, 'rgba64le']);
   expect(p('exr')).toEqual(['linear', 8, false, 'rgbaf16le']);
+  // 8-bit 4:2:0 reads back yuv420p converted on the GPU when the size packs (width a multiple of 8, height of 4)
+  const q = (id: FormatId, size: [number, number], o = {}) => planOf(FORMATS[id], o, 30, size).pixels;
+  expect(q('h264', [1920, 1080])).toBe('yuv420');
+  expect(q('h264', [1080, 1920])).toBe('yuv420');
+  expect(q('h264', [1916, 1080])).toBe('rgb8');
+  expect(q('h264', [1920, 1080], { chroma: '444' })).toBe('rgb8');
+  expect(q('webm', [1920, 1080], { alpha: false })).toBe('yuv420');
+  expect(q('webm', [1920, 1080])).toBe('rgba8');
+  expect(q('gif', [1920, 1080])).toBe('rgb8');
   // loops cap the frame rate, never raise it
   expect(planOf(FORMATS.gif, {}, 60).fps).toBe(25);
   expect(planOf(FORMATS.webp, {}, 24).fps).toBe(24);
@@ -136,4 +145,14 @@ test('drafts are named and encoded as drafts', () => {
     expect(draftEncoder(() => false)).toBe('x264');
     expect(draftEncoder(() => true)).toBe('videotoolbox');
   } finally { if (env === undefined) delete process.env.REEL_DRAFT_ENCODER; else process.env.REEL_DRAFT_ENCODER = env; }
+});
+
+test('frames converted on the GPU are only tagged, or repacked for nv12', () => {
+  const plan = planOf(FORMATS.h264, {}, 30, [1920, 1080]);
+  const a = ffmpegArgs(plan, {}, { width: 1920, height: 1080, fps: 30, out: '/o/x.mp4' }).join(' ');
+  expect(a).toContain('-pix_fmt yuv420p -s 1920x1080');
+  expect(a).toContain('-vf vflip,setparams=range=tv:colorspace=bt709');
+  expect(a).not.toContain('out_color_matrix');
+  const d = ffmpegArgs(planOf(FORMATS.h264, { draft: 'videotoolbox' }, 30, [960, 540]), { draft: 'videotoolbox' }, { width: 960, height: 540, fps: 30, out: '/o/x.mp4' }).join(' ');
+  expect(d).toContain('vflip,format=nv12,setparams=range=tv');
 });

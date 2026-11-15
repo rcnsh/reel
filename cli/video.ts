@@ -86,7 +86,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   // reorder buffer: frames waiting for an earlier one or for the encoder, acknowledged while under ~1 GB in
   // memory; past that they go to a spool on disk (up to spoolGb, default 20), so the renderers never wait
   // for x264 in the light scenes and x264 catches up in the heavy ones, where the CPU is free
-  const frameBytes = OW * OH * PIXELS[o.plan.pixels].channels * PIXELS[o.plan.pixels].bytes;
+  const frameBytes = OW * OH * PIXELS[o.plan.pixels].perPixel;
   const cap = Math.max(4, Math.floor((o.memGb * 1e9) / frameBytes));
   const spoolCap = Math.floor((o.spoolGb * 1e9) / frameBytes);
   const spoolDir = path.join(tmpdir(), `reel-spool-${process.pid}-${Date.now()}`);

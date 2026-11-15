@@ -222,7 +222,7 @@ try {
     let release = () => {};
     try {
       const m = await r.meta();
-      const plan = F.planOf(format, enc, page.fps ?? m.format.fps);
+      const sc = page.scale, plan = F.planOf(format, enc, page.fps ?? m.format.fps, [(page.w ?? m.format.w) * sc, (page.h ?? m.format.h) * sc]);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
       // (with --mix the picture is rendered beside the output and the mix writes the output)
       const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;

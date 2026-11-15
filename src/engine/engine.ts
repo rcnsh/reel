@@ -5,7 +5,7 @@ import { AudioData } from './audio';
 import { Words } from './words';
 import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT } from './gl';
 import { ALPHA, BITS } from './format';
-import { PIXELS, type Pixels } from './pixels';
+import { PIXELS, yuvFits, type Pixels } from './pixels';
 export { PIXELS, type Pixels };
 import { DEFAULT_POST, Post, SHOULDER_GLSL, type PostParams } from './post';
 import { THEME } from './palette';
@@ -864,6 +864,7 @@ export class Engine {
   private packer(mode: Pixels) {
     let p = this.packers.get(mode);
     if (p) return p;
+    if (mode === 'yuv420') return this.yuvPacker();
     const { channels: C, bytes: B } = PIXELS[mode], w = (PW * C * B) / 4;
     const max = (this.renderer.getContext() as WebGL2RenderingContext).getParameter(0x0d33) as number; // MAX_TEXTURE_SIZE
     if (w > max) throw new Error(`a ${mode} readback of a ${PW} px wide frame needs a ${w} px wide target; this GPU allows ${max}`);
@@ -884,8 +885,43 @@ export class Engine {
     this.packers.set(mode, p);
     return p;
   }
+  /**
+   * The yuv420 packer: the Y plane in the first PH rows of a PW/4-wide RGBA8 target (four luma bytes a texel), then
+   * U and V, two chroma rows to a target row, so the target's bytes are yuv420p's planes in order (bottom-up rows,
+   * as ffmpeg's vflip expects). Limited-range BT.709 from the final frame's sRGB bytes, rounded to nearest; chroma
+   * from the average of each 2x2 block.
+   */
+  private yuvPacker() {
+    if (!yuvFits(PW, PH)) throw new Error(`a yuv420 readback needs a frame width that is a multiple of 8 and a height that is a multiple of 4 (${PW}x${PH})`);
+    const cw = PW / 2;
+    const pass = new FSPass(/* glsl */ `
+      uniform sampler2D src;
+      const vec3 K = vec3(0.2126, 0.7152, 0.0722);
+      float luma(ivec2 p) { return dot(texelFetch(src, p, 0).rgb, K); }
+      void main() {
+        ivec2 o = ivec2(gl_FragCoord.xy);
+        vec4 v;
+        for (int c = 0; c < 4; c++) {
+          int b = o.x * 4 + c;
+          float x;
+          if (o.y < ${PH}) x = 16.0 + 219.0 * luma(ivec2(b, o.y));
+          else {
+            int r = o.y - ${PH}, plane = r / ${PH / 4}, row = 2 * (r - plane * ${PH / 4}) + b / ${cw}, cx = b - (b / ${cw}) * ${cw};
+            ivec2 q = ivec2(2 * cx, 2 * row);
+            vec3 s = (texelFetch(src, q, 0).rgb + texelFetch(src, q + ivec2(1, 0), 0).rgb + texelFetch(src, q + ivec2(0, 1), 0).rgb + texelFetch(src, q + ivec2(1, 1), 0).rgb) * 0.25;
+            float y = dot(s, K);
+            x = 128.0 + 224.0 * (plane == 0 ? (s.b - y) / 1.8556 : (s.r - y) / 1.5748);
+          }
+          v[c] = floor(clamp(x, 0.0, 255.0) + 0.5) / 255.0;
+        }
+        fragColor = v;
+      }`, { src: { value: null } });
+    const p = { rt: new THREE.WebGLRenderTarget(PW / 4, (PH * 3) / 2, { type: THREE.UnsignedByteType, depthBuffer: false, minFilter: THREE.NearestFilter, magFilter: THREE.NearestFilter }), pass };
+    this.packers.set('yuv420', p);
+    return p;
+  }
   /** Bytes per frame of readStart/readFinish in `mode` (bottom-up rows). */
-  static bytes(mode: Pixels = 'rgb8') { return PW * PH * PIXELS[mode].channels * PIXELS[mode].bytes; }
+  static bytes(mode: Pixels = 'rgb8') { return PW * PH * PIXELS[mode].perPixel; }
   /** Bytes per frame of the rgb24 readback. */
   static readonly RGB_BYTES = PW * PH * 3;
   /**
@@ -908,7 +944,7 @@ export class Engine {
     r.setRenderTarget(rt);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, buf);
     gl.bufferData(gl.PIXEL_PACK_BUFFER, bytes, gl.STREAM_READ);
-    gl.readPixels(0, 0, rt.width, PH, gl.RGBA, gl.UNSIGNED_BYTE, 0);
+    gl.readPixels(0, 0, rt.width, rt.height, gl.RGBA, gl.UNSIGNED_BYTE, 0);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, null);
     this.packs[slot] = { buf, sync: gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!, bytes };
     gl.flush();

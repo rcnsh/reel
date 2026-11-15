@@ -2,7 +2,7 @@
 // extension), what each needs from the page (the readback, the bits per channel, a transparent background) and the
 // ffmpeg command that encodes it. Pure (no I/O), so the CLI and its tests share it.
 import path from 'node:path';
-import type { Pixels } from '../src/engine/pixels';
+import { yuvFits, type Pixels } from '../src/engine/pixels';
 import { int, num, UsageError, type Values } from './args';
 
 export type FormatId = 'h264' | 'hevc' | 'prores' | 'prores4444' | 'webm' | 'gif' | 'webp' | 'png' | 'png16' | 'jpeg' | 'exr';
@@ -93,10 +93,14 @@ export interface Plan {
   rawFormat: string;
 }
 
-const RAW: Record<Pixels, string> = { rgb8: 'rgb24', rgba8: 'rgba', rgb16: 'rgb48le', rgba16: 'rgba64le', linear: 'rgbaf16le' };
+const RAW: Record<Pixels, string> = { rgb8: 'rgb24', rgba8: 'rgba', rgb16: 'rgb48le', rgba16: 'rgba64le', linear: 'rgbaf16le', yuv420: 'yuv420p' };
 
-/** The plan for a format and its options at the project's frame rate. Throws a UsageError for options that do not apply. */
-export function planOf(f: FormatSpec, o: EncodeOpts, fps: number): Plan {
+/**
+ * The plan for a format and its options at the project's frame rate and output size (physical px). Throws a
+ * UsageError for options that do not apply. 8-bit 4:2:0 formats read back yuv420p converted on the GPU when the size
+ * allows: half the bytes of rgb24 to carry from the page.
+ */
+export function planOf(f: FormatSpec, o: EncodeOpts, fps: number, size?: [number, number]): Plan {
   if (o.alpha && f.alpha === 'never') throw new UsageError(`--alpha: ${f.id} cannot carry transparency (prores4444, webm, webp, png, png16 and exr can)`);
   if (o.chroma && f.id !== 'h264') throw new UsageError(`--chroma goes with h264 (${f.id} has its own)`);
   if (o.depth && f.id !== 'h264') throw new UsageError(`--depth goes with h264 (hevc and prores are 10-bit, png16 and exr deeper)`);
@@ -108,6 +112,8 @@ export function planOf(f: FormatSpec, o: EncodeOpts, fps: number): Plan {
   if (f.id === 'hevc' || f.id === 'prores' || f.id === 'prores4444' || (f.id === 'h264' && o.depth === 10)) { pixels = alpha ? 'rgba16' : 'rgb16'; bits = 10; }
   if (f.id === 'png16') { pixels = alpha ? 'rgba16' : 'rgb16'; bits = 16; }
   if (f.id === 'exr') pixels = 'linear';
+  const yuv = (f.id === 'h264' && o.chroma !== '444' && o.depth !== 10) || (f.id === 'webm' && !alpha);
+  if (yuv && size && yuvFits(size[0], size[1])) pixels = 'yuv420';
   const cap = f.kind === 'loop' ? o.maxFps ?? (f.id === 'gif' ? 25 : 30) : Infinity;
   return { format: f, pixels, bits, alpha, fps: Math.min(fps, cap), rawFormat: RAW[pixels] };
 }
@@ -128,6 +134,7 @@ export function defaultOut(project: string, f: FormatSpec, draft = false) {
 // BT.709 tags for every YUV stream reel writes (SDR, limited range)
 const TAGS709 = ['-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709'];
 const SRGB = 'setparams=color_trc=iec61966-2-1:color_primaries=bt709';
+const TAG709 = 'setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709';
 /** Full-range RGB to limited-range BT.709 YUV: chroma averaged over its block, accurate rounding, tagged. */
 export const toYuv709 = (pixFmt: string) => `scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=${pixFmt},setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709`;
 
@@ -143,18 +150,20 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
   const sound = !!i.audio && !!f.audio;
   if (sound) a.push('-ss', String(i.audio!.from), '-t', String(i.audio!.duration), '-i', i.audio!.file);
   const v: string[] = [];
+  // (frames already converted to yuv420p on the GPU are only tagged, and repacked for an encoder that wants nv12)
+  const yuv = (pix: string) => (plan.pixels === 'yuv420' ? `${pix === 'yuv420p' ? '' : `format=${pix},`}${TAG709}` : toYuv709(pix));
   switch (f.id) {
     case 'h264': {
       if (o.draft === 'videotoolbox') {
-        v.push('-vf', `vflip,${toYuv709('nv12')}`, '-c:v', 'h264_videotoolbox', '-b:v', `${Math.max(2, Math.round((i.width * i.height * i.fps) / 1e6 * 0.12))}M`, '-realtime', '1', '-prio_speed', '1', ...TAGS709);
+        v.push('-vf', `vflip,${yuv('nv12')}`, '-c:v', 'h264_videotoolbox', '-b:v', `${Math.max(2, Math.round((i.width * i.height * i.fps) / 1e6 * 0.12))}M`, '-realtime', '1', '-prio_speed', '1', ...TAGS709);
         break;
       }
       if (o.draft === 'x264') {
-        v.push('-vf', `vflip,${toYuv709('yuv420p')}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-tune', 'zerolatency', ...TAGS709);
+        v.push('-vf', `vflip,${yuv('yuv420p')}`, '-c:v', 'libx264', '-preset', 'ultrafast', '-crf', '23', '-tune', 'zerolatency', ...TAGS709);
         break;
       }
       const pix = `yuv${o.chroma === '444' ? '444' : '420'}p${o.depth === 10 ? '10le' : ''}`;
-      v.push('-vf', `vflip,${toYuv709(pix)}`, '-c:v', 'libx264', '-preset', o.preset ?? 'slow', '-crf', String(o.crf ?? 16), '-pix_fmt', pix, '-tune', 'grain', '-x264-params', o.params ?? 'aq-mode=3', ...TAGS709);
+      v.push('-vf', `vflip,${yuv(pix)}`, '-c:v', 'libx264', '-preset', o.preset ?? 'slow', '-crf', String(o.crf ?? 16), '-pix_fmt', pix, '-tune', 'grain', '-x264-params', o.params ?? 'aq-mode=3', ...TAGS709);
       break;
     }
     case 'hevc':
@@ -173,7 +182,7 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
     case 'webm': {
       // (VP9 keeps alpha as a second stream libvpx encodes from yuva420p; browsers composite it as straight alpha)
       const pix = plan.alpha ? 'yuva420p' : 'yuv420p';
-      v.push('-vf', `vflip,${toYuv709(pix)}`, '-c:v', 'libvpx-vp9', '-pix_fmt', pix, '-crf', String(o.crf ?? 24), '-b:v', '0', '-row-mt', '1', '-deadline', 'good', '-cpu-used', '2', ...(plan.alpha ? ['-auto-alt-ref', '0'] : []), ...TAGS709);
+      v.push('-vf', `vflip,${yuv(pix)}`, '-c:v', 'libvpx-vp9', '-pix_fmt', pix, '-crf', String(o.crf ?? 24), '-b:v', '0', '-row-mt', '1', '-deadline', 'good', '-cpu-used', '2', ...(plan.alpha ? ['-auto-alt-ref', '0'] : []), ...TAGS709);
       break;
     }
     case 'gif': {
