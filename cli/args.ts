@@ -39,7 +39,7 @@ Rendering
   video                      the video, in its own browsers (not the warm renderer), through ffmpeg with
                              the project's audio track where the format carries sound
                              [--from 0] [--to <duration>] [--out <file>] [--format <f>] [--noaudio]
-                             [--workers 2] [--chunk 8] [--mem-gb 1] [--spool-gb 20]
+                             [--workers 2] [--chunk 8] [--mem-gb 1] [--spool-gb 20] [--force]
                              [--progress (JSON lines on stderr)]
                              --format (else from the --out extension; default h264, out/video.mp4):
                                h264        .mp4  x264 [--crf 16] [--preset slow] [--x264 aq-mode=3]
@@ -67,6 +67,8 @@ Rendering
                              --mix: the finished file in one go: the render, then reel mix (the
                              track, music and cues of mix.json, at the loudness target); --subtitles:
                              as --mix, with the timed words as a soft subtitle track (mp4, mov, webm)
+                             One export at a time per machine: another running one is an error unless
+                             --force (parallel 4K exports exhaust memory)
 
 Working on a project
   init <folder>              a new project that renders straight away, with the reel skills in
@@ -135,7 +137,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   events: { render: true, opts: { out: str } },
   perf: { render: true, opts: { from: str, to: str, pixels: str } },
   gpu: { render: true, opts: {} },
-  video: { render: true, opts: { from: str, to: str, out: str, format: str, crf: str, preset: str, x264: str, x265: str, chroma: str, depth: str, alpha: bool, opaque: bool, quality: str, 'max-fps': str, 'max-size': str, draft: bool, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
+  video: { render: true, opts: { from: str, to: str, out: str, format: str, crf: str, preset: str, x264: str, x265: str, chroma: str, depth: str, alpha: bool, opaque: bool, quality: str, 'max-fps': str, 'max-size': str, draft: bool, force: bool, noaudio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
   dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },

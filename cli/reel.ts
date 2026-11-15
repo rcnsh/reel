@@ -214,12 +214,14 @@ try {
     if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
     const r = new Renderer(PROJECT, { headed: !!A.headed });
     const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
+    let release = () => {};
     try {
       const m = await r.meta();
       const plan = F.planOf(format, enc, page.fps ?? m.format.fps);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
       // (with --mix the picture is rendered beside the output and the mix writes the output)
       const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;
+      release = (await import('./exports')).claimExport(PROJECT, out, !!A.force);
       // (the subtitles first: a project without timed words fails before it renders, not after)
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
@@ -250,7 +252,7 @@ try {
     } catch (e) {
       if (e instanceof UsageError) throw e;
       res.errors.push(String((e as Error)?.message ?? e));
-    } finally { await r.close(); }
+    } finally { await r.close(); release(); }
     res.ok = !res.errors.length;
     finish(res, () => {});
   }
