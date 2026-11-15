@@ -30,11 +30,17 @@ export interface BarChartOptions extends ProgressOptions {
   highlight?: number;
   /** A title above the chart. */
   title?: string;
+  /**
+   * Bars grow one after another (default true). False: all together, each in proportion, so the chart never shows
+   * a smaller bar ahead of a larger one (for a comparison whose order is the point).
+   */
+  stagger?: boolean;
 }
 
 /**
- * A bar chart: bars grow from the baseline one after another as progress runs 0 to 1, with their values above
- * and labels below. Classes: `.title`, `.bars`, `.bar`, `.fill`, `.value`, `.label`.
+ * A bar chart: bars grow from the baseline one after another (or together, `stagger: false`) as progress runs 0 to
+ * 1, with their values above and labels below. Markup: `.frame` (a column) > `.title`, `.bars` (a row) > `.bar`
+ * (a column, bottom aligned) > `.value`, `.fill`, `.label`. Classes: `.title`, `.bars`, `.bar`, `.fill`, `.value`, `.label`.
  */
 export class BarChart extends HtmlComponent {
   private o: BarChartOptions;
@@ -59,7 +65,7 @@ export class BarChart extends HtmlComponent {
     const o = this.o, p = progressOf(o, f), n = o.data.length, max = o.max ?? Math.max(...o.data.map((d) => d.value), 1e-9);
     this.layer.$$('.bar').forEach((e, i) => {
       // bar i grows over its own share of the progress, overlapping its neighbours
-      const k = ease.outCubic(clamp((p * (n + 2) - i) / 3)), v = o.data[i]!.value;
+      const k = o.stagger === false ? p : ease.outCubic(clamp((p * (n + 2) - i) / 3)), v = o.data[i]!.value;
       this.layer.set(e, { vars: { h: ((v / max) * k).toFixed(4) } });
       this.layer.set(e.querySelector('.value')!, { text: k > 0 ? (o.format ?? formatNumber)(v * k) : '' });
     });
@@ -143,9 +149,14 @@ export interface CounterOptions extends ProgressOptions {
   caption?: string;
   size?: number;
   color?: string;
+  /** Where the number and caption sit across the box (default center). */
+  align?: 'left' | 'center' | 'right';
 }
 
-/** A number counting from `from` to `to` as progress runs 0 to 1, with a caption. Classes: `.num`, `.cap`. */
+/**
+ * A number counting from `from` to `to` as progress runs 0 to 1, with a caption. Markup: `.frame` (a column, centred
+ * vertically, aligned by `align`) > `.num`, `.cap`.
+ */
 export class Counter extends HtmlComponent {
   private o: CounterOptions;
   constructor(o: CounterOptions) {
@@ -153,7 +164,7 @@ export class Counter extends HtmlComponent {
     super(o, {
       box: o.box ?? safeBox(0.15), label: 'counter',
       html: `<div class="frame"><p class="num"></p>${o.caption ? `<p class="cap">${esc(o.caption)}</p>` : ''}</div>`,
-      css: `.frame { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; }
+      css: `.frame { position: absolute; inset: 0; display: flex; flex-direction: column; justify-content: center; align-items: ${{ left: 'flex-start', center: 'center', right: 'flex-end' }[o.align ?? 'center']}; text-align: ${o.align ?? 'center'}; }
         .num { font: 800 ${size}px/1 Archivo; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; color: ${cssColor(o.color ?? 'fg')}; white-space: nowrap; }
         .cap { font: 400 ${Math.round(size * 0.22)}px/1.3 Archivo; margin-top: ${Math.round(size * 0.12)}px; color: color-mix(in srgb, var(--fg) 75%, var(--bg)); }`,
     });

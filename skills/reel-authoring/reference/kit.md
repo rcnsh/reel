@@ -20,7 +20,7 @@ export default class Point extends Scene {
 - Make components as fields of a scene (they belong to its clip) and call `draw(renderer, out, f, { opacity? })` in `render()`, in back-to-front order. On a track above 0, clear to transparent first.
 - Options every component takes:
   - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side.
-  - `at: [from, to]`: the seconds of the clip it shows in (default the whole clip).
+  - `at: [from, to]`: the seconds of the clip it shows in, counted from the clip's start (default the whole clip). Word times are video seconds, so take the clip's start off: `at: [this.ctx.words.get('the tide').start - this.ctx.start, 9]`.
   - `motion`: its entrance and exit, `{ from: 'up' | 'down' | 'left' | 'right' | 'fade' | 'scale' | 'none', in: 0.6, out: 0.4, delay: 0, distance }`, or `false` for none. Motion is drawn in GL per sub-frame, so it gets motion blur under `--samples auto`.
   - `css`: CSS added to its layer, to restyle it (each component lists its classes below).
   - `label`: its name in `reel check` findings.
@@ -50,7 +50,7 @@ body = new TextBlock({
 card = new TitleCard({ kicker: 'Part two', title: 'Where the time goes', subtitle: 'Render minutes, measured', align: 'center' });
 ```
 
-`title`, `subtitle`, `kicker` (*Anim*), `align` (`center` | `left`), `font`, `weight` (800), `rule` (the accent bar, default true). The title shrinks (to three lines at most) until the whole card fits its box, by default the safe area. Classes: `.kicker`, `.title`, `.rule`, `.subtitle`.
+`title` (plain text: tags in it are shown as typed) or `html` (markup: `<em>` is drawn in the accent colour, `<br>` breaks the line), `subtitle`, `kicker` (all *Anim*), `align` (`center` | `left`), `font`, `weight` (800), `rule` (the accent bar, default true). The title shrinks (to three lines at most) until the whole card fits its box, by default the safe area. Classes: `.kicker`, `.title`, `.rule`, `.subtitle`.
 
 ### LowerThird
 
@@ -126,7 +126,7 @@ chart = new BarChart({
 });
 ```
 
-`data`, `max` (a full bar; default the largest value), `format`, `color` (accent), `highlight` (a bar's index, drawn in fg), `title`. Bars grow one after another. Classes: `.title`, `.bars`, `.bar`, `.fill`, `.value`, `.label`.
+`data`, `max` (a full bar; default the largest value), `format`, `color` (accent), `highlight` (a bar's index, drawn in fg), `title`, `stagger`. Bars grow one after another; with `stagger: false` they grow together, each in proportion, which a comparison needs (staggered, a small bar leads a large one for a moment and the chart says the opposite of its point). Markup: `.frame` (a column) > `.title`, `.bars` (a row) > `.bar` (a column, bottom aligned) > `.value`, `.fill`, `.label`.
 
 ### LineChart
 
@@ -145,7 +145,7 @@ trend = new LineChart({
 count = new Counter({ to: 7.8, digits: 1, suffix: '×', caption: 'faster than a fixed 24 samples' });
 ```
 
-`to`, `from` (0), `digits` or `format`, `prefix`, `suffix`, `caption`, `size`, `color`. Tabular figures, so the number does not jitter as it counts. Classes: `.num`, `.cap`.
+`to`, `from` (0), `digits` or `format`, `prefix`, `suffix`, `caption`, `size`, `color`, `align` (`center` (default) | `left` | `right`: where the number and caption sit across the box). Tabular figures, so the number does not jitter as it counts. Markup: `.frame` (a column, centred vertically) > `.num`, `.cap`.
 
 ### ProgressBar and Timer
 
@@ -170,7 +170,7 @@ code = new CodeBlock({
 
 ## Your own component
 
-`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`:
+`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`. The defaults passed to `super` must include a `box` (the layer is made that size):
 
 ```ts
 import { HtmlComponent, type ComponentOptions, safeBox, type Frame } from 'reel';

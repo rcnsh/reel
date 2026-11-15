@@ -76,7 +76,9 @@ export function fitText(el: HTMLElement, box: Box, max: number, min: number, max
 }
 
 export interface TitleCardOptions extends ComponentOptions {
-  title: Anim<string>;
+  /** The title as plain text, or `html` for markup (`<em>` is drawn in the accent colour, `<br>` breaks the line). */
+  title?: Anim<string>;
+  html?: Anim<string>;
   subtitle?: Anim<string>;
   /** A small line above the title (a chapter, a date). */
   kicker?: Anim<string>;
@@ -104,6 +106,7 @@ export class TitleCard extends HtmlComponent {
         .card { text-align: ${align}; display: flex; flex-direction: column; align-items: ${align === 'center' ? 'center' : 'flex-start'}; gap: ${Math.round(UNIT * 0.018)}px; }
         .kicker { font: 600 ${Math.round(UNIT * 0.026)}px 'IBM Plex Mono'; letter-spacing: .18em; text-transform: uppercase; color: color-mix(in srgb, var(--accent) 72%, var(--fg)); }
         .title { font-family: ${o.font ? `'${o.font}'` : 'Archivo'}; font-weight: ${o.weight ?? 800}; line-height: 1.02; letter-spacing: -0.01em; font-size: ${Math.round(UNIT * 0.12)}px; text-wrap: balance; width: 100%; }
+        .title em { font-style: inherit; color: var(--accent); }
         .rule { width: ${Math.round(UNIT * 0.09)}px; height: ${Math.max(3, Math.round(UNIT * 0.006))}px; background: var(--accent); margin: ${Math.round(UNIT * 0.006)}px 0; }
         .subtitle { font: 400 ${Math.round(UNIT * 0.036)}px/1.3 Archivo; color: color-mix(in srgb, var(--fg) 78%, var(--bg)); max-width: 32em; text-wrap: balance; }
         .kicker:empty, .subtitle:empty { display: none; }`,
@@ -115,13 +118,13 @@ export class TitleCard extends HtmlComponent {
     const o = this.o, l = this.layer;
     l.text('.kicker', o.kicker ? val(o.kicker, f) : '');
     l.text('.subtitle', o.subtitle ? val(o.subtitle, f) : '');
-    const title = val(o.title, f);
-    l.text('.title', title);
+    const title = o.html !== undefined ? val(o.html, f) : esc(val(o.title ?? '', f)), t = l.$('.title');
+    if (t.innerHTML !== title) t.innerHTML = title;
     const key = `${title}|${l.$('.kicker').textContent}|${l.$('.subtitle').textContent}`;
     if (key === this.fitted) return;
     this.fitted = key;
     // the title shrinks until the whole card fits the box
-    const card = l.$('.card'), t = l.$('.title');
+    const card = l.$('.card');
     const rest = card.getBoundingClientRect().height - t.getBoundingClientRect().height;
     fitText(t, { ...this.box, h: this.box.h - rest }, Math.round(UNIT * 0.12), Math.round(UNIT * 0.045), 3, 1.02);
   }
