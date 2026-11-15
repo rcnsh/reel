@@ -121,6 +121,10 @@ export async function serveMcp() {
     instructions: 'reel renders deterministic WebGL videos from a project folder (reel.config.ts and scenes/*.ts). Author by editing those files; use these tools to look: project_info first, then render_still / motion_strip / contact_sheet to see frames, check_video to find layout and render problems, video_start to export, review_notes for what a person asked to change in a render (resolve_note once fixed). Every tool takes the project folder. Renders go through a warm background renderer per project, so repeated calls are fast, and it picks up file edits on the next call.',
   });
 
+  // (arguments are strict, like the CLI's flags: a misspelt `size` is an error, not a check of the wrong frame)
+  const register = server.registerTool.bind(server);
+  server.registerTool = ((name: string, cfg: { inputSchema: z.ZodRawShape }, cb: never) => register(name, { ...cfg, inputSchema: z.strictObject(cfg.inputSchema) }, cb)) as typeof server.registerTool;
+
   server.registerTool('project_info', {
     title: 'Project info',
     description: "A project's format (size, fps), duration, audio track, theme, tracks, every clip (id, start, end, track) and the sound cues scenes recorded. Call it first: clip ids and times for the other tools come from here.",

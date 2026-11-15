@@ -36,6 +36,12 @@ test('lists its tools, each with a description', async () => {
   for (const t of tools.filter((x) => !x.name.startsWith('video_s') && !x.name.startsWith('video_c') && x.name !== 'diff_images')) expect(t.inputSchema.required ?? []).toContain('project');
 });
 
+test('an argument a tool does not have is an error, like an unknown flag', async () => {
+  const r = await client.callTool({ name: 'project_info', arguments: { project: layers.dir, sise: '1080x1920' } });
+  expect(r.isError).toBe(true);
+  expect((r.content as Block[])[0]!.text).toMatch(/sise/);
+});
+
 test('the server exits when its input ends', async () => {
   const p = Bun.spawn(['bun', REEL, 'mcp'], { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' });
   p.stdin.end();
