@@ -268,8 +268,8 @@ export function encodeOptsOf(v: Values, f: FormatSpec): EncodeOpts {
   const o: EncodeOpts = {};
   if (v.crf !== undefined) {
     if (f.id !== 'h264' && f.id !== 'hevc' && f.id !== 'webm') throw new UsageError(`--crf goes with h264, hevc and webm (${f.id} has none)`);
-    const crf = o.crf = num(v, 'crf', 0);
-    if (!(crf >= 0 && crf <= 63)) throw new UsageError(`--crf ${v.crf}: expected 0 to 51 (63 for webm)`);
+    const crf = o.crf = num(v, 'crf', 0), top = f.id === 'webm' ? 63 : 51;
+    if (!(crf >= 0 && crf <= top)) throw new UsageError(`--crf ${v.crf}: expected 0 to ${top} for ${f.id}`);
   }
   if (v.preset !== undefined) {
     if (f.id !== 'h264' && f.id !== 'hevc') throw new UsageError(`--preset goes with h264 and hevc`);

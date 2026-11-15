@@ -67,6 +67,10 @@ test('flags become encoder options, checked against the format', () => {
   expect(() => encodeOptsOf({ alpha: true, opaque: true }, FORMATS.webm)).toThrow('contradict');
   expect(() => encodeOptsOf({ x265: 'a=1' }, FORMATS.h264)).toThrow('--x265 goes with hevc');
   expect(() => encodeOptsOf({ quality: '101' }, FORMATS.jpeg)).toThrow('1 to 100');
+  // x264 and x265 stop at 51, libvpx at 63
+  expect(() => encodeOptsOf({ crf: '60' }, FORMATS.h264)).toThrow('0 to 51 for h264');
+  expect(() => encodeOptsOf({ crf: '52' }, FORMATS.hevc)).toThrow('0 to 51 for hevc');
+  expect(encodeOptsOf({ crf: '60' }, FORMATS.webm).crf).toBe(60);
 });
 
 const args = (id: FormatId, o = {}, audio = true) => {
