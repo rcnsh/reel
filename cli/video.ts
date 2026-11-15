@@ -57,12 +57,18 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
       return { browser, page: await openPage(browser, pageUrl(o.url, fmt, { ...o, alpha: o.plan.alpha, bits: o.plan.bits }), fmt, o, (l) => logs.push(l)) };
     } catch (e) { await browser.close().catch(() => {}); throw e; }
   };
-  // (the duration and the track come from the project's data, the same in every page)
+  // (an ffmpeg without libwebp: PNG frames into a folder, assembled by img2webp at the end)
+  const webpFrames = o.plan.format.id === 'webp' && !hasEncoder('libwebp_anim') ? path.join(tmpdir(), `reel-webp-${process.pid}-${Date.now()}`) : undefined;
+  if (webpFrames && !Bun.which('img2webp')) throw new Error('webp: this ffmpeg has no libwebp encoder and img2webp (libwebp\'s tools: brew install webp, apt install webp) is not installed');
+  // (the duration and the track come from the project's data, the same in every page; the first page then renders
+  // as worker 0, which saves a browser start)
   const first = await browserOf();
-  const m: { duration: number; track: string | null; stateful: boolean; timeline: VideoResult['events']['timeline']; cues: VideoResult['events']['cues']; sounds: VideoResult['events']['sounds'] } = await first.page.evaluate(() => { const P = (window as any).__reel; return { duration: P.duration, track: P.track, stateful: P.stateful, timeline: P.timeline, cues: P.cues, sounds: P.sounds }; });
-  await first.browser.close();
+  let m: { duration: number; track: string | null; stateful: boolean; timeline: VideoResult['events']['timeline']; cues: VideoResult['events']['cues']; sounds: VideoResult['events']['sounds'] };
+  try {
+    m = await first.page.evaluate(() => { const P = (window as any).__reel; return { duration: P.duration, track: P.track, stateful: P.stateful, timeline: P.timeline, cues: P.cues, sounds: P.sounds }; });
+  } catch (e) { await first.browser.close().catch(() => {}); throw e; }
   const from = o.from ?? 0, to = o.to ?? m.duration;
-  if (!(to > from)) throw new Error(`--from ${from} --to ${to}: nothing to render`);
+  if (!(to > from)) { await first.browser.close().catch(() => {}); throw new Error(`--from ${from} --to ${to}: nothing to render`); }
 
   const fps = fmt.fps, OW = Math.round(fmt.w * fmt.scale), OH = Math.round(fmt.h * fmt.scale);
   const seq = o.plan.format.kind === 'sequence';
@@ -71,12 +77,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   const audio = m.track && existsSync(path.join(o.project, m.track)) ? path.join(o.project, m.track) : null;
   const mux = !!audio && !o.noaudio;
   const f0 = Math.round(from * fps), f1 = Math.round(to * fps), total = f1 - f0;
-  // (an ffmpeg without libwebp: PNG frames into a folder, assembled by img2webp at the end)
-  const webpFrames = o.plan.format.id === 'webp' && !hasEncoder('libwebp_anim') ? path.join(tmpdir(), `reel-webp-${process.pid}-${Date.now()}`) : undefined;
-  if (webpFrames) {
-    if (!Bun.which('img2webp')) throw new Error('webp: this ffmpeg has no libwebp encoder and img2webp (libwebp\'s tools: brew install webp, apt install webp) is not installed');
-    mkdirSync(webpFrames, { recursive: true });
-  }
+  if (webpFrames) mkdirSync(webpFrames, { recursive: true });
   const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: o.out, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames, alphaModes: o.plan.format.id !== 'exr' || ffmpegHasAlphaModes(), deepGain: o.plan.pixels === 'rgb16' || o.plan.pixels === 'rgba16' ? ffmpegDeepGain() : 1 });
   const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
 
@@ -183,7 +184,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   });
   // chunks in order from a shared cursor
   const take = () => { if (cursor >= f1) return null; const a = cursor; cursor = Math.min(f1, a + chunk); return [a, cursor] as const; };
-  const pages: Awaited<ReturnType<typeof browserOf>>[] = [];
+  const pages: Awaited<ReturnType<typeof browserOf>>[] = [first];
   const used: Record<string, number> = {};
   const sceneErrors = new Set<string>();
   const closePages = async () => {
@@ -194,7 +195,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   };
   let ok = false;
   try {
-    const opened = await Promise.allSettled(Array.from({ length: workers }, () => browserOf()));
+    const opened = await Promise.allSettled(Array.from({ length: workers - 1 }, () => browserOf()));
     for (const r of opened) if (r.status === 'fulfilled') pages.push(r.value);
     for (const r of opened) if (r.status === 'rejected') throw r.reason;
     const rendering = Promise.all(pages.map(async ({ page }, k) => {
