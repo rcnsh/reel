@@ -76,7 +76,7 @@ if (mode === 'init') {
   if (A.narrated) {
     // time the script with a scratch voice, so the project has its words and length before the first render
     const p = Bun.spawn(['bun', path.join(ENGINE, 'tools/narrate.ts')], { stdio: ['ignore', json ? 'pipe' : 'inherit', json ? 'pipe' : 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
-    if (await p.exited !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` (macOS say) or \`reel align <recording>\` there`);
+    if (await p.exited !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` there once the error above is fixed, or \`reel align <recording>\``);
   }
   out.ok = !out.errors.length;
   finish(out, () => {

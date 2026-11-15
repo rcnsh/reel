@@ -1,5 +1,5 @@
 // `reel align <recording | folder>`: re-time the video to a real voice. The script is known, so its words are
-// force-aligned to the audio (Qwen3-ForcedAligner on MLX) rather than transcribed; `--method whisper` transcribes
+// force-aligned to the audio (Qwen3-ForcedAligner) rather than transcribed; `--method whisper` transcribes
 // with Whisper and matches the words heard to the script instead, for a reading that departs from it. Writes the
 // same files as `reel narrate`: audio/narration.flac, data/words.json, data/audio.json.
 import { $ } from 'bun';
@@ -21,8 +21,8 @@ per plate, named after its header (intro.m4a, setup.wav, …). The take is clean
 words timed, and the plates laid out with the pauses below. Writes audio/narration.flac, data/words.json and
 data/audio.json, like reel narrate.
 
-  --method qwen|whisper   qwen (default): force-align the script's words (Qwen3-ForcedAligner through MLX,
-                          Apple Silicon; the model, about 1.2 GB, is fetched on first use). whisper: transcribe
+  --method qwen|whisper   qwen (default): force-align the script's words (Qwen3-ForcedAligner, through MLX
+                          on Apple Silicon, PyTorch elsewhere; the model, about 1.2 GB, is fetched on first use). whisper: transcribe
                           (faster-whisper small.en) and match the words heard to the script, for a reading
                           that departs from it; less precise
   --lead ${DEFAULTS.lead}              seconds before the first word

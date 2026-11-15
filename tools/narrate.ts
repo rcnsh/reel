@@ -32,7 +32,8 @@ ${Object.values(SOURCES).map((s) => `      ${s.about}`).join('\n')}
   --project <folder>      the project (default: the current folder)
 
 Hosted voices are opt-in: text leaves the machine only for elevenlabs (ELEVENLABS_API_KEY) or fish (FISH_API_KEY).
-Kokoro and the forced aligner run locally on Apple Silicon (MLX) and fetch their models on first use.`;
+Kokoro and the forced aligner run locally (MLX on Apple Silicon, PyTorch on CPU elsewhere) and fetch their models on
+first use. The say voice is macOS only.`;
 
 const LOUDNESS = { integrated: -16, truePeak: -1.5 };
 

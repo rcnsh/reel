@@ -1,8 +1,20 @@
 # /// script
 # requires-python = ">=3.12,<3.13"
-# dependencies = ["mlx-qwen3-asr==0.4.4", "numpy>=2.0"]
+# dependencies = [
+#   "mlx-qwen3-asr==0.4.4; sys_platform == 'darwin' and platform_machine == 'arm64'",
+#   "qwen-asr==0.0.6; sys_platform != 'darwin' or platform_machine != 'arm64'",
+#   "torch>=2.6; sys_platform == 'linux'",
+#   "numpy>=2.0",
+# ]
+# [[tool.uv.index]]
+# name = "pytorch-cpu"
+# url = "https://download.pytorch.org/whl/cpu"
+# explicit = true
+# [tool.uv.sources]
+# torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 # ///
-"""Forced alignment of known text to speech: Qwen3-ForcedAligner-0.6B, run natively on Apple Silicon through MLX.
+"""Forced alignment of known text to speech: Qwen3-ForcedAligner-0.6B, through MLX on Apple Silicon and through the
+Qwen team's PyTorch package elsewhere (CPU wheels on Linux, slower but the same model).
 
     uv run tools/forced_align.py <jobs.json>
 
@@ -14,11 +26,11 @@ before its edge, with the last few words placed as context. LANGUAGE (default En
 """
 import json
 import os
+import platform
 import sys
 import wave
 
 import numpy as np
-from mlx_qwen3_asr.forced_aligner import ForcedAligner
 
 SR = 16000
 WINDOW = float(os.environ.get("WINDOW", 60))  # (measured on a 220 s take: 60 s windows hold, 150 s ones drift by seconds)
@@ -58,9 +70,30 @@ def align(fa, audio, text):
     return out
 
 
+def aligner():
+    """An object whose align(audio, text, language) gives items with text, start_time and end_time."""
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        from mlx_qwen3_asr.forced_aligner import ForcedAligner
+
+        return ForcedAligner()
+
+    import torch
+    from qwen_asr import Qwen3ForcedAligner
+
+    class Torch:
+        def __init__(self):
+            gpu = torch.cuda.is_available()
+            self.m = Qwen3ForcedAligner.from_pretrained("Qwen/Qwen3-ForcedAligner-0.6B", dtype=torch.bfloat16 if gpu else torch.float32, device_map="cuda:0" if gpu else "cpu")
+
+        def align(self, audio, text, language):
+            return self.m.align(audio=(audio, SR), text=text, language=language)[0]
+
+    return Torch()
+
+
 def main():
     jobs = json.load(open(sys.argv[1]))
-    fa = ForcedAligner()
+    fa = aligner()
     for j in jobs:
         res = align(fa, load(j["audio"]), j["text"])
         json.dump([{"w": r["w"], "start": round(float(r["start"]), 3), "end": round(float(r["end"]), 3)} for r in res], open(j["out"], "w"))

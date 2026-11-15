@@ -1,5 +1,6 @@
-// Forced alignment from the tools: known text against speech, through tools/forced_align.py (Qwen3-ForcedAligner
-// on MLX), then matched back to the script's words and snapped to the pauses in the audio.
+// Forced alignment from the tools: known text against speech, through tools/forced_align.py (Qwen3-ForcedAligner,
+// MLX on Apple Silicon, PyTorch elsewhere), then matched back to the script's words and snapped to the pauses in
+// the audio.
 import { $ } from 'bun';
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -23,7 +24,7 @@ export async function forcedAlign(passages: { pcm: Float32Array; words: { w: str
   const jf = path.join(work, 'jobs.json');
   await Bun.write(jf, JSON.stringify(jobs));
   const r = await $`uv run -q ${path.join(import.meta.dir, 'forced_align.py')} ${jf}`.env({ ...process.env, LANGUAGE: language }).nothrow();
-  if (r.exitCode !== 0) throw new Error(`forced alignment failed (Qwen3-ForcedAligner through MLX, which needs Apple Silicon):\n${r.stderr.toString().slice(-1500)}`);
+  if (r.exitCode !== 0) throw new Error(`forced alignment failed (Qwen3-ForcedAligner; --method whisper transcribes instead):\n${r.stderr.toString().slice(-1500)}`);
   return passages.map((p, i) => {
     const tokens = JSON.parse(readFileSync(jobs[i]!.out, 'utf8')) as TimedWord[];
     return refine(p.words, tokens, p.pcm);

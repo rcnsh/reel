@@ -5,9 +5,17 @@
 #   "torch>=2.6",
 #   "torchaudio>=2.6",
 #   "soundfile>=0.13",
-#   "demucs-mlx==1.6.1",
+#   "demucs-mlx==1.6.1; sys_platform == 'darwin' and platform_machine == 'arm64'",
+#   "demucs==4.1.0; sys_platform != 'darwin' or platform_machine != 'arm64'",
 #   "numpy>=2.0",
 # ]
+# [[tool.uv.index]]
+# name = "pytorch-cpu"
+# url = "https://download.pytorch.org/whl/cpu"
+# explicit = true
+# [tool.uv.sources]
+# torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
+# torchaudio = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux'" }]
 # ///
 """The models behind `reel analyze` (tools/analyze.py runs this unless --fast):
 
@@ -15,14 +23,19 @@
 
 Writes <out>/beats.json ({"beats", "downbeats"} in seconds, from Beat This!, Foscarin, Schlüter and Widmer,
 ISMIR 2024, checkpoint final0, without DBN post-processing) and <out>/{drums,bass,other,vocals}.wav, stems
-separated by Demucs (htdemucs) through demucs-mlx on Apple Silicon. Models are fetched on first use: the Beat This!
-checkpoint (81 MB, into torch hub's cache; from the authors' server, else the mirror one of them hosts, checked
-against the MD5 they published) and the htdemucs weights (160 MB, into ~/.cache/demucs-mlx, checked by demucs-mlx).
+separated by Demucs (htdemucs): through demucs-mlx on Apple Silicon, through the reference PyTorch demucs elsewhere
+(on Linux with PyTorch's CPU wheels, which install anywhere without CUDA's gigabytes; a 3-minute song takes a
+few minutes on four cores). Models are fetched on first use: the Beat This! checkpoint (81 MB, into torch hub's
+cache; from the authors' server, else the mirror one of them hosts, checked against the MD5 they published) and the
+htdemucs weights (about 80 MB, into ~/.cache/demucs-mlx or torch hub's cache, checked by demucs).
 """
 import hashlib
 import json
 import os
+import platform
+import subprocess
 import sys
+import tempfile
 import urllib.request
 from pathlib import Path
 
@@ -61,6 +74,38 @@ def checkpoint() -> Path:
     sys.exit("music_models: could not fetch the Beat This! checkpoint:\n  " + "\n  ".join(errors) + "\n(reel analyze --fast works without it)")
 
 
+def separate(song):
+    """{stem: (channels, samples)} and the sample rate, from htdemucs."""
+    if sys.platform == "darwin" and platform.machine() == "arm64":
+        from demucs_mlx import Separator
+
+        sep = Separator(model="htdemucs", seed=0)
+        _, stems = sep.separate_audio_file(song)
+        return stems, sep.samplerate
+
+    import torch
+    from demucs.apply import apply_model
+    from demucs.pretrained import get_model
+
+    model = get_model("htdemucs")
+    model.eval()
+    sr = model.samplerate
+    # (decoded by ffmpeg, which reel needs anyway, so any format the song comes in reads the same)
+    with tempfile.TemporaryDirectory() as tmp:
+        wav = os.path.join(tmp, "song.wav")
+        subprocess.run(["ffmpeg", "-v", "error", "-i", song, "-ac", str(model.audio_channels), "-ar", str(sr), "-c:a", "pcm_f32le", wav], check=True)
+        x, _ = sf.read(wav, dtype="float32", always_2d=True)
+    mix = torch.from_numpy(x.T.copy())
+    ref = mix.mean(0)
+    mean, std = ref.mean(), ref.std() + 1e-8
+    torch.manual_seed(0)
+    device = "cuda" if torch.cuda.is_available() else "cpu"
+    with torch.no_grad():
+        y = apply_model(model, ((mix - mean) / std)[None], device=device, shifts=1, split=True, overlap=0.25, progress=False)[0]
+    y = y * std + mean
+    return {name: y[i].cpu().numpy() for i, name in enumerate(model.sources)}, sr
+
+
 def main():
     song, out = sys.argv[1], Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
@@ -68,16 +113,13 @@ def main():
     import torch
     from beat_this.inference import File2Beats
 
-    device = "mps" if torch.backends.mps.is_available() else "cpu"
+    device = "mps" if torch.backends.mps.is_available() else "cuda" if torch.cuda.is_available() else "cpu"
     beats, downbeats = File2Beats(checkpoint_path=str(checkpoint()), device=device, dbn=False)(song)
     json.dump({"beats": [float(x) for x in beats], "downbeats": [float(x) for x in downbeats]}, open(out / "beats.json", "w"))
 
-    from demucs_mlx import Separator
-
-    sep = Separator(model="htdemucs", seed=0)
-    _, stems = sep.separate_audio_file(song)
+    stems, sr = separate(song)
     for name, a in stems.items():
-        sf.write(out / f"{name}.wav", np.asarray(a, dtype=np.float32).T, sep.samplerate, subtype="FLOAT")
+        sf.write(out / f"{name}.wav", np.asarray(a, dtype=np.float32).T, sr, subtype="FLOAT")
     print(f"music_models: {len(beats)} beats, {len(downbeats)} downbeats, stems {', '.join(stems)}", file=sys.stderr)
 
 
