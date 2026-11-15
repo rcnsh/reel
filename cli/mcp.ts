@@ -57,8 +57,11 @@ function summary(r: Result, drop: string[] = ['previews']) {
 
 /** Run a tool body; a thrown error becomes an error result the model can read. */
 async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
-  try { return await f(); } catch (e) { return { content: [text(String((e as Error)?.message ?? e))], isError: true }; }
+  pending++;
+  try { return await f(); } catch (e) { return { content: [text(String((e as Error)?.message ?? e))], isError: true }; } finally { pending--; }
 }
+/** Tool calls being answered now: the server does not exit under them when its input ends. */
+let pending = 0;
 
 // ---- video jobs: `reel video` in a child process, polled and cancellable ----
 interface Job { id: string; project: string; out: string; state: 'running' | 'done' | 'failed' | 'cancelled'; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
@@ -320,6 +323,13 @@ export async function serveMcp() {
   transport.onclose = () => { cleanup(); process.exit(0); };
   // (the client went away without a goodbye: the transport does not notice its input ending, and the server
   // would outlive it, holding its video jobs)
-  for (const ev of ['end', 'close'] as const) process.stdin.on(ev, () => { cleanup(); process.exit(0); });
+  // (calls already sent are answered first: a script may pipe its requests in and close)
+  let leaving = false;
+  const leave = () => {
+    if (leaving) return;
+    leaving = true;
+    const t = setInterval(() => { if (!pending) { clearInterval(t); cleanup(); process.stdout.write('', () => process.exit(0)); } }, 50);
+  };
+  for (const ev of ['end', 'close'] as const) process.stdin.on(ev, leave);
   await server.connect(transport);
 }

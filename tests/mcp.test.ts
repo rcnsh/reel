@@ -42,6 +42,20 @@ test('an argument a tool does not have is an error, like an unknown flag', async
   expect((r.content as Block[])[0]!.text).toMatch(/sise/);
 });
 
+test('a call piped in before the input ends is answered before the server exits', async () => {
+  const msgs = [
+    { jsonrpc: '2.0', id: 1, method: 'initialize', params: { protocolVersion: '2025-03-26', capabilities: {}, clientInfo: { name: 't', version: '1' } } },
+    { jsonrpc: '2.0', method: 'notifications/initialized' },
+    { jsonrpc: '2.0', id: 2, method: 'tools/call', params: { name: 'review_notes', arguments: { project: layers.dir } } },
+  ];
+  const p = Bun.spawn(['bun', REEL, 'mcp'], { stdin: 'pipe', stdout: 'pipe', stderr: 'ignore' });
+  p.stdin.write(msgs.map((m) => JSON.stringify(m)).join('\n') + '\n');
+  p.stdin.end();
+  const out = await new Response(p.stdout).text();
+  expect(await p.exited).toBe(0);
+  expect(out.split('\n').filter(Boolean).map((l) => JSON.parse(l).id)).toEqual([1, 2]);
+}, 20_000);
+
 test('the server exits when its input ends', async () => {
   const p = Bun.spawn(['bun', REEL, 'mcp'], { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' });
   p.stdin.end();
