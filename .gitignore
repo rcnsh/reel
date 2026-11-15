@@ -10,9 +10,6 @@ dist/
 **/audio/.narration/
 .reel.config.*.mjs
 
-# local working notes
-plan.md
-
 .DS_Store
 *.tsbuildinfo
 .env*

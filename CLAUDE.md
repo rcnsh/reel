@@ -108,5 +108,3 @@ The golden test renders the frames listed in `tests/golden/goldens.json` (small 
 ## Git
 
 Every change is committed straight to `main`, one logical change per commit: no branches, no PRs. Conventional Commits (`feat(analyze): …`, `fix(mix): …`, `docs: …`), title only: no body and no trailers. A change large enough to want review gets a fresh-context review of the diff before it is committed. Keep `README.md`, `docs/ENGINE.md`, the skills, `reel --help` (`cli/args.ts`) and this file current in the same commit as the behaviour they describe.
-
-If a gitignored `plan.md` exists in the root, read it before starting work: it holds the agreed direction and what is in progress. Nothing committed refers to it.
