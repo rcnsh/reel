@@ -4,9 +4,9 @@ import { describe, expect, test } from 'bun:test';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
-import { apertureOf, crane, dolly, focalOf, fovOf, lookAt, orbit, path, progress, shots, smoothPath, type Vec3 } from '../src/three/camera';
+import { apertureOf, crane, dolly, focalOf, fovOf, lookAt, orbit, path, progress, shots, smoothPath, type CameraPose, type Vec3 } from '../src/three/camera';
 import { halton, lensSample, lightSample, subPixel } from '../src/three/jitter';
-import { corners, projectBox } from '../src/three/project';
+import { corners, projectBox, projectPoint } from '../src/three/project';
 import { Animation } from '../src/three/animate';
 import { findingsOf, type CheckOpts, type Sample } from '../src/check';
 import type { ReportedBox } from '../src/engine/report';
@@ -152,5 +152,29 @@ describe('check of 3D boxes', () => {
     expect(f.map((x) => `${x.severity} ${x.kind} ${x.text ?? ''}`).sort()).toEqual(['info offFrame bottle', 'info offFrame lamp', 'info tiny bolt', 'warning empty '].sort());
     expect(f.find((x) => x.kind === 'offFrame' && x.text === 'lamp')!.message).toContain('behind the camera');
     expect(findingsOf([sample([{ kind: 'stage', w: 1000, h: 500, visible: 3 }])], opts)).toHaveLength(0);
+  });
+});
+
+describe('projectPoint', () => {
+  test("matches three's camera for a pose: position, target, roll and field of view", () => {
+    const poses: CameraPose[] = [
+      { position: [3, 2, 5], target: [0, 0.5, 0] }, { position: [-2, 4, 1], target: [1, 0, -3], roll: 17, fov: 60 },
+      { position: [0, 6, 0.001], target: [0, 0, 0] }, { position: [0, 0, 5], target: [0, 0, 0], roll: -40 },
+    ];
+    const pts: Vec3[] = [[0.4, 0.2, -0.3], [-1, 1.5, 0.7], [2, 0, 2]];
+    for (const pose of poses) for (const pt of pts) {
+      const cam = new THREE.PerspectiveCamera(pose.fov ?? 35, 1920 / 1080, 0.05, 200);
+      cam.position.set(...pose.position); cam.up.set(0, 1, 0); cam.lookAt(...pose.target);
+      if (pose.roll) cam.rotateZ((pose.roll * Math.PI) / 180);
+      cam.updateMatrixWorld(); cam.updateProjectionMatrix();
+      const q = new THREE.Vector3(...pt).project(cam);
+      const p = projectPoint(pose, pt, 35, 1920, 1080);
+      expect(p.x).toBeCloseTo(((q.x + 1) / 2) * 1920, 1);
+      expect(p.y).toBeCloseTo(((1 - q.y) / 2) * 1080, 1);
+      expect(p.behind).toBe(false);
+    }
+  });
+  test('a point behind the camera says so', () => {
+    expect(projectPoint({ position: [0, 0, 5], target: [0, 0, 0] }, [0, 0, 9], 35, 1920, 1080).behind).toBe(true);
   });
 });

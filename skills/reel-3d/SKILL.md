@@ -100,6 +100,24 @@ Give the pose `fstop` (f-number) or `aperture` (lens radius in world units), and
 
 `new HtmlPlane({ html, css, size: [w, h], pxPerUnit })` is a mesh showing an HTML layer: place it like any object. Give it enough layer px for its size on screen (`pxPerUnit`; a plane 0.1 units wide at `pxPerUnit: 6000` is 600 layer px) and it is sharp at `--scale 2`. `{ layer: component.layer, size }` shows a kit component's layer instead. Unlit, transparent, no shadow; one-sided unless `doubleSided`. For titles that should not move with the set, use the kit on a track above instead: sharper, and check measures it exactly.
 
+### Labels pinned to objects
+
+A flat label that follows an object (a name beside a planet, a callout line) is 2D drawn where the object is on screen. `stage.project(point | object)` gives that after `stage.camera(pose)`: `{ x, y, depth, behind }` in logical px, to place an HTML layer or a Canvas2D line in the same scene. Skip the label while `behind`.
+
+When the labels are a clip of their own on a track above (so they stay sharp and outside the stage's depth of field), both clips share the rig and the label clip asks for the stage clip's time:
+
+```ts
+// scenes/_space.ts, imported by both scenes
+export const rig = orbit({ target: [0, 0, 0], radius: 6, height: 2, from: -30, to: 60, at: [0, 8] });
+export const MOON: [number, number, number] = [1.2, 0.5, 0];
+
+// scenes/labels.ts (track 1), in render():
+const p = screenPoint(rig(f.t - this.ctx.clip('orbit').start), MOON, { fov: 35 });   // the stage's fov
+if (!p.behind) this.tag.draw(this.ctx.renderer, out, { x: p.x + 40, y: p.y - 22 });
+```
+
+`screenPoint(pose, point, { fov })` is the stage's camera without the stage (no jitter, so the label is steady while the object blurs). `this.ctx.clip(id)` gives any clip's `start`, `end` and `track`, and throws when the id is gone. A point that moves (an orbiting body) comes from a function of time both scenes import too.
+
 ## What `reel check` reports
 
 - A `stage` that sees none of its objects: `empty` (warning).

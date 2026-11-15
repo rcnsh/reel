@@ -126,7 +126,7 @@ A video exported with alpha (`reel video --format prores4444`, `webm`, or `--alp
 
 What a scene gets:
 
-- `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `id`, `start`, `end`, `W`, `H`.
+- `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `id`, `start`, `end`, `W`, `H`, and `clip(id)`: another clip's `{ start, end, track }` (throws when the id is gone), for a clip that follows another's timing.
 - `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt`, `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), `exposure` (the span of time the frame's sub-frames cover: 0 in previews and stills), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
 - Lifecycle: `init()` once (async; load and precompute here), `prepare(f)` once per output frame before its sub-frames (optional, may be async; HTML layers update then), `render()` per frame and per motion-blur sub-frame (synchronous), `reset()` for stateful scenes, `dispose()`.
 - Flags: `stateful = true` for simulation state, `handlesTransition = true` to composite `f.under` with `f.tin` yourself, `tileMasked` (see reference/sampling.md).

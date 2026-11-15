@@ -22,6 +22,11 @@ export interface SceneCtx {
   start: number;
   end: number;
   /**
+   * Another clip of the timeline by id: its window and track (throws when there is none, so a renamed clip fails
+   * loudly). For a clip that follows another: `f.t - this.ctx.clip('orbit').start` is that clip's local time.
+   */
+  clip(id: string): { id: string; start: number; end: number; track: number };
+  /**
    * For a `moving` entry of Scene.tileMasked, before drawing into it in a sub-frame: its texel at uv is read
    * on screen at uv * map.xy + map.zw this sub-frame (a zoom or pan), so its tile mask is mapped there; null
    * draws it whole. A no-op outside masked sub-frames.

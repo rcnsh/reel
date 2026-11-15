@@ -431,7 +431,11 @@ export class Engine {
       this.trackRTs.push(t);
       for (const rt of [...t.rts, ...t.mix]) this.maskedRTs.set(rt, { margin: 0 });
     }
-    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, mapTileMask: (rt, map) => this.mapTileMask(rt, map), maskDepth: (rt) => this.maskDepth(rt) };
+    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, clip: (id) => {
+      const e = this.timeline.find((x) => x.id === id);
+      if (!e) throw new Error(`no clip '${id}' on the timeline (it has ${this.timeline.map((x) => x.id).join(', ')})`);
+      return { id: e.id, start: e.start, end: e.end, track: e.track ?? 0 };
+    }, mapTileMask: (rt, map) => this.mapTileMask(rt, map), maskDepth: (rt) => this.maskDepth(rt) };
     this.post = new Post();
     // (the overlay is part of the look: loaded with any --only)
     const entries = only ? this.timeline.filter((e) => e === overlay || only(e)) : this.timeline;

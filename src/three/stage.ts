@@ -11,7 +11,7 @@ import { report, reporting } from '../engine/report';
 import type { SceneCtx } from '../engine/scene';
 import { apertureOf, type CameraPose, type Vec3 } from './camera';
 import { lensSample, lightSample, subPixel } from './jitter';
-import { corners, projectBox } from './project';
+import { corners, projectBox, projectPoint, type ScreenPoint } from './project';
 import { environment } from './load';
 
 export interface StageOptions {
@@ -297,6 +297,17 @@ export class Stage3D {
     this.ctx.comp.draw(r, tgt.texture, out, { mode: opaque ? 'replace' : 'normal', opacity: o.opacity ?? 1, premult: false });
   }
 
+  /**
+   * Where a point of the world (or an object's origin) is on screen for the camera as placed: logical px, to pin a
+   * label, a line or an HTML layer to it. Call it after stage.camera(pose).
+   */
+  project(point: Vec3 | THREE.Object3D): ScreenPoint {
+    const v = Array.isArray(point) ? new THREE.Vector3(...point) : point.getWorldPosition(new THREE.Vector3());
+    const depth = -v.clone().applyMatrix4(this.cam.matrixWorldInverse).z;
+    v.project(this.cam);
+    return { x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H, depth, behind: depth <= 1e-9 };
+  }
+
   /** The view-projection matrix of the camera as placed (no jitter). */
   viewProjection() {
     return this.vp.multiplyMatrices(this.cam.projectionMatrix, this.cam.matrixWorldInverse);
@@ -343,3 +354,11 @@ export class Stage3D {
 
 /** The theme's colour for a palette key or a CSS colour, as a three.js colour in linear sRGB. */
 export const themeColor = colour;
+
+/**
+ * Where a point of the world is on screen from a camera pose, in logical px: what `stage.project(point)` gives for
+ * a stage whose camera is at `pose`, without the stage. For a clip on another track that pins labels to a stage's
+ * objects: both import one rig and call it with the stage clip's time (`f.t - this.ctx.clip('<stage clip>').start`).
+ * `fov` is the stage's (default 35, as Stage3D's); a pose's own `fov` wins.
+ */
+export const screenPoint = (pose: CameraPose, point: Vec3, o: { fov?: number } = {}): ScreenPoint => projectPoint(pose, point, o.fov ?? 35, W, H);
