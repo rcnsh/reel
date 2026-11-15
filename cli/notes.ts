@@ -133,8 +133,11 @@ export function addNote(project: string, n: NewNote, now = new Date()): Note {
   return made;
 }
 
-/** The fields of a note a change may set: the rest (id, time, frame, clips, render, created) stay as made. */
-export interface NotePatch { text?: string; rect?: Rect | null; status?: NoteStatus }
+/**
+ * The fields of a note a change may set: the rest (id, render, created) stay as made. `moved` pins the note to
+ * another moment: its time, that time's frame and the clips on screen then, together.
+ */
+export interface NotePatch { text?: string; rect?: Rect | null; status?: NoteStatus; moved?: { t: number; frame: number; clips: string[] } }
 
 /** Change one note's fields, merged into the note as it is on disk now; returns it. Throws when no note has the id. */
 export function patchNote(project: string, id: string, patch: NotePatch, now = new Date()): Note {
@@ -151,6 +154,7 @@ export function patchNote(project: string, id: string, patch: NotePatch, now = n
       n.status = patch.status;
     }
     if (patch.rect !== undefined) { if (patch.rect) n.rect = cleanRect(patch.rect); else delete n.rect; }
+    if (patch.moved) { n.t = round(patch.moved.t); n.frame = patch.moved.frame; n.clips = patch.moved.clips; }
     const p = noteProblem(n);
     if (p) throw new NotesError(`the note is not valid: ${p}`);
     n.updated = now.toISOString();

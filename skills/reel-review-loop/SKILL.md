@@ -75,7 +75,7 @@ The person you work with watches renders with `reel review` (a page that plays t
 4. Re-render what the person will look at (`reel video --draft`, or the final), since the page plays the newest file.
 5. `reel notes done <id>` (MCP: `resolve_note`) for each note fixed. Never delete a person's note, and leave open what you did not fix; say why in your report.
 
-`reel notes add --t <s> "<text>"` leaves a note of your own for the person (a question about a moment, or a choice you made). Edit `review/notes.json` by hand only if you must; the tools merge by id, so a page open at the same time loses nothing.
+`reel notes add --t <s> "<text>"` leaves a note of your own for the person (a question about a moment, or a choice you made); `reel notes move <id> --t <s>` pins a note to another moment. While `reel review` runs, its page's API does the same over HTTP on the URL it prints: `GET /api/state` (the render, the timeline and the notes), `POST /api/notes` with `{ t, text, rect?: { x, y, w, h }, status? }`, `PATCH /api/notes/<id>` with any of `{ t, text, rect, status }`, `DELETE /api/notes/<id>`. Edit `review/notes.json` by hand only if you must; the tools merge by id, so a page open at the same time loses nothing.
 
 ## Cheap looking
 

@@ -82,6 +82,13 @@ test.skipIf(!hasChrome)('review a draft: the page, the video in ranges, a note t
   // the page sees the agent's change
   expect((await (await fetch(`${url}api/notes`)).json()).notes[0].status).toBe('done');
 
+  // a note pinned to the wrong moment moves, through the page's API and the CLI: time, frame and clips together
+  const moved = await (await fetch(`${url}api/notes/${note.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: 3.21 }) })).json();
+  expect(moved.note).toMatchObject({ t: 3.2, frame: 96, clips: ['dawn', 'dusk', 'title'], text: 'Title too low' });
+  const back = await reel(['notes', 'move', note.id, '--t', '5.8', '--json', '--project', dir]);
+  expect(back.code).toBe(0);
+  expect(back.json().note).toMatchObject({ t: 5.8, frame: 174, clips: ['dusk'] });
+
   server.kill('SIGINT');
   expect(await server.exited).not.toBe(null);
   server = null;

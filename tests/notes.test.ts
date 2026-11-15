@@ -27,6 +27,7 @@ test('add, edit, resolve and delete notes; the file is sorted by time and readab
   expect(edited.updated).toBe('2030-01-01T00:00:00.000Z');
   expect(edited.created).toBe(a.created);
   expect(patchNote(p, b.id, { status: 'done' }).status).toBe('done');
+  expect(patchNote(p, b.id, { moved: { t: 2.5, frame: 75, clips: ['x'] } })).toMatchObject({ t: 2.5, frame: 75, clips: ['x'], status: 'done' });
   deleteNote(p, b.id);
   expect(readNotes(p).map((n) => n.id)).toEqual([a.id]);
   expect(JSON.parse(readFileSync(notesPath(p), 'utf8')).notes[0].text).toBe('changed');

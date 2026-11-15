@@ -159,8 +159,10 @@ export function serveReview(o: ReviewOpts) {
         }
         const one = /^\/api\/notes\/([\w-]+)$/.exec(p);
         if (one && m === 'PATCH') {
-          const b = await req.json() as NotePatch;
-          const note = patchNote(project, one[1]!, { text: b.text, rect: b.rect, status: b.status });
+          const b = await req.json() as NotePatch & { t?: number };
+          if (b.t !== undefined && (typeof b.t !== 'number' || !Number.isFinite(b.t) || b.t < 0)) throw new NotesError('t: expected seconds');
+          const at = b.t === undefined ? undefined : frameOf(b.t, pr.fps);
+          const note = patchNote(project, one[1]!, { text: b.text, rect: b.rect, status: b.status, moved: at && { t: at.start, frame: at.frame, clips: o.timeline ? clipsAt(o.timeline.timeline, at.start) : [] } });
           return json({ note, notes: readNotes(project) });
         }
         if (one && m === 'DELETE') { deleteNote(project, one[1]!); return notes(); }

@@ -202,7 +202,7 @@ if (mode === 'notes') {
   const res: Result = { ok: true, errors: [], logs: [], warnings: [], file: N.notesPath(PROJECT) };
   try {
     if (sub === undefined) {
-      if (A.t !== undefined) throw new UsageError('--t goes with notes add');
+      if (A.t !== undefined) throw new UsageError('--t goes with notes add and notes move');
       const all = N.readNotes(PROJECT), shown = A.open ? all.filter((n) => n.status === 'open') : all;
       res.notes = shown.map((n) => N.listed(PROJECT, n));
       finish(res, () => console.log(N.formatNotes(PROJECT, shown, all)));
@@ -226,7 +226,17 @@ if (mode === 'notes') {
       res.note = N.listed(PROJECT, note);
       finish(res, () => console.log(`added ${note.id} at ${note.t.toFixed(3)} s (frame ${note.frame}, ${note.clips.join('+') || 'no clip'})`));
     }
-    throw new UsageError(`notes ${sub}: expected add, done or reopen (or nothing, to list them)`);
+    if (sub === 'move') {
+      const t = num(A, 't');
+      if (!arg || t === undefined || t < 0) throw new UsageError('notes move <id> --t <seconds>');
+      const R = await import('./review');
+      const fps = (await import('../src/config')).formatOf(await (await import('./server')).loadConfig(PROJECT)).fps;
+      const timeline = await R.timelineOf(PROJECT, (w) => res.warnings.push(w));
+      const note = N.patchNote(PROJECT, arg, { moved: { t, frame: N.frameOf(t, fps).frame, clips: timeline ? N.clipsAt(timeline.timeline, t) : [] } });
+      res.note = N.listed(PROJECT, note);
+      finish(res, () => console.log(`${note.id} is now at ${note.t.toFixed(3)} s (frame ${note.frame}, ${note.clips.join('+') || 'no clip'})`));
+    }
+    throw new UsageError(`notes ${sub}: expected add, move, done or reopen (or nothing, to list them)`);
   } catch (e) {
     if (e instanceof UsageError) fail(e.message);
     finish({ ...res, ok: false, errors: [(e as Error).message] }, () => {});

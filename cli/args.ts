@@ -79,6 +79,7 @@ Review by a person (no browser of reel's own)
                              command for its moment              [--open: only open ones] [--json]
   notes add --t <s> "<text>" add a note at that time
   notes done <id>            mark a note done (notes reopen <id>: open again)
+  notes move <id> --t <s>    pin a note to another moment
 
 Working on a project
   init <folder>             a new project that renders straight away, with the reel skills in
