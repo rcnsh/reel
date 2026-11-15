@@ -58,10 +58,12 @@ Stills and strips settle layout and most motion. Render video when you need to j
 
 - **Draft** (`reel video --draft`, add `--from 20 --to 26` for a stretch): half size with the same layout, one sample (no motion blur), H.264 encoded inside the browser, so a minute of video takes seconds. Use it to judge pacing, rhythm against the sound, cuts and motion while iterating, and to show the person you work with a rough cut. It is written as `out/video.draft.mp4` and tagged a draft: never hand one over as the result, and never judge sharpness, banding, motion blur or fine type from it.
 - **Final** (`--samples auto`, at full size; `--scale 2` for 4K): once stills, strips and check are clean and a draft has settled the timing. Adaptive motion blur, the full encoder; slower. Stateful scenes need a fixed `--samples 8`.
-- **Format**: `--format` or the `--out` extension: `h264` for most delivery, `hevc` (10-bit) where banding in dark gradients shows, `prores` for an editor, `prores4444` or `webm` for an overlay with transparency (check it with `reel still --alpha`), `gif`/`webp` for a short loop, `png`/`exr` frames for grading or compositing elsewhere. `reel video --help` lists them.
+- **Format**: `--format` or the `--out` extension: `h264` for most delivery, `hevc` or `--depth 10` where a dark gradient or a slow fade bands (8-bit H.264 smooths away the frame's dither, so steps show in dark areas; 10-bit files hold them and are often smaller), `prores` for an editor, `prores4444` or `webm` for an overlay with transparency (check it with `reel still --alpha`), `gif`/`webp` for a short loop, `png`/`exr` frames for grading or compositing elsewhere. `reel video --help` lists them.
 - Narrated or scored: `reel video --samples auto --mix` lays the track, music and cue sounds at the loudness target (it prints LUFS and true peak); `reel events` then `reel mix out/raw.mp4 out/final.mp4` re-mixes a render (a partial one with the same `--from`).
 
 You cannot watch a video file; judge its frames with `reel strip` at the same times, and use the video for the person you are working with.
+
+One export runs at a time on a machine: a second `reel video` (or `video_start`) fails while one is running, naming it. Wait for it rather than forcing a second beside it. On a Linux machine without a GPU everything renders in software (SwiftShader): stills, `check` and drafts work but take about half a second a frame, and a final `--samples auto` export takes seconds a frame, so keep exports there short (`--from/--to`) and render finals where there is a GPU.
 
 ## Cheap looking
 
