@@ -63,14 +63,24 @@ async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
 interface Job { id: string; project: string; out: string; state: 'running' | 'done' | 'failed' | 'cancelled'; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
 const jobs = new Map<string, Job>();
 
-function startVideo(a: Record<string, any>): Job {
-  const proj = projectDir(a.project);
-  const out = a.out ? path.resolve(a.out) : path.join(proj, 'out/video.mp4');
-  const args = ['video', '--project', proj, '--json', '--progress', '--out', out];
+/**
+ * The `reel video` command line for video_start's arguments. Without `out` the CLI picks the default for the format
+ * (out/video.mp4, out/video.hevc.mp4, out/video.draft.mp4, out/png/frame_NNNNNN.png, ...).
+ */
+export function videoArgs(a: Record<string, any>, proj: string): string[] {
+  const args = ['video', '--project', proj, '--json', '--progress'];
+  if (a.out) args.push('--out', path.resolve(a.out));
   const flag = (k: string, v: unknown) => { if (v !== undefined && v !== false) args.push(`--${k}`, ...(v === true ? [] : [Array.isArray(v) ? v.join(',') : String(v)])); };
   flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme);
   flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); flag('mix', a.mix); flag('subtitles', a.subtitles);
   flag('format', a.format); flag('chroma', a.chroma); flag('depth', a.depth); flag('alpha', a.alpha); flag('opaque', a.opaque); flag('quality', a.quality); flag('max-fps', a.max_fps); flag('max-size', a.max_size); flag('draft', a.draft);
+  return args;
+}
+
+function startVideo(a: Record<string, any>): Job {
+  const proj = projectDir(a.project);
+  const out = a.out ? path.resolve(a.out) : '(the format\'s default under out/; the result names the file)';
+  const args = videoArgs(a, proj);
   const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
   const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: 'running', progress: null, started: Date.now(), output: '', proc };
   jobs.set(job.id, job);
@@ -190,7 +200,7 @@ export async function serveMcp() {
 
   server.registerTool('video_start', {
     title: 'Start a video render',
-    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/<format>/frame_NNNNNN.<ext> for sequences).",
+    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details.",
     inputSchema: {
       ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output path (its extension picks the format when `format` is not given; for sequences, the frames are named after it with the frame number).'),
       format: z.enum(['h264', 'hevc', 'prores', 'prores4444', 'webm', 'gif', 'webp', 'png', 'png16', 'jpeg', 'exr']).optional().describe('Output format (default from the out extension, else h264).'),
@@ -244,7 +254,7 @@ export async function serveMcp() {
 
   server.registerTool('align_recording', {
     title: 'Align a recording',
-    description: "Time narration.txt to a real voice recording (one take, or a folder of per-plate files named after the plates): the script's words are force-aligned to it (Qwen3-ForcedAligner on Apple Silicon), or with method 'whisper' transcribed and matched, for a reading that departs from the script. Replaces audio/narration.flac, data/words.json and data/audio.json, then warns (and fails) about lines whose words are not heard where they were placed: a take that skips, repeats or rewords a line. The first run downloads a model (minutes).",
+    description: "Time narration.txt to a real voice recording (one take, or a folder of per-plate files named after the plates): the script's words are force-aligned to it (Qwen3-ForcedAligner: MLX on Apple Silicon, PyTorch on CPU elsewhere), or with method 'whisper' transcribed and matched, for a reading that departs from the script. Replaces audio/narration.flac, data/words.json and data/audio.json, then warns (and fails) about lines whose words are not heard where they were placed: a take that skips, repeats or rewords a line. The first run downloads a model (minutes).",
     inputSchema: { project, recording: z.string().describe('The recording file or folder.'), method: z.enum(['qwen', 'whisper']).optional(), lead: z.number().min(0).optional(), hold: z.number().min(0).optional(), tail: z.number().min(0).optional() },
   }, (a) => guard(() => tool('align', a.project, [path.resolve(a.recording), ...(['method', 'lead', 'hold', 'tail'] as const).flatMap((k) => (a[k] !== undefined ? [`--${k}`, String(a[k])] : []))])));
 

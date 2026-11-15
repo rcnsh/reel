@@ -4,6 +4,9 @@ import { existsSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PNG } from 'pngjs';
+import { parseCommand } from '../cli/args';
+import { encodeOptsOf, formatOf, planOf } from '../cli/formats';
+import { videoArgs } from '../cli/mcp';
 import { fixture, hasChrome, OFF_FRAME, reel, REEL, scratchCopy } from './helpers';
 
 const demo = scratchCopy('demo'), layers = scratchCopy('layers'), wide = fixture('offframe', OFF_FRAME);
@@ -31,6 +34,25 @@ test('lists its tools, each with a description', async () => {
   expect(names).toEqual(['align_recording', 'analyze_song', 'assets', 'check_video', 'contact_sheet', 'diff_images', 'mix_audio', 'motion_strip', 'narrate', 'project_info', 'render_still', 'subtitles', 'video_cancel', 'video_start', 'video_status'].sort());
   for (const t of tools) expect((t.description ?? '').length).toBeGreaterThan(60);
   for (const t of tools.filter((x) => !x.name.startsWith('video_s') && !x.name.startsWith('video_c') && x.name !== 'diff_images')) expect(t.inputSchema.required ?? []).toContain('project');
+});
+
+test("video_start's options become reel video flags the CLI accepts; without out the format picks its default", () => {
+  const cases: [Record<string, unknown>, string[]][] = [
+    [{}, []],
+    [{ format: 'prores4444', opaque: true }, ['--format', 'prores4444', '--opaque']],
+    [{ format: 'hevc', crf: 20, preset: 'slow', samples: 'auto', scale: 2 }, ['--scale', '2', '--samples', 'auto', '--preset', 'slow', '--crf', '20', '--format', 'hevc']],
+    [{ chroma: '444', depth: 10, mix: true, from: 1, to: 2 }, ['--from', '1', '--to', '2', '--mix', '--chroma', '444', '--depth', '10']],
+    [{ format: 'webp', alpha: true, quality: 70, max_fps: 12, max_size: 480 }, ['--format', 'webp', '--alpha', '--quality', '70', '--max-fps', '12', '--max-size', '480']],
+    [{ draft: true, only: ['a', 'b'], noaudio: true }, ['--only', 'a,b', '--noaudio', '--draft']],
+    [{ format: 'png', out: '/tmp/f/x.png' }, ['--out', '/tmp/f/x.png', '--format', 'png']],
+  ];
+  for (const [a, want] of cases) {
+    const args = videoArgs(a, '/p');
+    expect(args).toEqual(['video', '--project', '/p', '--json', '--progress', ...want]);
+    const v = parseCommand(args).values;
+    const f = formatOf(v.format as string | undefined, v.out as string | undefined);
+    planOf(f, encodeOptsOf(v, f), 30);
+  }
 });
 
 test.skipIf(!hasChrome)('project_info', async () => {
