@@ -31,7 +31,7 @@ export default defineVideo({
 
 ## Post-processing
 
-A scene's `render()` may return overrides; a clip's `post` sets defaults while it shows; the theme's `post` is the base (over the neutral defaults: no glow, grain, vignette or aberration). Parameters: `exposure`, `bloom`, `bloomThreshold`, `bloomKnee`, `bloomRadius`, `halation`, `ca` (chromatic aberration, px at the edge), `grain`, `vignette`, `fade` (to black), `flash` (in the theme's light colour), `shake: [x, y]` (px), `zoom` (punch-ins), `invert` (swaps `bg` and `fg`). Another theme's grade for one scene: `return { ...themes.film.post, bloom: 0.8 }` (`themes` from `reel`).
+A scene's `render()` may return overrides; a clip's `post` sets defaults while it shows; the theme's `post` is the base (over the neutral defaults: no glow, grain, vignette or aberration). Parameters: `exposure`, `bloom`, `bloomThreshold`, `bloomKnee`, `bloomRadius`, `halation`, `ca` (chromatic aberration, px at the edge), `grain`, `vignette`, `fade` (to black; to transparent in a render with alpha), `flash` (in the theme's light colour), `shake: [x, y]` (px), `zoom` (punch-ins), `invert` (swaps `bg` and `fg`). Another theme's grade for one scene: `return { ...themes.film.post, bloom: 0.8 }` (`themes` from `reel`).
 
 ## The overlay
 

@@ -160,4 +160,4 @@ Aim under 25 ms a frame (`reel perf --from a --to b`). Precompute in `init()`. A
 - `reference/timing.md`: words (narration, lyrics), audio analysis and beat helpers, narration and music workflows, the sound mix.
 - The `reel-3d` skill: 3D with three.js: a stage, models and environments, lighting rigs, camera rigs, depth of field, soft shadows, glTF animation, text on planes.
 - The `reel-audio` skill: voicing and aligning narration, analysing songs, the mix and its loudness, subtitles, generated assets.
-- The engine's source (where the project's `package.json` points `reel`): `src/engine/*.ts` when the reference is not enough.
+- The engine's source (where the project's `tsconfig.json` maps `reel`): `src/engine/*.ts` when the reference is not enough.
