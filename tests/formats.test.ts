@@ -1,7 +1,7 @@
 // The output formats: which one a command line means, what each asks of the page, and the ffmpeg command for each.
 import { expect, test } from 'bun:test';
 import { UsageError } from '../cli/args';
-import { defaultOut, draftEncoder, draftName, draftScale, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
+import { deepGainOf, defaultOut, draftEncoder, draftName, draftScale, GAIN_Y, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
 import { containerOf } from '../tools/mix';
 
 test('the format comes from --format, else the --out extension, else H.264', () => {
@@ -102,6 +102,11 @@ test("16-bit frames have swscale's gain divided out before the YUV conversion; 8
   // (an ffmpeg without the gain gets nothing added)
   const plan = planOf(FORMATS.hevc, {}, 30);
   expect(ffmpegArgs(plan, {}, { width: 64, height: 64, fps: 30, out: '/o/x.mp4', deepGain: 1 }).join(' ')).not.toContain('lutrgb');
+  // the gain from the limited-range luma of the grey: 55626 is what both a static ffmpeg 7 and Homebrew's ffmpeg 9
+  // give through toYuv709 (a static ffmpeg 7 gives the grey back exactly in full range, so a full-range probe saw 1)
+  expect(deepGainOf(GAIN_Y)).toBeCloseTo(1, 9);
+  expect(deepGainOf(55626)).toBeCloseTo(65535 / 65280, 4);
+  expect(deepGainOf(0)).toBe(1);
 });
 
 test('each format has its codec, pixel format and sound', () => {

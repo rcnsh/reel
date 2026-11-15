@@ -331,19 +331,23 @@ export function ffmpegHasAlphaModes() {
 }
 
 let deepGain: number | undefined;
+/** The grey the gain is measured on (16-bit), and the limited-range 16-bit luma an exact conversion gives it. */
+export const GAIN_GREY = 60000, GAIN_Y = 4096 + (56064 * GAIN_GREY) / 65535;
+/** The gain a measured luma shows: how far the conversion stretched the grey's distance from black. */
+export const deepGainOf = (y: number) => (y > 4096 ? (y - 4096) / (GAIN_Y - 4096) : 1);
 /**
- * What the ffmpeg on PATH multiplies 16-bit RGB by when swscale converts it to YUV: measured once per process on a
- * grey of 60000. Some builds' swscale scales 16-bit input as if its full scale were 255 x 256 rather than 65535
- * (Homebrew's ffmpeg 9 gives 1.0039, which brightens a 10-bit export by up to 3.4 codes; a static ffmpeg 7 build
- * gives 1), so the deep formats divide it out first.
+ * What the ffmpeg on PATH multiplies 16-bit RGB by when swscale converts it to limited-range YUV: measured once per
+ * process on a grey of GAIN_GREY, through the very conversion the deep formats use (toYuv709, at 16 bits). Builds
+ * scale 16-bit input as if its full scale were 255 x 256 rather than 65535 (1.0039, which brightens a 10-bit export by
+ * up to 3.4 codes): Homebrew's ffmpeg 9 on every path, a static ffmpeg 7 only on the way to limited range, so the
+ * measurement takes that way. The deep formats divide it out first.
  */
 export function ffmpegDeepGain() {
   if (deepGain === undefined) {
     const grey = new Uint8Array(16 * 16 * 6);
-    for (let k = 0; k < grey.length; k += 2) { grey[k] = 60000 & 255; grey[k + 1] = 60000 >> 8; }
-    const r = Bun.spawnSync(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', '16x16', '-i', 'pipe:0', '-vf', 'scale=in_range=pc:out_range=pc:out_color_matrix=bt709:flags=accurate_rnd,format=yuv444p16le', '-f', 'rawvideo', 'pipe:1'], { stdin: grey, stdout: 'pipe', stderr: 'ignore' });
-    const y = r.stdout.length >= 2 ? r.stdout[0]! | (r.stdout[1]! << 8) : 0;
-    deepGain = y > 0 ? y / 60000 : 1;
+    for (let k = 0; k < grey.length; k += 2) { grey[k] = GAIN_GREY & 255; grey[k + 1] = GAIN_GREY >> 8; }
+    const r = Bun.spawnSync(['ffmpeg', '-v', 'error', '-f', 'rawvideo', '-pix_fmt', 'rgb48le', '-s', '16x16', '-i', 'pipe:0', '-vf', toYuv709('yuv444p16le'), '-f', 'rawvideo', 'pipe:1'], { stdin: grey, stdout: 'pipe', stderr: 'ignore' });
+    deepGain = r.stdout.length >= 2 ? deepGainOf(r.stdout[0]! | (r.stdout[1]! << 8)) : 1;
   }
   return deepGain;
 }
