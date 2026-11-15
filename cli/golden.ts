@@ -1,5 +1,9 @@
 // Golden frames: stills of the examples (tests/golden/goldens.json) that the tests compare renders against.
-// `reel golden update` writes them; tests/golden.test.ts renders the same list and compares.
+// `reel golden update` writes them; tests/golden.test.ts renders the same list and compares. Each operating system
+// has a set of its own (tests/golden/<platform>/): Chrome rasterises text and decodes video differently on macOS and
+// Linux, by more than any tolerance that would still catch a real change, while on one system the GL backend barely
+// matters (on a Mac, SwiftShader and Metal differ in a few dozen pixels of text edges). The Linux set is rendered by
+// SwiftShader, the backend of a machine without a GPU.
 import { mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -12,6 +16,8 @@ export const GOLDEN = path.join(ENGINE, 'tests/golden');
 
 export interface GoldenSpec { example: string; times: number[]; samples?: 'auto' | number; size?: string; theme?: string }
 export interface GoldenList { maxSize: number; tol: number; frames: GoldenSpec[] }
+/** The golden set for an operating system (this one, by default). */
+export const goldenDir = (platform: string = process.platform) => path.join(GOLDEN, platform);
 export const goldenList = (): GoldenList => JSON.parse(readFileSync(path.join(GOLDEN, 'goldens.json'), 'utf8'));
 
 /** A golden's file name: the time and what differs from the example's defaults. */

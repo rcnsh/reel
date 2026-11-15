@@ -93,8 +93,8 @@ if (mode === 'mcp') {
 
 if (mode === 'golden') {
   if (P.positionals[0] !== 'update') fail(`golden ${P.positionals[0]}: expected update`);
-  const { GOLDEN, renderGoldens } = await import('./golden');
-  const { files, errors } = await renderGoldens(GOLDEN);
+  const { goldenDir, renderGoldens } = await import('./golden');
+  const { files, errors } = await renderGoldens(goldenDir());
   finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()] }, () => console.log([...files.values()].join('\n')));
 }
 
