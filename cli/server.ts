@@ -70,10 +70,12 @@ export async function startServer(project: string, opts: { port?: number; strict
   // (imported here: a command that only talks to the warm renderer never loads Vite)
   const { createServer, createLogger } = await import('vite');
   const logger = createLogger('error');
+  let moduleFailed = false;
   const logError = logger.error.bind(logger);
   logger.error = (msg, o) => {
     // (err.loc is not used: for a transform error it points into Vite's own code; the message has the code frame)
     const err = o?.error as { id?: string; message?: string } | null | undefined;
+    if (err?.id) moduleFailed = true;
     if (opts.onModuleError && err?.id && err.message) {
       const file = err.id.split('?')[0]!;
       opts.onModuleError({ file, message: `${path.relative(project, file)}: ${stripVTControlCharacters(err.message).trim()}` });
@@ -139,6 +141,16 @@ export async function startServer(project: string, opts: { port?: number; strict
     }],
   });
   await server.listen();
+  if (opts.hmr) {
+    // (the preview: after a module failed, a file that appears may be the import it could not resolve, which
+    // Vite's resolver remembers as missing until the server starts again; the page then reloads by itself)
+    server.watcher.add(project);
+    server.watcher.on('add', (f) => {
+      if (!moduleFailed || !f.startsWith(project + path.sep) || /(^|\/)(out|node_modules|\.git)\//.test(path.relative(project, f) + '/')) return;
+      moduleFailed = false;
+      void server.restart();
+    });
+  }
   const addr = server.httpServer!.address();
   const port = typeof addr === 'object' && addr ? addr.port : opts.port;
   return { url: `http://localhost:${port}`, server, format, theme, stop: () => server.close() };
