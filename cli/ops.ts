@@ -236,6 +236,8 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
     try {
       h = await r.page(req.page);
       Object.assign(res, await OPS[req.op](h, ctx));
+      // (the frame rendered, so a caller sees which size it looked at)
+      res.frame = `${h.fmt.w}x${h.fmt.h}${h.fmt.scale !== 1 ? ` at scale ${h.fmt.scale}` : ''}, ${h.fmt.fps} fps`;
       res.errors.push(...await h.errors());
       res.logs.push(...h.logs);
       break;
