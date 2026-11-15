@@ -7,7 +7,7 @@ import { resolveTheme } from '../src/themes';
 import { readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { ENGINE, loadConfig, startServer } from './server';
-import { checkChromeVersion, findChrome } from './chrome';
+import { checkChromeVersion, findChrome, glArgs, glBackend, type GlBackend } from './chrome';
 import type { PageOpts } from './args';
 
 /** Paths in a project whose changes never matter to its pages (renders, tools' working files, the config loader's). */
@@ -16,12 +16,17 @@ export const IGNORED = /^(out|node_modules|\.git|audio\/\.work|audio\/\.align|\.
 /** The flags every Chrome the CLI starts gets. */
 // (--disable-frame-rate-limit: a page paints as soon as it is asked to instead of on a 60 Hz clock, so an HTML
 // layer that changes costs a fraction of a millisecond per frame instead of up to 17)
-export const CHROME_ARGS = ['--use-angle=metal', '--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--disable-frame-rate-limit'];
+export const CHROME_ARGS = ['--enable-gpu-rasterization', '--ignore-gpu-blocklist', '--disable-background-timer-throttling', '--disable-renderer-backgrounding', '--disable-backgrounding-occluded-windows', '--disable-frame-rate-limit'];
+
+/** Every flag a Chrome gets: CHROME_ARGS, the GL backend's (cli/chrome.ts) and, as root (containers), no sandbox. */
+export function chromeArgs(backend: GlBackend = glBackend()) {
+  return [...CHROME_ARGS, ...glArgs(backend), ...(process.getuid?.() === 0 ? ['--no-sandbox'] : [])];
+}
 
 /** Start the Chrome reel renders with (cli/chrome.ts), refusing one too old for HTML layers. */
 export async function launchChrome(headed = false) {
   const choice = findChrome();
-  const browser = await chromium.launch({ executablePath: choice.path, headless: !headed, args: CHROME_ARGS });
+  const browser = await chromium.launch({ executablePath: choice.path, headless: !headed, args: chromeArgs() });
   try { checkChromeVersion(browser.version(), choice); } catch (e) { await browser.close().catch(() => {}); throw e; }
   return browser;
 }

@@ -12,7 +12,7 @@ import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ENGINE } from './server';
-import { findChrome } from './chrome';
+import { findChrome, glBackend } from './chrome';
 import type { Req, Result } from './ops';
 
 /** Bumped when the request or state format changes. */
@@ -23,7 +23,9 @@ const DIR = path.join(tmpdir(), 'reel-daemons');
 export function engineVersion(): string {
   let chrome = '';
   try { chrome = findChrome().path; } catch {}
-  const parts: string[] = [`p${PROTOCOL}`, chrome];
+  let gl = '';
+  try { gl = glBackend(); } catch {}
+  const parts: string[] = [`p${PROTOCOL}`, chrome, gl];
   const walk = (d: string) => {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const f = path.join(d, e.name);

@@ -44,6 +44,11 @@ let P!: ReturnType<typeof parseCommand>;
 try { P = parseCommand(argv); } catch (e) { fail((e as Error).message); }
 const A = P.values;
 if (A.help) { console.log(HELP); process.exit(0); }
+// (the GL backend travels by environment: to the warm renderer, whose engine version includes it, and video's browsers)
+if (typeof A.gl === 'string') {
+  process.env.REEL_GL = A.gl;
+  try { (await import('./chrome')).glBackend(); } catch (e) { fail(`--gl ${A.gl}: ${(e as Error).message.replace(/^REEL_GL=\S+: /, '')}`); }
+}
 const json = !!A.json;
 const say = (s: string) => { if (!json) console.log(s); };
 /** A path given on the command line, absolute (requests travel to the warm renderer, whose folder differs). */
@@ -235,7 +240,7 @@ try {
       });
       const file = format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file;
       if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: 0.5, samples: 1 };
-      Object.assign(res, { file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
+      Object.assign(res, { gl: (await import('./chrome')).glBackend(), file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
       res.errors.push(...r.explain(v.errors));
       res.logs.push(...r.explain(v.logs));
       say(`\nwrote ${file} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
@@ -339,5 +344,5 @@ finish(res, (x) => {
   else if (mode === 'check') printCheck(x);
   else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues, ${x.sounds} sounds on the timeline`);
   else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms (render ${(x.render as number).toFixed(1)}, readback ${(x.readback as number).toFixed(1)})  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
-  else if (mode === 'gpu') say(String(x.gpu));
+  else if (mode === 'gpu') say(`${x.gpu}\nGL backend: ${x.gl}${x.software ? ' (software rendering: no GPU)' : ''}`);
 });

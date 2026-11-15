@@ -2,7 +2,7 @@
 // only reproducible on a known browser, so reel pins a Chrome for Testing build and keeps it in a cache folder of
 // its own (`reel chrome install` fetches it with @puppeteer/browsers). CHROME_PATH names another binary instead.
 // The installed Google Chrome is never used by default: it updates itself, and a render must not change with it.
-import { existsSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { homedir } from 'node:os';
 import path from 'node:path';
 import { Browser, computeExecutablePath, detectBrowserPlatform, install } from '@puppeteer/browsers';
@@ -61,4 +61,42 @@ export async function installChrome(onProgress?: (done: number, total: number) =
   if (!platform) throw new Error(`no Chrome for Testing build for ${process.platform} ${process.arch}`);
   const b = await install({ browser: Browser.CHROME, buildId: CHROME_BUILD, cacheDir: chromeCache(), platform, downloadProgressCallback: onProgress });
   return b.executablePath;
+}
+
+/**
+ * How Chrome draws WebGL (through ANGLE): 'metal' on macOS; on Linux a real GPU through EGL ('egl') or Vulkan
+ * ('vulkan') when one is there, else 'swiftshader', Chrome's software renderer, which needs no GPU at all.
+ */
+export type GlBackend = 'metal' | 'egl' | 'vulkan' | 'swiftshader';
+export const GL_BACKENDS: readonly GlBackend[] = ['metal', 'egl', 'vulkan', 'swiftshader'];
+
+/**
+ * The backend renders use: REEL_GL (one of GL_BACKENDS; `--gl` sets it) if given, else Metal on macOS, else EGL when
+ * the machine has a GPU render node (/dev/dri/renderD*), else SwiftShader.
+ */
+export function glBackend(env: Record<string, string | undefined> = process.env, platform: string = process.platform, hasGpu: () => boolean = gpuNode): GlBackend {
+  const want = env.REEL_GL;
+  if (want) {
+    if (!GL_BACKENDS.includes(want as GlBackend)) throw new Error(`REEL_GL=${want}: expected ${GL_BACKENDS.join(', ')}`);
+    if (want === 'metal' && platform !== 'darwin') throw new Error('REEL_GL=metal: Metal is macOS only');
+    return want as GlBackend;
+  }
+  if (platform === 'darwin') return 'metal';
+  return hasGpu() ? 'egl' : 'swiftshader';
+}
+
+/** Whether this machine has a GPU render node (Linux DRM). */
+export function gpuNode() {
+  try { return readdirSync('/dev/dri').some((n) => n.startsWith('renderD')); } catch { return false; }
+}
+
+/** Chrome's flags for a backend. */
+export function glArgs(b: GlBackend): string[] {
+  switch (b) {
+    case 'metal': return ['--use-angle=metal'];
+    case 'egl': return ['--use-gl=angle', '--use-angle=gl-egl'];
+    case 'vulkan': return ['--use-gl=angle', '--use-angle=vulkan', '--enable-features=Vulkan,VulkanFromANGLE,DefaultANGLEVulkan'];
+    // (SwiftShader WebGL is behind this flag since Chrome 137: reel renders only its own pages)
+    case 'swiftshader': return ['--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'];
+  }
 }

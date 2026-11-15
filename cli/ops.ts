@@ -7,6 +7,7 @@ import type { AdaptiveSampling } from '../src/engine/engine';
 import { checkTimes, findingsOf, type Finding, type Sample } from '../src/check';
 import { UsageError, type PageOpts } from './args';
 import { isGone, type PageHandle, type Renderer } from './renderer';
+import { glBackend } from './chrome';
 import { describe, missingAssets } from '../tools/asset-manifest';
 
 export type Op = 'info' | 'still' | 'sheet' | 'strip' | 'check' | 'events' | 'perf' | 'gpu';
@@ -207,7 +208,7 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
       const ext = gl.getExtension('WEBGL_debug_renderer_info');
       return ext ? gl.getParameter(ext.UNMASKED_RENDERER_WEBGL) : gl.getParameter(gl.RENDERER);
     });
-    return { gpu };
+    return { gpu, software: /swiftshader|llvmpipe|software/i.test(String(gpu)) };
   },
 };
 
@@ -252,6 +253,7 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       break;
     }
   }
+  res.gl = glBackend();
   res.errors = [...new Set(r.explain(res.errors))];
   res.logs = r.explain(res.logs);
   res.ok = res.errors.length === 0;

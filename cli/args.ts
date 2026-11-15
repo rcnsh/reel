@@ -33,7 +33,7 @@ reuses; each exits 1 on a scene error)
                              [--out data/cues.json]
   perf    --from 0 --to 5    milliseconds per frame: rendering and the export's pixel readback, apart
                              [--pixels rgb8|rgba8|rgb16|rgba16|linear: the readback to time]
-  gpu                        the GPU Chrome renders with
+  gpu                        the GPU Chrome renders with and the GL backend (software: SwiftShader)
 
 Rendering
   video                      the video, in its own browsers (not the warm renderer), through ffmpeg with
@@ -110,6 +110,9 @@ Flags for every command that renders
   --no-daemon          render in a browser of its own, started and stopped by this command
                        (also REEL_NO_DAEMON=1)
   --headed             show the browser (implies --no-daemon)
+  --gl <backend>       how Chrome draws: metal (macOS), egl or vulkan (a Linux GPU), swiftshader
+                       (software, no GPU); default: metal on macOS, else egl with a GPU render node,
+                       else swiftshader (also REEL_GL). --json reports it as gl
   --json               machine-readable output: one JSON object { ok, errors, logs, ... }
 
 Chrome: $CHROME_PATH, else the pinned Chrome for Testing that \`reel chrome install\` fetches; it must
@@ -122,7 +125,7 @@ type Opt = typeof str | typeof bool;
 /** Flags of every command that renders through a page. */
 const RENDER: Record<string, Opt> = {
   project: str, json: bool, help: bool, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str,
-  shutter: str, scale: str, size: str, fps: str, theme: str, headed: bool, 'no-daemon': bool,
+  shutter: str, scale: str, size: str, fps: str, theme: str, headed: bool, 'no-daemon': bool, gl: str,
 };
 const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
 
