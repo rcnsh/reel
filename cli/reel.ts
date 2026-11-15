@@ -80,7 +80,7 @@ if (mode === 'init') {
   }
   out.ok = !out.errors.length;
   finish(out, () => {
-    console.log(files.map((f) => path.relative(process.cwd(), f)).join('\n'));
+    console.log(files.map((f) => path.relative(project, f)).join('\n'));
     console.log(`\n${project} is ready: cd there and run \`bun run reel still --t 1\``);
   });
 }

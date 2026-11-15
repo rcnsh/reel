@@ -47,7 +47,7 @@ export function initProject(dir: string, o: InitOptions): string[] {
   const files: Record<string, string> = {
     'reel.config.ts': o.narrated ? narratedConfig(o) : silentConfig(o, title),
     'scenes/intro.ts': o.narrated ? narratedScene() : silentScene(),
-    'tsconfig.json': JSON.stringify({ extends: path.join(ENGINE, 'tsconfig.project.json'), include: ['**/*.ts'], exclude: ['out', 'node_modules'] }, null, 2) + '\n',
+    'tsconfig.json': JSON.stringify({ extends: path.join(ENGINE, 'tsconfig.project.json'), include: ['**/*.ts'], exclude: ['out', 'node_modules', 'tools'] }, null, 2) + '\n',
     'package.json': JSON.stringify({
       name: name.toLowerCase().replace(/[^a-z0-9._-]+/g, '-').replace(/^[-._]+/, '') || 'video',
       private: true,
