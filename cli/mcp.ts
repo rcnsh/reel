@@ -9,6 +9,7 @@ import { pageOf, samplesOf, UsageError, type Values } from './args';
 import { call } from './daemon';
 import { runDiff } from './diff';
 import { type Op, type Req, type Result } from './ops';
+import { listed, notesPath, patchNote, readNotes } from './notes';
 import { downscale, encodePng, readPng } from './png';
 import { ENGINE, projectDir } from './server';
 
@@ -117,7 +118,7 @@ async function tool(name: string, proj: string, args: string[]): Promise<ToolRes
 
 export async function serveMcp() {
   const server = new McpServer({ name: 'reel', version: '1.0.0' }, {
-    instructions: 'reel renders deterministic WebGL videos from a project folder (reel.config.ts and scenes/*.ts). Author by editing those files; use these tools to look: project_info first, then render_still / motion_strip / contact_sheet to see frames, check_video to find layout and render problems, video_start to export. Every tool takes the project folder. Renders go through a warm background renderer per project, so repeated calls are fast, and it picks up file edits on the next call.',
+    instructions: 'reel renders deterministic WebGL videos from a project folder (reel.config.ts and scenes/*.ts). Author by editing those files; use these tools to look: project_info first, then render_still / motion_strip / contact_sheet to see frames, check_video to find layout and render problems, video_start to export, review_notes for what a person asked to change in a render (resolve_note once fixed). Every tool takes the project folder. Renders go through a warm background renderer per project, so repeated calls are fast, and it picks up file edits on the next call.',
   });
 
   server.registerTool('project_info', {
@@ -286,6 +287,26 @@ export async function serveMcp() {
     description: "The images and sounds the project declares in assets.json ({ assets: [{ id, kind: 'image'|'sfx'|'music', prompt, size|duration, out }] }) and their state. Generates the missing ones when the provider's key is set (OPENAI_API_KEY for images, ELEVENLABS_API_KEY for sounds and music; only the prompt and size or duration are sent); otherwise returns each missing asset's prompt, size and path so a person can make it. isError while any is missing. Renders show a labelled placeholder for a missing image.",
     inputSchema: { project, list: z.boolean().optional().describe('Only list, generate nothing.'), force: z.boolean().optional().describe('Generate the generated ones again.') },
   }, (a) => guard(() => tool('assets', a.project, ['--json', ...(a.list ? ['--list'] : []), ...(a.force ? ['--force'] : [])])));
+
+  server.registerTool('review_notes', {
+    title: 'Review notes',
+    description: "The notes a person left on a render with `reel review` (the project's review/notes.json): each with id, t (seconds), frame, the clips on screen, text, an optional rect on the frame in logical px, status (open or done), the render it was made on, and `still`, the command that renders that moment. Work through the open ones: look at each moment (render_still at t, the rect shows where), fix, re-render, then resolve_note.",
+    inputSchema: { project, open_only: z.boolean().optional().describe('Only the open notes (default: all).') },
+    annotations: { readOnlyHint: true },
+  }, (a) => guard(async () => {
+    const proj = projectDir(a.project);
+    const all = readNotes(proj), shown = a.open_only ? all.filter((n) => n.status === 'open') : all;
+    return { content: [text({ file: notesPath(proj), open: all.filter((n) => n.status === 'open').length, total: all.length, notes: shown.map((n) => listed(proj, n)) })] };
+  }));
+
+  server.registerTool('resolve_note', {
+    title: 'Resolve a review note',
+    description: "Mark a review note done once the render no longer has the problem it describes (or open again with reopen: true). The note stays in review/notes.json for the person to see; the review page shows the change within seconds.",
+    inputSchema: { project, id: z.string().describe('The note id, from review_notes.'), reopen: z.boolean().optional().describe('Mark it open again instead.') },
+  }, (a) => guard(async () => {
+    const proj = projectDir(a.project);
+    return { content: [text(listed(proj, patchNote(proj, a.id, { status: a.reopen ? 'open' : 'done' })))] };
+  }));
 
   // (a job left running when the client goes away would hold Chromes and ffmpeg)
   const cleanup = () => { for (const j of jobs.values()) if (j.state === 'running') j.proc.kill('SIGTERM'); };

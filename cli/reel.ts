@@ -178,6 +178,61 @@ let PROJECT = '';
 const needsProject = !(mode === 'diff' && A.t === undefined);
 try { PROJECT = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { if (needsProject) fail((e as Error).message); }
 
+if (mode === 'review') {
+  const R = await import('./review');
+  const file = P.positionals[0] ? path.resolve(P.positionals[0]) : R.latestRender(PROJECT);
+  if (!file) fail(`no video under ${path.join(PROJECT, 'out')}: render one (reel video --draft) or name a file`);
+  if (!(await Bun.file(file!).exists())) fail(`${file}: no such file`);
+  const port = A.port === undefined ? 0 : (() => { try { return int(A, 'port', 0, 1); } catch (e) { return fail((e as Error).message); } })();
+  const warnings: string[] = [];
+  const timeline = await R.timelineOf(PROJECT, (w) => warnings.push(w));
+  let srv;
+  try { srv = R.serveReview({ project: PROJECT, file: file!, port, timeline }); } catch (e) { fail((e as Error).message); }
+  if (json) console.log(JSON.stringify({ ok: true, errors: [], logs: [], warnings, url: srv!.url, file, draft: srv!.draft, notes: (await import('./notes')).notesPath(PROJECT) }));
+  else {
+    for (const w of warnings) console.error(`warning: ${w}`);
+    console.log(`${srv!.url}  reviewing ${path.relative(process.cwd(), file!) || file}${srv!.draft ? ' (a draft)' : ''}; notes go to ${path.relative(process.cwd(), (await import('./notes')).notesPath(PROJECT))}. Ctrl-C stops it.`);
+  }
+  await new Promise(() => {});
+}
+
+if (mode === 'notes') {
+  const N = await import('./notes');
+  const [sub, arg] = P.positionals;
+  const res: Result = { ok: true, errors: [], logs: [], warnings: [], file: N.notesPath(PROJECT) };
+  try {
+    if (sub === undefined) {
+      if (A.t !== undefined) throw new UsageError('--t goes with notes add');
+      const all = N.readNotes(PROJECT), shown = A.open ? all.filter((n) => n.status === 'open') : all;
+      res.notes = shown.map((n) => N.listed(PROJECT, n));
+      finish(res, () => console.log(N.formatNotes(PROJECT, shown, all)));
+    }
+    if (sub === 'done' || sub === 'reopen') {
+      if (!arg) throw new UsageError(`notes ${sub} <id>`);
+      const note = N.patchNote(PROJECT, arg, { status: sub === 'done' ? 'done' : 'open' });
+      res.note = N.listed(PROJECT, note);
+      finish(res, () => console.log(`${note.id} is ${note.status}: ${note.text.split('\n')[0]}`));
+    }
+    if (sub === 'add') {
+      if (!arg) throw new UsageError('notes add --t <seconds> "<text>"');
+      const t = num(A, 't');
+      if (t === undefined || t < 0) throw new UsageError('notes add needs --t <seconds>');
+      const R = await import('./review');
+      const fps = (await import('../src/config')).formatOf(await (await import('./server')).loadConfig(PROJECT)).fps;
+      const timeline = await R.timelineOf(PROJECT, (w) => res.warnings.push(w));
+      const { frame } = N.frameOf(t, fps);
+      const latest = R.latestRender(PROJECT);
+      const note = N.addNote(PROJECT, { t, frame, clips: timeline ? N.clipsAt(timeline.timeline, t) : [], text: arg, render: latest ? R.renderRef(PROJECT, latest, R.isDraft(latest, '')) : null });
+      res.note = N.listed(PROJECT, note);
+      finish(res, () => console.log(`added ${note.id} at ${note.t.toFixed(3)} s (frame ${note.frame}, ${note.clips.join('+') || 'no clip'})`));
+    }
+    throw new UsageError(`notes ${sub}: expected add, done or reopen (or nothing, to list them)`);
+  } catch (e) {
+    if (e instanceof UsageError) fail(e.message);
+    finish({ ...res, ok: false, errors: [(e as Error).message] }, () => {});
+  }
+}
+
 if (mode === 'dev') {
   const { startServer } = await import('./server');
   let srv;

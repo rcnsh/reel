@@ -1,0 +1,381 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>reel review</title>
+<style>
+:root {
+  --bg: #f4f4f2; --panel: #ffffff; --fg: #1a1a1a; --muted: #67676a; --line: #dcdcd8; --hover: #f0f0ec;
+  --accent: #2456d3; --accent-fg: #ffffff; --open: #c2410c; --done: #15803d;
+  --clip: #e6e9f2; --clip-line: #b9c1d6; --clip-fg: #2b3245;
+  --draft-bg: #fde68a; --draft-fg: #5c3a06; --err-bg: #fee2e2; --err-fg: #7f1d1d;
+  --stage: #000;
+}
+@media (prefers-color-scheme: dark) {
+  :root {
+    --bg: #131314; --panel: #1c1c1e; --fg: #e9e9ea; --muted: #9b9ba0; --line: #323236; --hover: #26262a;
+    --accent: #7ea3ff; --accent-fg: #0d1430; --open: #fb923c; --done: #4ade80;
+    --clip: #252a38; --clip-line: #3b4560; --clip-fg: #d3d9ea;
+    --draft-bg: #713f12; --draft-fg: #fde68a; --err-bg: #4c1414; --err-fg: #fecaca;
+  }
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; }
+body { background: var(--bg); color: var(--fg); font: 13px/1.4 system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; font-variant-numeric: tabular-nums; }
+button, select, textarea { font: inherit; color: inherit; }
+button { background: var(--panel); border: 1px solid var(--line); border-radius: 4px; padding: 3px 8px; cursor: pointer; }
+button:hover { background: var(--hover); }
+button.primary { background: var(--accent); color: var(--accent-fg); border-color: var(--accent); }
+button:focus-visible, textarea:focus-visible, .note:focus-visible { outline: 2px solid var(--accent); outline-offset: 1px; }
+kbd { font: 11px ui-monospace, SFMono-Regular, Menlo, monospace; border: 1px solid var(--line); border-bottom-width: 2px; border-radius: 3px; padding: 0 4px; background: var(--panel); }
+.mono { font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 12px; }
+.muted { color: var(--muted); }
+
+header { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; padding: 8px 14px; border-bottom: 1px solid var(--line); background: var(--panel); }
+header h1 { font-size: 14px; margin: 0; font-weight: 600; }
+header .keys { margin-left: auto; color: var(--muted); font-size: 12px; }
+.draft { background: var(--draft-bg); color: var(--draft-fg); font-weight: 700; padding: 6px 14px; letter-spacing: .02em; }
+.draft span { font-weight: 400; }
+.error { background: var(--err-bg); color: var(--err-fg); padding: 6px 14px; white-space: pre-wrap; }
+
+main { display: grid; grid-template-columns: minmax(0, 1fr) 360px; gap: 0; min-height: calc(100vh - 40px); }
+.player { padding: 12px 14px; min-width: 0; }
+aside { border-left: 1px solid var(--line); background: var(--panel); display: flex; flex-direction: column; min-width: 0; }
+
+.stage { position: relative; width: 100%; max-width: calc(64vh * var(--ar, 1.7778)); margin: 0 auto; aspect-ratio: var(--ar, 1.7778); background: var(--stage); }
+.stage video { position: absolute; inset: 0; width: 100%; height: 100%; display: block; }
+.overlay { position: absolute; inset: 0; pointer-events: none; }
+.overlay.drawing { pointer-events: auto; cursor: crosshair; bottom: 0; }
+.box { position: absolute; border: 2px solid var(--open); box-shadow: 0 0 0 1px rgba(0,0,0,.5); }
+.box.done { border-color: var(--done); }
+.box.new { border: 2px dashed #ffd400; box-shadow: 0 0 0 1px rgba(0,0,0,.6); }
+.box b { position: absolute; left: -2px; top: -18px; font: 600 11px ui-monospace, Menlo, monospace; background: var(--open); color: #fff; padding: 0 4px; border-radius: 2px 2px 0 0; }
+.box.done b { background: var(--done); }
+.unplayable { position: absolute; inset: 0; display: grid; place-items: center; color: #eee; text-align: center; padding: 20px; }
+
+.readout { display: flex; gap: 6px 12px; align-items: center; flex-wrap: wrap; margin: 8px 0 6px; }
+.readout .time { font-weight: 600; }
+.readout .grow { flex: 1; }
+.btns { display: inline-flex; gap: 6px; flex-wrap: nowrap; }
+
+.timeline { position: relative; border: 1px solid var(--line); background: var(--panel); border-radius: 4px; padding: 4px 0; user-select: none; cursor: pointer; }
+.row { position: relative; height: 20px; margin: 2px 6px; }
+.row.marks { height: 14px; }
+.clip { position: absolute; top: 0; bottom: 0; background: var(--clip); border: 1px solid var(--clip-line); color: var(--clip-fg); border-radius: 3px; font-size: 11px; line-height: 18px; padding: 0 4px; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.mark { position: absolute; top: 0; width: 10px; height: 12px; margin-left: -5px; background: var(--open); clip-path: polygon(0 0, 100% 0, 50% 100%); }
+.mark.done { background: var(--done); }
+.mark.sel { outline: 2px solid var(--accent); }
+.playhead { position: absolute; top: 0; bottom: 0; width: 2px; margin-left: -1px; background: var(--accent); pointer-events: none; }
+.track-empty { color: var(--muted); font-size: 12px; padding: 2px 8px; }
+
+.composer { margin-top: 10px; border: 1px solid var(--accent); border-radius: 4px; background: var(--panel); padding: 8px 10px; }
+.composer[hidden] { display: none; }
+.composer .head { display: flex; gap: 10px; align-items: baseline; flex-wrap: wrap; margin-bottom: 6px; }
+.composer textarea { width: 100%; min-height: 64px; resize: vertical; background: var(--bg); border: 1px solid var(--line); border-radius: 4px; padding: 6px 8px; }
+.composer .foot { display: flex; gap: 8px; align-items: center; flex-wrap: wrap; margin-top: 6px; }
+.composer .foot .grow { flex: 1; }
+.composer label { display: inline-flex; gap: 4px; align-items: center; cursor: pointer; }
+
+.notes-head { display: flex; align-items: center; gap: 8px; padding: 8px 12px; border-bottom: 1px solid var(--line); }
+.notes-head h2 { font-size: 13px; margin: 0; }
+.notes-head .grow { flex: 1; }
+.seg { display: inline-flex; border: 1px solid var(--line); border-radius: 4px; overflow: hidden; }
+.seg button { border: 0; border-radius: 0; padding: 2px 8px; }
+.seg button[aria-pressed="true"] { background: var(--accent); color: var(--accent-fg); }
+.list { overflow-y: auto; flex: 1; }
+.empty { padding: 14px 12px; color: var(--muted); }
+.note { padding: 8px 12px; border-bottom: 1px solid var(--line); cursor: pointer; border-left: 3px solid transparent; }
+.note:hover { background: var(--hover); }
+.note.sel { border-left-color: var(--accent); background: var(--hover); }
+.note .meta { display: flex; gap: 8px; align-items: baseline; flex-wrap: wrap; font-size: 12px; }
+.note .st { font-weight: 700; font-size: 11px; text-transform: uppercase; letter-spacing: .03em; color: var(--open); }
+.note.done .st { color: var(--done); }
+.note.done .text { color: var(--muted); }
+.note .id { margin-left: auto; color: var(--muted); }
+.note .text { margin: 3px 0 5px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.note .acts { display: flex; gap: 6px; }
+.note .acts button { font-size: 12px; padding: 1px 7px; }
+
+@media (max-width: 860px) {
+  main { grid-template-columns: 1fr; min-height: 0; }
+  aside { border-left: 0; border-top: 1px solid var(--line); }
+  header .keys { margin-left: 0; width: 100%; }
+}
+@media (max-width: 600px) { header .keys { display: none; } .readout .grow { flex-basis: 100%; height: 0; } }
+</style>
+</head>
+<body>
+<header>
+  <h1 id="title">reel review</h1>
+  <span id="file" class="mono muted"></span>
+  <span class="keys"><kbd>space</kbd> play <kbd>h</kbd> controls <kbd>,</kbd> <kbd>.</kbd> frame <kbd>←</kbd> <kbd>→</kbd> 1 s <kbd>[</kbd> <kbd>]</kbd> notes <kbd>n</kbd> new note <kbd>Enter</kbd> save <kbd>Esc</kbd> cancel</span>
+</header>
+<div id="draft" class="draft" hidden></div>
+<div id="error" class="error" hidden></div>
+<main>
+  <section class="player">
+    <div class="stage" id="stage">
+      <video id="v" src="/video" controls preload="auto" playsinline></video>
+      <div class="overlay" id="overlay"></div>
+    </div>
+    <div class="readout">
+      <span class="time" id="time">0.000 s</span>
+      <span class="muted" id="frame">frame 0</span>
+      <span id="clips" class="mono"></span>
+      <span class="grow"></span>
+      <span class="btns">
+        <button id="play" title="Play or pause (space)">Play</button>
+        <button id="prev" title="Previous frame (,)">‹ frame</button>
+        <button id="next" title="Next frame (.)">frame ›</button>
+        <button id="add" class="primary" title="New note at this frame (n)">Note</button>
+      </span>
+    </div>
+    <div class="timeline" id="timeline" title="Click to seek"></div>
+    <div class="composer" id="composer" hidden>
+      <div class="head"><strong id="c-title">New note</strong><span id="c-where" class="muted"></span></div>
+      <textarea id="c-text" placeholder="What should change here?"></textarea>
+      <div class="foot">
+        <span id="c-rect" class="muted">Drag on the frame to mark an area (optional).</span>
+        <button id="c-clear" hidden>Clear area</button>
+        <span class="grow"></span>
+        <label><input type="checkbox" id="c-done"> done</label>
+        <button id="c-cancel">Cancel</button>
+        <button id="c-save" class="primary">Save <kbd>Enter</kbd></button>
+      </div>
+    </div>
+  </section>
+  <aside>
+    <div class="notes-head">
+      <h2>Notes</h2><span id="count" class="muted"></span><span class="grow"></span>
+      <div class="seg" role="group" aria-label="Show"><button id="f-all" aria-pressed="true">All</button><button id="f-open" aria-pressed="false">Open</button></div>
+    </div>
+    <div class="list" id="list"></div>
+  </aside>
+</main>
+<script>
+'use strict';
+const $ = (id) => document.getElementById(id);
+const v = $('v'), overlay = $('overlay'), stage = $('stage'), tl = $('timeline');
+let S = null, notes = [], fps = 30, duration = 0, L = [1920, 1080];
+let selected = null, filter = 'all', lastNotesJson = '';
+// the note being written or edited: { id?, t, frame, rect, done }
+let draft = null, drag = null, controls = true;
+// the browser's controls cover the bottom of the frame: hidden while a note is written, and with h
+const setControls = () => { v.controls = controls && !draft; };
+
+const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
+const frameAt = (t) => Math.max(0, Math.floor(t * fps + 1e-4));
+const curFrame = () => frameAt(v.currentTime);
+const lastFrame = () => Math.max(0, Math.ceil(duration * fps) - 1);
+const fmt = (t) => t.toFixed(3) + ' s';
+// (half a frame in, so the decoder lands on the frame and not the one before)
+const seekFrame = (f) => { v.pause(); f = Math.min(lastFrame(), Math.max(0, f)); v.currentTime = (f + 0.5) / fps; update(); };
+const clipsAt = (t) => { const on = S.timeline.filter((c) => t >= c.start && t < c.end).sort((a, b) => a.track - b.track).map((c) => c.id); return on.length > 1 ? on.filter((c) => c !== 'overlay') : on; };
+
+function showError(msg) { const e = $('error'); e.hidden = !msg; e.textContent = msg || ''; }
+
+async function api(method, url, body) {
+  const r = await fetch(url, { method, headers: body ? { 'content-type': 'application/json' } : {}, body: body ? JSON.stringify(body) : undefined });
+  const j = await r.json().catch(() => ({ error: `${r.status} ${r.statusText}` }));
+  if (!r.ok) { showError(j.error || `${r.status}`); throw new Error(j.error); }
+  showError('');
+  if (j.notes) setNotes(j.notes);
+  return j;
+}
+
+function setNotes(list) {
+  const s = JSON.stringify(list);
+  if (s === lastNotesJson) return;
+  lastNotesJson = s; notes = list;
+  if (selected && !notes.some((n) => n.id === selected)) selected = null;
+  renderList(); renderTimeline(); renderBoxes();
+}
+
+// ---- the timeline: one row per track (the top track first), note markers above, the playhead ----
+function renderTimeline() {
+  const pct = (t) => `${(100 * Math.min(Math.max(t, 0), duration)) / duration}%`;
+  const tracks = [...new Set(S.timeline.map((c) => c.track))].sort((a, b) => b - a);
+  let h = '<div class="row marks">' + notes.map((n) => `<div class="mark ${n.status}${n.id === selected ? ' sel' : ''}" style="left:${pct(n.t)}" data-id="${esc(n.id)}" title="${esc(n.id)} ${fmt(n.t)}: ${esc(n.text.slice(0, 80))}"></div>`).join('') + '</div>';
+  for (const k of tracks) {
+    h += '<div class="row">' + S.timeline.filter((c) => c.track === k && c.start < duration).map((c) => `<div class="clip" style="left:${pct(c.start)};width:calc(${pct(Math.min(c.end, duration))} - ${pct(c.start)})" title="${esc(c.id)}  ${c.start.toFixed(2)}–${c.end.toFixed(2)} s, track ${k}">${esc(c.id)}</div>`).join('') + '</div>';
+  }
+  if (!tracks.length) h += '<div class="track-empty">No timeline (the project\'s clips could not be read).</div>';
+  tl.innerHTML = h + '<div class="playhead" id="ph"></div>';
+  updatePlayhead();
+}
+function updatePlayhead() { const ph = $('ph'); if (ph && duration) ph.style.left = `calc(6px + (100% - 12px) * ${Math.min(1, v.currentTime / duration)})`; }
+let scrubbing = false;
+const scrubTo = (e) => {
+  const r = tl.getBoundingClientRect(), x = (e.clientX - r.left - 6) / (r.width - 12);
+  seekFrame(frameAt(Math.min(1, Math.max(0, x)) * duration));
+};
+tl.addEventListener('pointerdown', (e) => {
+  const m = e.target.closest('.mark');
+  if (m) { selectNote(m.dataset.id); return; }
+  scrubbing = true; tl.setPointerCapture(e.pointerId); scrubTo(e);
+});
+tl.addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(e); });
+tl.addEventListener('pointerup', () => { scrubbing = false; });
+
+// ---- the notes list ----
+function renderList() {
+  const open = notes.filter((n) => n.status === 'open').length;
+  $('count').textContent = `${notes.length} · ${open} open`;
+  const shown = filter === 'open' ? notes.filter((n) => n.status === 'open') : notes;
+  const list = $('list');
+  if (!shown.length) { list.innerHTML = `<div class="empty">${notes.length ? 'No open notes.' : 'No notes yet. Pause on a frame and press <kbd>n</kbd>.'}</div>`; return; }
+  list.innerHTML = shown.map((n) => `
+    <div class="note ${n.status}${n.id === selected ? ' sel' : ''}" data-id="${esc(n.id)}" tabindex="0">
+      <div class="meta"><span class="st">${n.status}</span><span>${fmt(n.t)}</span><span class="muted">frame ${n.frame}</span><span class="mono">${esc(n.clips.join('+') || '—')}</span>${n.rect ? '<span class="muted" title="Has an area on the frame">▭</span>' : ''}<span class="id mono">${esc(n.id)}</span></div>
+      <div class="text">${esc(n.text)}</div>
+      <div class="acts"><button data-act="edit">Edit</button><button data-act="toggle">${n.status === 'open' ? 'Resolve' : 'Reopen'}</button><button data-act="delete">Delete</button></div>
+    </div>`).join('');
+}
+$('list').addEventListener('click', async (e) => {
+  const el = e.target.closest('.note'); if (!el) return;
+  const n = notes.find((x) => x.id === el.dataset.id); if (!n) return;
+  const act = e.target.closest('button')?.dataset.act;
+  if (act === 'toggle') await api('PATCH', `/api/notes/${n.id}`, { status: n.status === 'open' ? 'done' : 'open' });
+  else if (act === 'delete') { if (confirm(`Delete note ${n.id}?`)) await api('DELETE', `/api/notes/${n.id}`); }
+  else if (act === 'edit') { selectNote(n.id); startEdit(n); }
+  else selectNote(n.id);
+});
+$('list').addEventListener('keydown', (e) => { if (e.key === 'Enter' && e.target.classList.contains('note')) { e.preventDefault(); e.stopPropagation(); const n = notes.find((x) => x.id === e.target.dataset.id); if (n) { selectNote(n.id); startEdit(n); } } });
+function selectNote(id) {
+  const n = notes.find((x) => x.id === id); if (!n) return;
+  selected = id; seekFrame(n.frame);
+  renderList(); renderTimeline();
+  document.querySelector(`.note[data-id="${CSS.escape(id)}"]`)?.scrollIntoView({ block: 'nearest' });
+}
+for (const [id, f] of [['f-all', 'all'], ['f-open', 'open']]) $(id).addEventListener('click', () => { filter = f; $('f-all').setAttribute('aria-pressed', f === 'all'); $('f-open').setAttribute('aria-pressed', f === 'open'); renderList(); });
+
+// ---- boxes on the frame: the notes on this frame (or the selected one), and the one being drawn ----
+const toPct = (r) => `left:${(100 * r.x) / L[0]}%;top:${(100 * r.y) / L[1]}%;width:${(100 * r.w) / L[0]}%;height:${(100 * r.h) / L[1]}%`;
+function renderBoxes() {
+  const f = curFrame();
+  let h = '';
+  if (v.paused) for (const n of notes) if (n.rect && (n.frame === f || n.id === selected) && n.id !== draft?.id) h += `<div class="box ${n.status}" style="${toPct(n.rect)}"><b>${esc(n.id)}</b></div>`;
+  if (draft?.rect) h += `<div class="box new" style="${toPct(draft.rect)}"></div>`;
+  overlay.innerHTML = h;
+}
+const toLogical = (e) => { const r = overlay.getBoundingClientRect(); return [Math.min(1, Math.max(0, (e.clientX - r.left) / r.width)) * L[0], Math.min(1, Math.max(0, (e.clientY - r.top) / r.height)) * L[1]]; };
+overlay.addEventListener('pointerdown', (e) => { if (!draft) return; e.preventDefault(); overlay.setPointerCapture(e.pointerId); drag = toLogical(e); });
+overlay.addEventListener('pointermove', (e) => {
+  if (!drag || !draft) return;
+  const [x, y] = toLogical(e);
+  draft.rect = { x: Math.min(x, drag[0]), y: Math.min(y, drag[1]), w: Math.abs(x - drag[0]), h: Math.abs(y - drag[1]) };
+  renderBoxes(); composerRect();
+});
+overlay.addEventListener('pointerup', () => { if (draft?.rect && (draft.rect.w < 4 || draft.rect.h < 4)) draft.rect = null; drag = null; renderBoxes(); composerRect(); $('c-text').focus(); });
+
+// ---- writing a note ----
+function composerRect() {
+  const r = draft?.rect;
+  $('c-rect').textContent = r ? `Area x ${Math.round(r.x)} y ${Math.round(r.y)}, ${Math.round(r.w)}×${Math.round(r.h)} px (drag again to redraw)` : 'Drag on the frame to mark an area (optional).';
+  $('c-clear').hidden = !r;
+}
+function openComposer(d, text) {
+  draft = d;
+  $('c-title').textContent = d.id ? `Edit note ${d.id}` : 'New note';
+  $('c-where').textContent = `${fmt(d.t)} · frame ${d.frame} · ${clipsAt(d.t).join('+') || 'no clip'}`;
+  $('c-text').value = text; $('c-done').checked = d.done;
+  $('composer').hidden = false; overlay.classList.add('drawing'); setControls();
+  composerRect(); renderBoxes();
+  $('c-text').focus();
+}
+function startNew() {
+  v.pause();
+  const f = curFrame();
+  seekFrame(f);
+  openComposer({ t: f / fps, frame: f, rect: null, done: false }, '');
+}
+function startEdit(n) { openComposer({ id: n.id, t: n.t, frame: n.frame, rect: n.rect ? { ...n.rect } : null, done: n.status === 'done' }, n.text); }
+function closeComposer() { draft = null; drag = null; $('composer').hidden = true; overlay.classList.remove('drawing'); setControls(); renderBoxes(); }
+async function save() {
+  if (!draft) return;
+  const text = $('c-text').value.trim();
+  if (!text) { $('c-text').focus(); return; }
+  const status = $('c-done').checked ? 'done' : 'open';
+  try {
+    if (draft.id) await api('PATCH', `/api/notes/${draft.id}`, { text, rect: draft.rect, status });
+    else { const j = await api('POST', '/api/notes', { t: draft.t, text, rect: draft.rect, status }); selected = j.note.id; renderList(); renderTimeline(); }
+    closeComposer();
+  } catch {}
+}
+$('c-save').onclick = save;
+$('c-cancel').onclick = closeComposer;
+$('c-clear').onclick = () => { if (draft) { draft.rect = null; composerRect(); renderBoxes(); } };
+$('add').onclick = startNew;
+const togglePlay = () => (v.paused ? v.play() : v.pause());
+$('play').onclick = togglePlay;
+v.addEventListener('play', () => { $('play').textContent = 'Pause'; });
+v.addEventListener('pause', () => { $('play').textContent = 'Play'; });
+$('prev').onclick = () => seekFrame(curFrame() - 1);
+$('next').onclick = () => seekFrame(curFrame() + 1);
+
+// ---- the readout, kept up to date while playing ----
+function update() {
+  const f = curFrame(), t = f / fps;
+  $('time').textContent = fmt(t);
+  $('frame').textContent = `frame ${f} / ${lastFrame()}`;
+  $('clips').textContent = S ? clipsAt(t).join(' + ') : '';
+  updatePlayhead(); renderBoxes();
+}
+v.addEventListener('timeupdate', update);
+v.addEventListener('seeked', update);
+v.addEventListener('pause', update);
+v.addEventListener('loadedmetadata', () => { if (!duration && v.duration) { duration = v.duration; renderTimeline(); } update(); });
+(function tick() { if (!v.paused) update(); requestAnimationFrame(tick); })();
+
+// ---- keys: the page's own, ahead of the video element's ----
+window.addEventListener('keydown', (e) => {
+  if (e.metaKey || e.ctrlKey || e.altKey) return;
+  const typing = e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
+  if (e.key === 'Escape' && draft) { e.preventDefault(); closeComposer(); return; }
+  if (typing) {
+    if (e.key === 'Enter' && !e.shiftKey && e.target.id === 'c-text') { e.preventDefault(); save(); }
+    return;
+  }
+  if (e.key === 'Enter' && draft) { e.preventDefault(); save(); return; }
+  const n = curFrame();
+  const act = {
+    ' ': togglePlay,
+    h: () => { controls = !controls; setControls(); },
+    ',': () => seekFrame(n - 1), '.': () => seekFrame(n + 1),
+    '<': () => seekFrame(n - 10), '>': () => seekFrame(n + 10),
+    ArrowLeft: () => seekFrame(n - Math.round(fps)), ArrowRight: () => seekFrame(n + Math.round(fps)),
+    Home: () => seekFrame(0), End: () => seekFrame(lastFrame()),
+    n: startNew, N: startNew,
+    '[': () => { const p = [...notes].reverse().find((x) => x.frame < n); if (p) selectNote(p.id); },
+    ']': () => { const p = notes.find((x) => x.frame > n); if (p) selectNote(p.id); },
+  }[e.key];
+  if (act) { e.preventDefault(); e.stopPropagation(); act(); }
+}, true);
+
+// ---- start: the state, then the notes every two seconds (an agent may change them meanwhile) ----
+(async () => {
+  try {
+    S = await (await fetch('/api/state')).json();
+  } catch (e) { showError(`Could not load the review: ${e.message}`); return; }
+  fps = S.video.fps; duration = S.video.duration || v.duration || 0; L = S.logical;
+  document.title = `${S.video.draft ? 'DRAFT · ' : ''}${S.project} · reel review`;
+  $('title').textContent = S.project;
+  $('file').textContent = `${S.video.name} · ${S.video.w}×${S.video.h} · ${+S.video.fps.toFixed(3)} fps · rendered ${new Date(S.video.mtime).toLocaleString()}`;
+  stage.style.setProperty('--ar', String(S.video.w / S.video.h));
+  if (S.video.draft) {
+    const d = $('draft'); d.hidden = false;
+    d.innerHTML = `DRAFT <span>· ${esc(S.video.comment.replace(/^reel draft:\s*/, '') || 'half size, one sample, not for delivery')}. Judge timing and layout here, not sharpness, banding or motion blur.</span>`;
+  }
+  if (!S.video.playable) stage.insertAdjacentHTML('beforeend', `<div class="unplayable">Browsers cannot play ${esc(S.video.codec)}. Review an H.264, HEVC or WebM render instead.</div>`);
+  if (S.error) showError(S.error);
+  lastNotesJson = ''; setNotes(S.notes);
+  renderTimeline(); update();
+  setInterval(async () => {
+    try { const r = await fetch('/api/notes'); const j = await r.json(); if (r.ok) { setNotes(j.notes); if ($('error').textContent.includes('notes.json')) showError(''); } else showError(j.error); } catch {}
+  }, 2000);
+})();
+</script>
+</body>
+</html>

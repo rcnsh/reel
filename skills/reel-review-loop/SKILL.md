@@ -1,13 +1,13 @@
 ---
 name: reel-review-loop
-description: The render-look-fix loop for reel videos - render stills, motion strips and contact sheets, run reel check, read the images, fix and re-render until the video is right; then export. Use after writing or changing a reel scene or config, when asked to review, verify or polish a reel video, or before reporting reel work as done.
+description: The render-look-fix loop for reel videos - render stills, motion strips and contact sheets, run reel check, read the images, fix and re-render until the video is right; then export. Use after writing or changing a reel scene or config, when asked to review, verify or polish a reel video, to work through the notes a person left with reel review, or before reporting reel work as done.
 ---
 
 # Reviewing a reel video
 
 A reel video is code, so the only proof a change worked is a rendered frame you have looked at. Typechecking proves nothing about layout, timing or colour. The loop is: render a little, look, fix, repeat; widen to the whole video; export last.
 
-Commands are `reel <command>` (in a project made by `reel init`: `bun run reel <command>`; elsewhere `bun <engine>/cli/reel.ts`). Each has `--project <folder>` and `--json`, and exits 1 on a scene error. The same tools exist over MCP (`render_still`, `motion_strip`, `contact_sheet`, `check_video`, `diff_images`, `video_start`) and return the images inline.
+Commands are `reel <command>` (in a project made by `reel init`: `bun run reel <command>`; elsewhere `bun <engine>/cli/reel.ts`). Each has `--project <folder>` and `--json`, and exits 1 on a scene error. The same tools exist over MCP (`render_still`, `motion_strip`, `contact_sheet`, `check_video`, `diff_images`, `video_start`, `review_notes`, `resolve_note`) and return the images inline.
 
 ## The loop
 
@@ -64,6 +64,18 @@ Stills and strips settle layout and most motion. Render video when you need to j
 You cannot watch a video file; judge its frames with `reel strip` at the same times, and use the video for the person you are working with.
 
 One export runs at a time on a machine: a second `reel video` (or `video_start`) fails while one is running, naming it. Wait for it rather than forcing a second beside it. On a Linux machine without a GPU everything renders in software (SwiftShader): stills, `check` and drafts work but take half a second to a few seconds a frame (more on a busy host), and a final `--samples auto` export takes from seconds to minutes a frame, so keep exports there short (`--from/--to`) and render finals where there is a GPU.
+
+## Notes from the person reviewing
+
+The person you work with watches renders with `reel review` (a page that plays the newest render under `out/` and pins notes to frames) and leaves notes in the project's `review/notes.json`. Each note has an `id`, a time `t` and `frame`, the `clips` on screen, the `text`, sometimes a `rect` (the area meant, in logical px, the same coordinates as `W` x `H`), a `status` (open or done) and the `render` it was made on (a draft says so). Pick them up like this:
+
+1. `reel notes --open` (or `--json`; MCP: `review_notes` with `open_only`). Each open note names its clips and gives the command that renders its moment.
+2. For each: run that `reel still --t <t>` and read the image, looking inside the `rect` when there is one. A note made on a draft is about timing or layout, not sharpness. If the note is not clear from the frame, ask rather than guess.
+3. Fix it in the scene or config, and check it the usual way (stills, a strip, `reel check`).
+4. Re-render what the person will look at (`reel video --draft`, or the final), since the page plays the newest file.
+5. `reel notes done <id>` (MCP: `resolve_note`) for each note fixed. Never delete a person's note, and leave open what you did not fix; say why in your report.
+
+`reel notes add --t <s> "<text>"` leaves a note of your own for the person (a question about a moment, or a choice you made). Edit `review/notes.json` by hand only if you must; the tools merge by id, so a page open at the same time loses nothing.
 
 ## Cheap looking
 

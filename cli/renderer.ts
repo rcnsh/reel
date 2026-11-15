@@ -10,8 +10,8 @@ import { ENGINE, loadConfig, startServer } from './server';
 import { checkChromeVersion, findChrome, glArgs, glBackend, missingLibsMessage, type GlBackend } from './chrome';
 import type { PageOpts } from './args';
 
-/** Paths in a project whose changes never matter to its pages (renders, tools' working files, the config loader's). */
-export const IGNORED = /^(out|node_modules|\.git|audio\/\.work|audio\/\.align|\.claude)(\/|$)|(^|\/)\.reel\.config\.[^/]*\.mjs$|(^|\/)\.DS_Store$/;
+/** Paths in a project whose changes never matter to its pages (renders, review notes, tools' working files, the config loader's). */
+export const IGNORED = /^(out|review|node_modules|\.git|audio\/\.work|audio\/\.align|\.claude)(\/|$)|(^|\/)\.reel\.config\.[^/]*\.mjs$|(^|\/)\.DS_Store$/;
 
 /** The flags every Chrome the CLI starts gets. */
 // (--disable-frame-rate-limit: a page paints as soon as it is asked to instead of on a 60 Hz clock, so an HTML

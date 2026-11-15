@@ -30,6 +30,8 @@ Engine.init ─▶ load the clips' scenes (+ the theme's overlay clip) ─▶ ea
 src/main.ts: preview player (reel dev) or export API window.__reel (?export=1)
 cli/reel.ts (flags: cli/args.ts) drives window.__reel through cli/renderer.ts + cli/ops.ts: info | still | sheet | strip | check | events | perf | gpu;
             cli/video.ts: the video export, cli/formats.ts: its output formats and ffmpeg commands
+cli/review.ts + review.html: reel review, a Bun server on 127.0.0.1 for a person to watch a render and pin notes ─▶ <project>/review/notes.json
+            (cli/notes.ts: the store, merged by id, atomic) ─▶ reel notes (list, add, done) and the MCP tools review_notes, resolve_note
 reel video --mix (or reel events ─▶ data/cues.json ─▶ reel mix) + mix.json ─▶ the track (lossless), music and cues, two-pass loudness, one AAC encode
 ```
 

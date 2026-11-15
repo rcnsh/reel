@@ -54,7 +54,7 @@ export function initProject(dir: string, o: InitOptions): string[] {
       type: 'module',
       scripts: { reel: reel, dev: `${reel} dev`, typecheck: `${sh(path.join(ENGINE, 'node_modules/.bin/tsc'))} --noEmit -p .` },
     }, null, 2) + '\n',
-    '.gitignore': ['# renders, stills and contact sheets', 'out/', '', '# working files of reel narrate, reel align and the config loader', 'audio/.align/', 'audio/.narration/', '.reel.config.*.mjs', '', 'node_modules/', '.DS_Store', ''].join('\n'),
+    '.gitignore': ['# renders, stills and contact sheets', 'out/', '', '# working files of reel narrate, reel align and the config loader', 'audio/.align/', 'audio/.narration/', '.reel.config.*.mjs', 'review/.notes.lock', '', 'node_modules/', '.DS_Store', ''].join('\n'),
     'CLAUDE.md': claudeMd(title, o),
   };
   if (o.narrated) {
@@ -194,7 +194,8 @@ Read before acting (the skills are copied into \`.claude/skills\`; \`bun run ree
 1. \`bun run typecheck\`.
 2. Stills of every clip you touched (its first, middle and last frame) and a strip of its motion, looked at: \`bun run reel still --t <times> --only <clip>\`, \`bun run reel strip --from <s> --to <s> --only <clip>\`.
 3. \`bun run reel check\` with no errors (and \`--size 1080x1920\` if the video may go vertical).
-4. Timing against the sound: \`bun run reel video --draft\` (half size, one sample, quick; never a deliverable). Motion blur: \`bun run reel video --samples auto --preset veryfast\`${o.narrated ? ' (add \`--mix\` for the finished sound)' : ''}.
+4. Notes from the person reviewing (\`bun run reel review\` opens a page where they pin notes to frames of the newest render): \`bun run reel notes --open\` lists them with the \`reel still\` command for each moment; fix, re-render, then \`bun run reel notes done <id>\`. \`review/notes.json\` is committed.
+5. Timing against the sound: \`bun run reel video --draft\` (half size, one sample, quick; never a deliverable). Motion blur: \`bun run reel video --samples auto --preset veryfast\`${o.narrated ? ' (add \`--mix\` for the finished sound)' : ''}.
 
 \`bun run reel …\` is \`bun ${path.join(ENGINE, 'cli/reel.ts')} …\` in this folder; it starts a warm renderer for the project on first use. Chrome: \`CHROME_PATH\`, else the Chrome for Testing build \`bun run reel chrome install\` downloads (157 or later).
 `;

@@ -71,8 +71,17 @@ Rendering
                              One export at a time per machine: another running one is an error unless
                              --force (parallel 4K exports exhaust memory)
 
+Review by a person (no browser of reel's own)
+  review [<video>]           a page to watch a render (default: the newest video under out/) and pin
+                             notes to its frames, with an area on the frame; saved at once to
+                             review/notes.json. Serves on 127.0.0.1 until Ctrl-C  [--port <n>]
+  notes                      the review notes: each open one with its clips and the reel still
+                             command for its moment              [--open: only open ones] [--json]
+  notes add --t <s> "<text>" add a note at that time
+  notes done <id>            mark a note done (notes reopen <id>: open again)
+
 Working on a project
-  init <folder>              a new project that renders straight away, with the reel skills in
+  init <folder>             a new project that renders straight away, with the reel skills in
                              .claude/skills; refuses a folder that holds anything
                              [--size 1920x1080] [--fps 60] [--theme neutral|print|film] [--narrated]
   skills update              copy this engine's skills into the project's .claude/skills
@@ -150,6 +159,8 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   chrome: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
   font: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [2, 2] },
   mcp: { render: false, opts: { help: bool } },
+  review: { render: false, opts: { project: str, port: str, json: bool, help: bool }, positionals: [0, 1] },
+  notes: { render: false, opts: { project: str, open: bool, t: str, json: bool, help: bool }, positionals: [0, 2] },
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };
 

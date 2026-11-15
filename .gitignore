@@ -9,6 +9,7 @@ dist/
 **/audio/.align/
 **/audio/.narration/
 .reel.config.*.mjs
+**/review/.notes.lock
 
 .DS_Store
 *.tsbuildinfo
