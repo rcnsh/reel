@@ -314,5 +314,8 @@ export async function serveMcp() {
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { cleanup(); process.exit(0); });
   const transport = new StdioServerTransport();
   transport.onclose = () => { cleanup(); process.exit(0); };
+  // (the client went away without a goodbye: the transport does not notice its input ending, and the server
+  // would outlive it, holding its video jobs)
+  for (const ev of ['end', 'close'] as const) process.stdin.on(ev, () => { cleanup(); process.exit(0); });
   await server.connect(transport);
 }

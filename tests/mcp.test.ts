@@ -36,6 +36,12 @@ test('lists its tools, each with a description', async () => {
   for (const t of tools.filter((x) => !x.name.startsWith('video_s') && !x.name.startsWith('video_c') && x.name !== 'diff_images')) expect(t.inputSchema.required ?? []).toContain('project');
 });
 
+test('the server exits when its input ends', async () => {
+  const p = Bun.spawn(['bun', REEL, 'mcp'], { stdin: 'pipe', stdout: 'ignore', stderr: 'ignore' });
+  p.stdin.end();
+  expect(await Promise.race([p.exited, new Promise((r) => setTimeout(() => { p.kill(); r('still running'); }, 8000))])).toBe(0);
+}, 15_000);
+
 test("video_start's options become reel video flags the CLI accepts; without out the format picks its default", () => {
   const cases: [Record<string, unknown>, string[]][] = [
     [{}, []],
