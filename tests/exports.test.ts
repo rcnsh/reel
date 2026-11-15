@@ -1,12 +1,13 @@
-// One export at a time: a live claim refuses another, --force runs beside it, a dead process's claim is cleared.
+// One export at a time: a live claim refuses another, --force runs beside it, a dead process's claim is cleared, and so
+// is a claim whose pid now belongs to another process.
 import { afterAll, expect, test } from 'bun:test';
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const dir = mkdtempSync(path.join(tmpdir(), 'reel-exports-test-'));
 process.env.REEL_EXPORTS_DIR = dir;
-const { claimExport, runningExports } = await import('../cli/exports');
+const { claimExport, processStart, runningExports } = await import('../cli/exports');
 afterAll(() => { delete process.env.REEL_EXPORTS_DIR; rmSync(dir, { recursive: true, force: true }); });
 
 test('a live export refuses another unless forced; a dead one is cleared', () => {
@@ -23,4 +24,25 @@ test('a live export refuses another unless forced; a dead one is cleared', () =>
   const r2 = claimExport('/p/c', '/p/c/out/video.mp4', false);
   r2();
   expect(runningExports()).toEqual([]);
+});
+
+test("a claim whose pid was reused by a process started at another time is stale; one by the same process is not", () => {
+  const d = path.join(dir, 'reel-exports');
+  mkdirSync(d, { recursive: true });
+  const ppid = process.ppid, now = processStart(ppid);
+  expect(now).toMatch(/^\w{3} \w{3} +\d+ \d\d:\d\d:\d\d \d{4}$/);
+  // a killed export's claim: its pid is now this test's parent (alive), which started at another time
+  writeFileSync(path.join(d, `${ppid}.json`), JSON.stringify({ pid: ppid, project: '/p/old', out: '/x', started: 0, pstart: 'Mon Jan 1 00:00:00 2001' }));
+  expect(runningExports()).toEqual([]);
+  expect(existsSync(path.join(d, `${ppid}.json`))).toBe(false);
+  const r = claimExport('/p/c', '/p/c/out/video.mp4', false);
+  r();
+  // the same process still running: a live claim
+  writeFileSync(path.join(d, `${ppid}.json`), JSON.stringify({ pid: ppid, project: '/p/live', out: '/x', started: 0, pstart: now }));
+  expect(runningExports().map((c) => c.project)).toEqual(['/p/live']);
+  rmSync(path.join(d, `${ppid}.json`));
+  // a claim records its own process's start
+  const r2 = claimExport('/p/c', '/p/c/out/video.mp4', false);
+  expect(JSON.parse(readFileSync(path.join(d, `${process.pid}.json`), 'utf8')).pstart).toBe(processStart(process.pid));
+  r2();
 });

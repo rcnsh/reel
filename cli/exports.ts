@@ -1,16 +1,34 @@
 // One video export at a time per machine. An export holds several Chromes, their GPU processes, the encoder and a
 // reorder buffer; a few 4K exports at once have exhausted a 24 GB machine's memory and frozen it. Each running export
-// leaves a claim (its pid, project and output) in the temp folder; a new one refuses while a live claim exists,
-// unless forced. Claims of processes that are gone are cleared.
+// leaves a claim (its pid and that process's start time, project and output) in the temp folder; a new one refuses
+// while a live claim exists, unless forced. Claims of processes that are gone are cleared, and so are claims whose pid
+// now belongs to a process started at another time (a killed export's pid reused by another program).
 import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const DIR = () => path.join(process.env.REEL_EXPORTS_DIR ?? tmpdir(), 'reel-exports');
 
-export interface Claim { pid: number; project: string; out: string; started: number }
+export interface Claim { pid: number; project: string; out: string; started: number; pstart?: string }
 
 const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
+
+/** When the process `pid` started, as `ps` prints it (to the second; macOS and Linux), or null when that cannot be read. */
+export function processStart(pid: number): string | null {
+  try {
+    const p = Bun.spawnSync(['ps', '-o', 'lstart=', '-p', String(pid)], { env: { ...process.env, LC_ALL: 'C' }, stderr: 'ignore' });
+    const s = p.stdout.toString().trim().replace(/\s+/g, ' ');
+    return p.exitCode === 0 && s ? s : null;
+  } catch { return null; }
+}
+
+/** A claim's process is still the export that wrote it: alive, and (when both are known) started when it was. */
+function live(c: Claim) {
+  if (!alive(c.pid)) return false;
+  if (!c.pstart) return true;
+  const now = processStart(c.pid);
+  return now === null || now === c.pstart;
+}
 
 /** The exports running on this machine now (claims of dead processes are removed). */
 export function runningExports(): Claim[] {
@@ -21,7 +39,7 @@ export function runningExports(): Claim[] {
     const f = path.join(DIR(), n);
     let c: Claim | null = null;
     try { c = JSON.parse(readFileSync(f, 'utf8')); } catch {}
-    if (!c || !alive(c.pid)) { rmSync(f, { force: true }); continue; }
+    if (!c || !live(c)) { rmSync(f, { force: true }); continue; }
     if (c.pid !== process.pid) out.push(c);
   }
   return out;
@@ -39,7 +57,7 @@ export function claimExport(project: string, file: string, force: boolean): () =
   }
   mkdirSync(DIR(), { recursive: true });
   const f = path.join(DIR(), `${process.pid}.json`);
-  writeFileSync(f, JSON.stringify({ pid: process.pid, project, out: file, started: Date.now() } satisfies Claim));
+  writeFileSync(f, JSON.stringify({ pid: process.pid, project, out: file, started: Date.now(), pstart: processStart(process.pid) ?? undefined } satisfies Claim));
   const release = () => { rmSync(f, { force: true }); process.off('exit', release); };
   process.on('exit', release);
   return release;
