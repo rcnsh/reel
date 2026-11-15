@@ -1,9 +1,11 @@
-import { expect, test } from 'bun:test';
-import { mkdtempSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { afterAll, expect, test } from 'bun:test';
+import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describeDiff, diffImages, downscale, encodePng, readPng, type Img } from '../cli/png';
 import { freeName, spaced, stillName } from '../cli/ops';
+import { removeTempDirs, tempDir } from './helpers';
+
+afterAll(removeTempDirs);
 
 const img = (w: number, h: number, f: (x: number, y: number) => number[]): Img => {
   const data = new Uint8Array(w * h * 4);
@@ -12,7 +14,7 @@ const img = (w: number, h: number, f: (x: number, y: number) => number[]): Img =
 };
 
 test('PNG round trip', () => {
-  const dir = mkdtempSync(path.join(tmpdir(), 'reel-png-'));
+  const dir = tempDir('reel-png-');
   const a = img(7, 5, (x, y) => [x * 30, y * 50, 99]);
   writeFileSync(path.join(dir, 'a.png'), encodePng(a));
   expect(readPng(path.join(dir, 'a.png'))).toEqual(a);
@@ -47,7 +49,7 @@ test('still names and free names', () => {
   expect(stillName(['overlay'], 1)).toBe('overlay_1.000s');
   expect(stillName([], 9)).toBe('nothing_9.000s');
   expect(stillName(['a b/c'], 0)).toBe('a-b-c_0.000s');
-  const dir = mkdtempSync(path.join(tmpdir(), 'reel-names-'));
+  const dir = tempDir('reel-names-');
   const f1 = freeName(dir, 'x');
   writeFileSync(f1, '');
   const f2 = freeName(dir, 'x');

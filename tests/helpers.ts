@@ -17,6 +17,15 @@ export function scratchCopy(example: string) {
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
+const scratch: string[] = [];
+/** A fresh temp folder; a test file that makes them calls `afterAll(removeTempDirs)`. */
+export function tempDir(prefix: string) {
+  const d = mkdtempSync(path.join(tmpdir(), prefix));
+  scratch.push(d);
+  return d;
+}
+export function removeTempDirs() { for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true }); }
+
 /** Run the CLI; returns its exit code, stdout and stderr. */
 export async function reel(args: string[], cwd = ENGINE, env: Record<string, string> = {}) {
   const p = Bun.spawn(['bun', REEL, ...args], { cwd, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...env } });

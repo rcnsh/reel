@@ -1,9 +1,7 @@
 // Narration: the script parser, the timing files, settings and cache keys, word refinement, the assembly of the
 // track, and the hosted voices' requests and responses (against fixtures: no request leaves the machine).
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync } from 'node:fs';
-import { mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { snapToPauses, timeScript } from '../tools/align-words';
 import { joinFigures } from '../tools/align';
@@ -13,6 +11,9 @@ import { plateKey, resolveSettings } from '../tools/settings';
 import { charsToWords, elevenlabs, request as elRequest } from '../tools/voices/elevenlabs';
 import { fish, request as fishRequest } from '../tools/voices/fish';
 import { voiceOf } from '../tools/voices';
+import { removeTempDirs, tempDir } from './helpers';
+
+afterAll(removeTempDirs);
 
 describe('script', () => {
   test('plates, comments and spacing', () => {
@@ -130,7 +131,7 @@ describe('voices', () => {
     const seen: { url: string; init: RequestInit }[] = [];
     const f = (async (url: string, init: RequestInit) => { seen.push({ url, init }); return new Response(fx, { headers: { 'content-type': 'application/json' } }); }) as unknown as typeof fetch;
     const v = elevenlabs.create('abc', { env: { ELEVENLABS_API_KEY: 'secret' }, fetch: f });
-    const work = mkdtempSync(path.join(tmpdir(), 'reel-el-'));
+    const work = tempDir('reel-el-');
     const [sp] = await v.synth([{ text: 'Hi, there. 3.5', speed: 1 }], work);
     expect((seen[0]!.init.headers as Record<string, string>)['xi-api-key']).toBe('secret');
     expect(readFileSync(sp!.file).subarray(0, 4).toString()).toBe('RIFF');
@@ -139,7 +140,7 @@ describe('voices', () => {
 
   test('ElevenLabs and Fish: an HTTP error is one line with the service and its message', async () => {
     const f = (async () => new Response('{"detail":"quota exceeded"}', { status: 401 })) as unknown as typeof fetch;
-    const work = mkdtempSync(path.join(tmpdir(), 'reel-err-'));
+    const work = tempDir('reel-err-');
     await expect(elevenlabs.create('abc', { env: { ELEVENLABS_API_KEY: 'k' }, fetch: f }).synth([{ text: 'x', speed: 1 }], work)).rejects.toThrow('elevenlabs: HTTP 401: {"detail":"quota exceeded"}');
     await expect(fish.create('abc', { env: { FISH_API_KEY: 'k' }, fetch: f }).synth([{ text: 'x', speed: 1 }], work)).rejects.toThrow('fish: HTTP 401');
   });
@@ -151,7 +152,7 @@ describe('voices', () => {
     const wav = Buffer.from('UklGRiQAAABXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQAAAAA=', 'base64');
     let auth = '';
     const f = (async (_: string, init: RequestInit) => { auth = (init.headers as Record<string, string>).authorization!; return new Response(wav); }) as unknown as typeof fetch;
-    const [sp] = await fish.create('ref1', { env: { FISH_API_KEY: 'fk' }, fetch: f }).synth([{ text: 'Hello.', speed: 1 }], mkdtempSync(path.join(tmpdir(), 'reel-fish-')));
+    const [sp] = await fish.create('ref1', { env: { FISH_API_KEY: 'fk' }, fetch: f }).synth([{ text: 'Hello.', speed: 1 }], tempDir('reel-fish-'));
     expect(auth).toBe('Bearer fk');
     expect(sp!.words).toBeUndefined(); // timed by the forced aligner
   });

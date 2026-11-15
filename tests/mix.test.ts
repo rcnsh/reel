@@ -1,11 +1,13 @@
-import { expect, test } from 'bun:test';
+import { afterAll, expect, test } from 'bun:test';
 import { buildMix, type Events } from '../tools/mix-graph';
-import { existsSync, mkdtempSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync } from 'node:fs';
 import path from 'node:path';
 import { bundledSounds, soundFile } from '../tools/mix';
 import { BUNDLED_SOUNDS } from '../src/config';
 import { loudnessTarget, loudnormFilter, parseLoudnorm, STREAMING } from '../tools/loudness';
+import { removeTempDirs, tempDir } from './helpers';
+
+afterAll(removeTempDirs);
 
 const ev: Events = { duration: 10, timeline: [{ id: 'a', start: 0, end: 4 }, { id: 'b', start: 4, end: 10 }], cues: [{ kind: 'tick', t: 1 }, { kind: 'tick', t: 1.05 }, { kind: 'tick', t: 5 }, { kind: 'boom', t: 2 }] };
 const snd = (f: string) => `/p/audio/${f}`;
@@ -66,7 +68,7 @@ test('loudness: targets from mix.json, the measurement and the second pass', () 
 
 test('mix.json can name a bundled cue sound; a project file of that name wins', () => {
   expect(bundledSounds().sort()).toEqual(['click', 'impact', 'pop', 'swell', 'tick', 'whoosh']);
-  const root = mkdtempSync(path.join(tmpdir(), 'reel-snd-'));
+  const root = tempDir('reel-snd-');
   expect(soundFile(root, 'whoosh')).toEndWith('sounds/whoosh.wav');
   expect(soundFile(root, 'reel:pop')).toEndWith('sounds/pop.wav');
   expect(() => soundFile(root, 'nope.wav')).toThrow('nor one of the bundled sounds');
@@ -105,7 +107,7 @@ test('a sound slower or faster than atempo takes in one step is a chain of atemp
 });
 
 test('a sound names a file of the project, of its audio folder, or a bundled sound', () => {
-  const root = mkdtempSync(path.join(tmpdir(), 'reel-snd-'));
+  const root = tempDir('reel-snd-');
   expect([...bundledSounds()].sort()).toEqual([...BUNDLED_SOUNDS].sort());
   return Bun.write(path.join(root, 'clips/a.mp4'), 'x').then(() => {
     expect(soundFile(root, 'clips/a.mp4')).toBe(path.join(root, 'clips/a.mp4'));

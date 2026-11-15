@@ -1,14 +1,16 @@
 // Generated assets: the manifest's checks, status and cache keys, the providers' requests, and a generation run
 // against a mocked provider (no request leaves the machine).
-import { describe, expect, test } from 'bun:test';
+import { afterAll, describe, expect, test } from 'bun:test';
 import { $ } from 'bun';
-import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { assetKey, parseManifest, statusOf, type AssetEntry } from '../tools/asset-manifest';
 import { runAssets } from '../tools/assets';
 import { request as elRequest } from '../tools/providers/elevenlabs-sound';
 import { request as oaRequest, sizeFor } from '../tools/providers/openai-image';
+import { removeTempDirs, tempDir } from './helpers';
+
+afterAll(removeTempDirs);
 
 const img: AssetEntry = { id: 'ridge', kind: 'image', prompt: 'A misty ridge', size: [1600, 900], out: 'assets/ridge.png' };
 const sfx: AssetEntry = { id: 'whoosh', kind: 'sfx', prompt: 'A soft whoosh', duration: 1.2, out: 'audio/whoosh.mp3' };
@@ -51,7 +53,7 @@ describe('providers', () => {
   });
 
   test('without a key nothing is sent and the assets stay missing; with one, images are generated, fitted and recorded', async () => {
-    const root = mkdtempSync(path.join(tmpdir(), 'reel-assets-'));
+    const root = tempDir('reel-assets-');
     writeFileSync(path.join(root, 'assets.json'), JSON.stringify({ assets: [img, sfx] }));
     const none = (async () => { throw new Error('no request may be made'); }) as unknown as typeof fetch;
     const rows = await runAssets(root, {}, { env: {}, fetch: none });
