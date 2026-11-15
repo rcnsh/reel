@@ -50,7 +50,9 @@ export function runningExports(): Claim[] {
  * (also run when the process exits).
  */
 export function claimExport(project: string, file: string, force: boolean): () => void {
-  const others = runningExports();
+  let others = runningExports();
+  // (an export that has written its file may still be closing its browsers: give it a moment before refusing)
+  for (let i = 0; i < 12 && others.length && !force; i++) { Bun.sleepSync(250); others = runningExports(); }
   if (others.length && !force) {
     const o = others[0]!;
     throw new Error(`another reel export is running (pid ${o.pid}, ${o.project} -> ${o.out}, for ${Math.round((Date.now() - o.started) / 1000)} s): one export at a time keeps memory bounded; wait for it, or pass --force to run beside it`);
