@@ -375,6 +375,8 @@ export class Engine {
     this.maskPass.u.tiles!.value = margin ? this.tileTexWide : this.tileTex;
     (this.maskPass.u.map!.value as THREE.Vector4).copy(map);
     this.maskPass.render(r, rt);
+    // (three's clear() does not set the colour mask: left off, the next colour clear of rt would do nothing)
+    r.state.buffers.color.setMask(true);
   }
 
   private nearPass: FSPass;
@@ -388,6 +390,8 @@ export class Engine {
     if (!this.masking || this.displaced.size) return;
     (this.nearPass.u.map!.value as THREE.Vector4).set(PW / rt.width, PH / rt.height, 0, 0);
     this.nearPass.render(r, rt);
+    // (left off, the colour mask would turn the scene's next colour clear into nothing, see drawMask)
+    r.state.buffers.color.setMask(true);
     r.setRenderTarget(rt);
   }
 
