@@ -1,23 +1,34 @@
 // The MCP server end to end: a real MCP client (the official SDK) starts `reel mcp` over stdio and calls its tools.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
-import { existsSync } from 'node:fs';
+import { existsSync, mkdtempSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StdioClientTransport } from '@modelcontextprotocol/sdk/client/stdio.js';
 import { PNG } from 'pngjs';
 import { parseCommand } from '../cli/args';
 import { encodeOptsOf, formatOf, planOf } from '../cli/formats';
+import { cancelJob, listJobs } from '../cli/jobs';
 import { videoArgs } from '../cli/mcp';
 import { fixture, hasChrome, OFF_FRAME, reel, REEL, scratchCopy } from './helpers';
 
 const demo = scratchCopy('demo'), layers = scratchCopy('layers'), wide = fixture('offframe', OFF_FRAME);
 let client: Client;
+// (the servers' video jobs, and their claim on the export slot, stay in a folder of the test's own)
+const exportsDir = mkdtempSync(path.join(tmpdir(), 'reel-mcp-exports-'));
+const env = { ...process.env, REEL_EXPORTS_DIR: exportsDir } as Record<string, string>;
 
 beforeAll(async () => {
   client = new Client({ name: 'reel-test', version: '1.0.0' });
-  await client.connect(new StdioClientTransport({ command: 'bun', args: [REEL, 'mcp'], env: process.env as Record<string, string>, stderr: 'inherit' }));
+  await client.connect(new StdioClientTransport({ command: 'bun', args: [REEL, 'mcp'], env, stderr: 'inherit' }));
 });
 afterAll(async () => {
   await client?.close();
+  // (a job a failed test left behind is stopped: jobs outlive their server)
+  const was = process.env.REEL_EXPORTS_DIR;
+  process.env.REEL_EXPORTS_DIR = exportsDir;
+  try { for (const j of listJobs()) if (j.state === 'running' || j.state === 'queued') await cancelJob(j.job); } finally { if (was === undefined) delete process.env.REEL_EXPORTS_DIR; else process.env.REEL_EXPORTS_DIR = was; }
+  rmSync(exportsDir, { recursive: true, force: true });
   for (const p of [demo, layers, wide]) { await reel(['daemon', 'stop', '--project', p.dir]); p.cleanup(); }
 });
 
@@ -114,19 +125,38 @@ test.skipIf(!hasChrome)('check_video finds a line running off the frame, and pas
   expect(ok.json.summary.error).toBe(0);
 }, 120_000);
 
-test.skipIf(!hasChrome)('a short video render runs to completion through start and status', async () => {
+test.skipIf(!hasChrome)('a video job outlives the server that started it: a new server follows it with wait_s and lists it', async () => {
   const out = `${layers.dir}/out/mcp.mp4`;
   const s = await call('video_start', { project: layers.dir, to: 0.5, preset: 'ultrafast', out, wait: true });
   // (queued until the machine's export slot is free, then running)
   expect(['queued', 'running']).toContain(s.json.state);
-  let st = s;
-  // (polling is the tool's contract: the job runs in the background)
-  for (let i = 0; i < 600 && (st.json.state === 'running' || st.json.state === 'queued'); i++) { await Bun.sleep(200); st = await call('video_status', { job: s.json.job }); }
+  // the client goes away and a new server starts
+  await client.close();
+  client = new Client({ name: 'reel-test', version: '1.0.0' });
+  await client.connect(new StdioClientTransport({ command: 'bun', args: [REEL, 'mcp'], env, stderr: 'inherit' }));
+  const listed = await call('video_status', { project: layers.dir });
+  expect(listed.json.jobs.map((j: { job: string }) => j.job)).toContain(s.json.job);
+  let st = s, calls = 0;
+  for (; calls < 40 && (st.json.state === 'running' || st.json.state === 'queued'); calls++) {
+    const t0 = Date.now();
+    st = await call('video_status', { job: s.json.job, wait_s: 30 });
+    // (each wait ends at a change, long before its 30 s)
+    expect(Date.now() - t0).toBeLessThan(25_000);
+  }
   expect(st.json.state).toBe('done');
   expect(st.json.result.ok).toBe(true);
   expect(st.json.result.frames).toBe(15);
   expect(existsSync(out)).toBe(true);
-}, 180_000);
+}, 240_000);
+
+test('video_status refuses wait_s without a job, and names a job it does not know', async () => {
+  const r = await client.callTool({ name: 'video_status', arguments: { wait_s: 5 } });
+  expect(r.isError).toBe(true);
+  expect((r.content as Block[])[0]!.text).toMatch(/wait_s needs a job/);
+  const n = await client.callTool({ name: 'video_status', arguments: { job: 'video-nope' } });
+  expect(n.isError).toBe(true);
+  expect((n.content as Block[])[0]!.text).toMatch(/no job 'video-nope'/);
+});
 
 test.skipIf(!hasChrome)('a bad argument comes back as an error the model can read', async () => {
   const r = await client.callTool({ name: 'render_still', arguments: { project: '/nonexistent', times: [1] } });
