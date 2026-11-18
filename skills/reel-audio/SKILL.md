@@ -61,6 +61,9 @@ Writes `data/audio.json` and copies the song to `audio/` as the track:
 - `beats`, `downbeats`, `bpm`, `time_signature` from Beat This! (a constant grid where the song keeps one tempo,
   phase set on the kicks; the tracked beats where the tempo moves).
 - 100 fps envelopes (0..1): `rms low mid high` of the mix, `drums bass other vocal` of Demucs stems.
+- A waveform of the song (`wave`: peak and RMS per 1/100 s, 0..1 at the loudest peak) and a spectrum (`spectrum`:
+  24 log-spaced bands from 40 Hz to 11 kHz per 1/100 s, 0..1 over the 60 dB under the loudest band), stored as
+  base64 bytes. Both paths (`--fast` too) write them; with `--keep-sections` they are the bed's, placed at its offset; an older `audio.json` without them still loads (they read 0; the kit's `Waveform` and `Spectrum` ask for a new analysis).
 - Onsets `[time, strength]`: `kick snare hat` from the drum stem, `vocal` from the vocal stem.
 - Sections: `--sections sections.json` (`[{ "name": "intro", "bar": 0 }, { "name": "drop", "start": 31.2 }]`, named
   after scenes), else segmented (`part1`, `part2` …).
@@ -68,7 +71,9 @@ Writes `data/audio.json` and copies the song to `audio/` as the track:
 - A bed under narration: time the narration first, then `reel analyze bed.flac --keep-sections --offset 12`.
 
 In scenes: `f.a.kick` (a decaying pulse), `f.a.drums`, `f.beat`, `f.bar`, `f.beatPhase`; `audio.hit('snare', t)`,
-`audio.env('vocal', t)`. Cut on the beat in the config: `src.audio.nearestDownbeat(t)`, `src.audio.beatBefore(t)`.
+`audio.env('vocal', t)`, `audio.wave(t, span)`, `audio.bands(t, n)`. To show the song itself, the kit's
+`Waveform` (bars or a line, static with a playhead or scrolling) and `Spectrum` (bars or a ring):
+`new Spectrum({ audio: this.ctx.audio, style: 'radial' })` (the `reel-authoring` skill's `reference/kit.md`). Cut on the beat in the config: `src.audio.nearestDownbeat(t)`, `src.audio.beatBefore(t)`.
 
 ## Cues and the mix
 

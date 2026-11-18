@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, and a waveform and a spectrum of the song. Each is built on an HTML layer (the image, video, Lottie, waveform and spectrum on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -167,6 +167,21 @@ code = new CodeBlock({
 ```
 
 `code`, `lang` (one of `CODE_LANGUAGES`: bash, cpp, css, diff, glsl, go, javascript, json, python, rust, sql, typescript, xml, yaml, and their aliases ts, js, py, sh, html, c, rs, yml; an unknown language is an error), `size` (largest; the font shrinks so the longest line and every line fit, no line wraps), `lineNumbers`, `highlight` (1-based lines, *Anim*), `reveal` (how many lines show, *Anim*), `title` (a file name bar), `panel`. Highlighted by highlight.js in the theme's colours: keywords in the accent, strings between the accent and fg, comments dimmed. Classes: `.code`, `.ln`, `.no`, `.on`, `.hljs-*`.
+
+## Waveform and Spectrum
+
+The analysed song drawn as a picture: levels from `reel analyze` (`audio.wave`, `audio.bands`; see the `reel-audio` skill), computed at every sub-frame's time, so they move smoothly and blur under `--samples auto`, and drawn by a shader in logical px (sharp at every `--scale`). Both need `audio: this.ctx.audio`; an analysis without a waveform or spectrum (narration, or one made before they were stored) is an error of the clip: run `reel analyze` again. Default motion: a fade. They report a `shape` to `reel check`.
+
+```ts
+overview = new Waveform({ audio: this.ctx.audio });                                         // the clip's span, played part in the accent
+scope = new Waveform({ audio: this.ctx.audio, window: 3, style: 'line', playhead: 0.8 });    // 3 s scrolling past now
+eq = new Spectrum({ audio: this.ctx.audio, count: 32, box: { x: W * 0.1, y: H * 0.55, w: W * 0.8, h: H * 0.3 } });
+ring = new Spectrum({ audio: this.ctx.audio, style: 'radial', inner: 0.5 });
+```
+
+- `Waveform`: `window` (`'clip'`, the default: the clip's own span of video time, static, with what has played in `color` and the rest in `restColor` at `restOpacity`; `[from, to]` in video seconds, static; or a number of seconds that scrolls past the playhead, at `playhead` across the box, 0.5 by default, fading at the box's ends). `style` (`'bars'` or `'line'`, a line through the levels over a fill of opacity `fill`), `mirror` (about the middle, default true; false rises from the bottom), `count` (bars or points across the box; a static line runs edge to edge), `measure` (`'peak'` or `'rms'`), `gain`, `gap`, `round`, `lineWidth`, `color` (accent), `restColor` (fg), `restOpacity` (0.35). Default box: a band across the middle of the safe area. Scrolling bars stand for fixed spans of the song and slide, so they never flicker.
+- `Spectrum`: `style` (`'bars'`, low to high across the box, or `'radial'`, round a circle with the lows at the top, mirrored down both sides unless `symmetric: false`), `count` (bars, or bars on each side of a symmetric ring; default the analysis' 24 bands; fewer show the loudest of the bands each covers, more interpolate between them), `mirror` (bars from the middle both ways), `inner` (the ring's inner radius, a share of the box's half short side, 0.45), `gain`, `gap`, `round`, `color`. Default box: a band below the middle of the safe area for bars, a centred square for the ring.
+- Colours are palette keys or `'#rrggbb'`. Silent levels draw as a short stub (a dot for narrow round bars), so the shape stays readable in a break.
 
 ## Your own component
 

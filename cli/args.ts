@@ -104,7 +104,8 @@ Working on a project
                              every word; caches each plate      (flags: reel narrate --help)
   align <recording|folder>   time narration.txt to a voice recording (forced alignment; --method
                              whisper for a reading that departs from it)  (flags: reel align --help)
-  analyze <song> [...]       beats, envelopes and sections of a song (flags: reel analyze --help)
+  analyze <song> [...]       beats, envelopes, waveform, spectrum and sections of a song
+                                                                       (flags: reel analyze --help)
   mix <in.mp4> <out.mp4>     the finished sound under a render: the track, music and cue sounds
                              (mix.json), at -14 LUFS; re-mix without re-rendering   [--from 0]
   subtitles                  SRT and VTT of the timed words, as subtitles.srt and subtitles.vtt

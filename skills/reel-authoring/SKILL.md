@@ -14,7 +14,7 @@ reel.config.ts      the edit: format, theme, every clip on the timeline
 scenes/<name>.ts    one Scene class per file (default export); shared helpers as scenes/_<name>.ts
 narration.txt       (narrated) plates: "# name" then its lines
 data/words.json     (generated) every word with its time      audio/narration.flac (generated)
-data/audio.json     (generated) beats, envelopes, sections, the track to mux
+data/audio.json     (generated) beats, envelopes, waveform, spectrum, sections, the track to mux
 mix.json            music beds, cue sounds and loudness for the mix
 assets.json         images and sounds to generate (`reel assets`)
 out/                renders (not committed)
@@ -49,7 +49,7 @@ export default defineVideo({
 
 ## A scene
 
-Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
+Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer, a code block, and a waveform and spectrum of the song, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
 
 ```ts
 import type * as THREE from 'three';

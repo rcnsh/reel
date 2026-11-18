@@ -3,8 +3,7 @@
 // wipe or a slide is motion blurred like anything else.
 import * as THREE from 'three';
 import { FSPass } from './gl';
-import { HEX } from './palette';
-import { hexToLinear } from './util';
+import { HEX, linearColor } from './palette';
 
 export type TransitionKind = 'crossfade' | 'wipe' | 'slide' | 'zoom' | 'dip';
 export type TransitionDirection = 'left' | 'right' | 'up' | 'down';
@@ -102,7 +101,7 @@ export class TransitionPass {
     (u.dir!.value as THREE.Vector2).set(...DIRS[t.direction ?? 'left']);
     u.colA!.value = upper && t.color === undefined ? 0 : 1;
     const c = t.color ?? 'bg';
-    (u.col!.value as THREE.Vector3).set(...(c.startsWith('#') ? hexToLinear(c) : hexToLinear(HEX[c]!)));
+    (u.col!.value as THREE.Vector3).set(...linearColor(c));
     this.pass.render(renderer, out);
   }
 }

@@ -275,7 +275,7 @@ export async function serveMcp() {
 
   server.registerTool('analyze_song', {
     title: 'Analyze a song',
-    description: "Beats and downbeats (Beat This!), loudness envelopes of the mix and of Demucs stems (drums, bass, other, vocal), drum and vocal onsets and sections of a song into data/audio.json (the song becomes the track). Extra flags as in `reel analyze --help`, e.g. ['--sections', 'sections.json'], ['--keep-sections', '--offset', '12'] or ['--fast'] (no models, a draft). The first run fetches packages and models (minutes).",
+    description: "Beats and downbeats (Beat This!), loudness envelopes of the mix and of Demucs stems (drums, bass, other, vocal), a waveform and spectrum bands of the mix, drum and vocal onsets and sections of a song into data/audio.json (the song becomes the track). Extra flags as in `reel analyze --help`, e.g. ['--sections', 'sections.json'], ['--keep-sections', '--offset', '12'] or ['--fast'] (no models, a draft). The first run fetches packages and models (minutes).",
     inputSchema: { project, song: z.string().describe('The audio file.'), args: z.array(z.string()).optional().describe('Extra flags for reel analyze.') },
   }, (a) => guard(() => tool('analyze', a.project, [path.resolve(a.song), ...(a.args ?? [])])));
 
