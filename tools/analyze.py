@@ -27,6 +27,7 @@ Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit,
 --fast skips the models (no download, seconds instead of tens of seconds): librosa's beat tracker with one
 fitted tempo set on the kicks and a kick/snare heuristic for the bar phase, and harmonic/percussive proxies for
 the stems. Good for drafts; one tempo loses its place where the tempo moves (--free-tempo follows it).
+tests/analyze.test.ts checks it against tools/synth_song.py's songs.
 
 The timeline shows each section with the scene of the same name, so name sections after your scenes.
 Without --keep-sections the song becomes the video's sound: it is copied to audio/ and data/audio.json
