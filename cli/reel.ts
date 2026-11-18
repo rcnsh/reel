@@ -3,6 +3,7 @@
 // commands and flags (cli/args.ts). Every rendering command takes --project <folder> (default: the current
 // folder) and --json (one JSON object on stdout: { ok, errors, logs, warnings, ... }). Exit codes: 0 done,
 // 1 something failed (scene errors included), 2 a bad command line or no project.
+import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { checkScale, HELP, int, list, num, pageOf, parseCommand, samplesOf, UsageError, type PageOpts, type Values } from './args';
 import { ENGINE, projectDir } from './server';
@@ -168,7 +169,12 @@ if (mode === 'daemon') {
     let project: string | null = null;
     if (!A.all) try { project = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail(`${(e as Error).message}, or --all`); }
     res.stopped = await d.stop(project);
-    finish(res, () => console.log((res.stopped as string[]).length ? `stopped ${(res.stopped as string[]).join(', ')}` : 'no warm renderer was running'));
+    // (--all also sweeps what dead exports and servers left: spool and frame folders, Vite's stale optimizer folders)
+    if (A.all) res.swept = (await import('./scratch')).sweep([(await import('node:os')).tmpdir()], path.join(ENGINE, 'node_modules/.vite'));
+    finish(res, () => {
+      console.log((res.stopped as string[]).length ? `stopped ${(res.stopped as string[]).join(', ')}` : 'no warm renderer was running');
+      if (A.all) console.log(`removed ${(res.swept as string[]).length} stale scratch folder${(res.swept as string[]).length === 1 ? '' : 's'}`);
+    });
   }
   fail(`daemon ${sub}: expected status or stop`);
 }
@@ -307,13 +313,14 @@ try {
     if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
     const r = new Renderer(PROJECT, { headed: !!A.headed });
     const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
-    let release = () => {};
+    let release = () => {}, offPic = () => {}, pic: string | null = null;
     try {
       const m = await r.meta();
       const sc = page.scale, plan = F.planOf(format, enc, page.fps ?? m.format.fps, [(page.w ?? m.format.w) * sc, (page.h ?? m.format.h) * sc]);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
-      // (with --mix the picture is rendered beside the output and the mix writes the output)
-      const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;
+      // (with --mix the picture is rendered to a scratch file beside the output and the mix writes the output)
+      const { partialOf, onAbort } = await import('./scratch');
+      if (mixed) { const p = pic = partialOf(out); offPic = onAbort(() => rmSync(p, { force: true })); }
       const X = await import('./exports');
       release = A.wait
         ? await X.queueExport(PROJECT, out, (running, ahead) => {
@@ -326,33 +333,35 @@ try {
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
         url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme,
-        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic, plan, enc, noaudio: !!A.noaudio || mixed,
+        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic ?? out, direct: !!pic, plan, enc, noaudio: !!A.noaudio || mixed,
         workers: int(A, 'workers', 2), chunk: int(A, 'chunk', 8), memGb: num(A, 'mem-gb', 1), spoolGb: num(A, 'spool-gb', 20), headed: !!A.headed,
         onProgress: (p) => {
           if (A.progress) console.error(JSON.stringify(p));
           else if (!json) process.stdout.write(`\r${p.frames}/${p.total} frames  ${p.fps.toFixed(1)} fps  eta ${p.eta.toFixed(0)}s   `);
         },
       });
-      const file = format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file;
+      // (null: scene errors, and the previous output left as it was)
+      const file = v.file && !mixed ? (format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file) : undefined;
       if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: page.scale, samples: 1 };
       Object.assign(res, { gl: (await import('./chrome')).glBackend(), file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
       res.errors.push(...r.explain(v.errors));
       res.logs.push(...r.explain(v.logs));
-      say(`\nwrote ${file} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
+      say(`\n${file ? `wrote ${file}` : v.file ? 'rendered the picture' : `rendered with scene errors, ${out} left as it was`} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
       say(A.draft ? `a draft (${(res.draft as { encoder: string }).encoder}, ${page.scale === 0.5 ? 'half size' : 'full size: half would not pack'}, one sample): not for delivery` : `sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
-      if (mixed && !res.errors.length) {
-        const { mixVideo } = await import('../tools/mix');
-        try {
-          const mres = await mixVideo({ root: PROJECT, input: pic, output: out, from: num(A, 'from', 0), events: v.events, subtitles: subs });
-          res.warnings.push(...mres.warnings);
-          Object.assign(res, { file: out, loudness: mres.loudness, ...(subs ? { subtitles: subs } : {}) });
-          say(mres.summary);
-        } finally { (await import('node:fs')).rmSync(pic, { force: true }); }
+      if (pic && v.file) {
+        const mres = await (await import('../tools/mix')).mixVideo({ root: PROJECT, input: pic, output: out, from: num(A, 'from', 0), events: v.events, subtitles: subs });
+        res.warnings.push(...mres.warnings);
+        Object.assign(res, { file: out, loudness: mres.loudness, ...(subs ? { subtitles: subs } : {}) });
+        say(mres.summary);
       }
     } catch (e) {
       if (e instanceof UsageError) throw e;
       res.errors.push(...r.explain([String((e as Error)?.message ?? e)]));
-    } finally { await r.close(); release(); }
+    } finally {
+      // (the picture a mix is made from is scratch, whatever happened)
+      if (pic) rmSync(pic, { force: true });
+      await r.close(); release(); offPic();
+    }
     res.ok = !res.errors.length;
     finish(res, () => {});
   }
