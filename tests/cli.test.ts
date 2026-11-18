@@ -84,6 +84,16 @@ test.skipIf(!hasChrome)('diff: identical renders exit 0, a different frame exits
   expect(existsSync(other.json().file)).toBe(true);
 }, 120_000);
 
+test.skipIf(!hasChrome)('adaptive sampling gives the same frame masking stopped tiles out of every sub-frame or only the merge', async () => {
+  // (at 5 s some of the layers' tiles stop at 12 sub-frames and others go on: the next step is masked)
+  const sub = await reel(['still', '--t', '5', '--samples', 'auto', '--json', '--project', layers.dir], ENGINE, { REEL_TILE_MASK: 'subs' });
+  expect(sub.json().frames[0].subFrames).toBeGreaterThan(12);
+  const merge = await reel(['diff', '--t', '5', sub.json().files[0], '--samples', 'auto', '--json', '--project', layers.dir], ENGINE, { REEL_TILE_MASK: 'merge' });
+  expect(merge.json().changed).toBe(0);
+  const bad = await reel(['still', '--t', '5', '--samples', 'auto', '--project', layers.dir], ENGINE, { REEL_TILE_MASK: 'some' });
+  expect(bad.code).toBe(2);
+}, 120_000);
+
 test.skipIf(!hasChrome)('check passes the demo at 16:9 and vertical (its text wraps to the frame)', async () => {
   for (const size of ['1920x1080', '1080x1920']) {
     const r = await reel(['check', '--size', size, '--json', '--project', demo.dir]);
