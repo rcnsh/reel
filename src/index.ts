@@ -14,7 +14,7 @@ export * from './engine/assets';
 export * from './engine/audio';
 export * from './kit';
 export * from './three';
-export { report, reportText, reporting, CHECK_RULES, type CheckRule, type DrawnBox } from './engine/report';
+export { report, reportText, reporting, uncounted, CHECK_RULES, type CheckRule, type DrawnBox } from './engine/report';
 export { GLSL_COMMON } from './engine/glsl/common';
 export { themes, extendTheme } from './themes';
 export type { Theme, ThemeName, HudParams } from './themes';

@@ -125,6 +125,15 @@ describe('findingsOf', () => {
     expect(findingsOf([sample(1, [box({ x: 900, exempt: true })])], opts)).toHaveLength(0);
     expect(findingsOf([sample(1, [box({ x: 900 })])], { ...opts, clips: [{ ...opts.clips[0]!, exempt: ['offFrame'] }] })).toHaveLength(0);
   });
+  test('a clip that draws text with fillText and reports none is a warning; one that reports any is not', () => {
+    const quiet = (t: number, n: number): Sample => ({ ...sample(t), textDraws: { a: n } });
+    const f = findingsOf([quiet(1, 3), quiet(2, 2), sample(3)], opts);
+    expect(f).toHaveLength(1);
+    expect(f[0]).toMatchObject({ kind: 'unreported', severity: 'warning', clip: 'a', t: 1, until: 2, frames: 2, value: 5 });
+    expect(f[0]!.message).toContain('reportText(c, text, x, y)');
+    expect(findingsOf([quiet(1, 3), sample(2, [box({})])], opts)).toHaveLength(0);
+    expect(findingsOf([quiet(1, 3)], { ...opts, clips: [{ ...opts.clips[0]!, exempt: ['unreported'] }] })).toHaveLength(0);
+  });
   test('blank and frozen frames, scene errors', () => {
     const flat = { sig: [10, 10], cols: 2, rows: 1, spread: 0 };
     const f = findingsOf([{ t: 0, clips: ['a'], boxes: [], stats: flat, errors: ['[a] render at 0.000 s: boom'] }, ...[0.5, 1, 2, 3.5].map((t) => ({ t, clips: ['a'], boxes: [], stats: flat, errors: [] }))], opts);

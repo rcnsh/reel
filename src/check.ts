@@ -141,6 +141,8 @@ export interface Sample {
   boxes: (ReportedBox & { m?: TextMeasure | null })[];
   stats: FrameStats;
   errors: string[];
+  /** Canvas2D fillText and strokeText calls per clip in this frame (text the clip may not have reported). */
+  textDraws?: Record<string, number>;
 }
 
 export interface CheckOpts {
@@ -294,6 +296,24 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
       raw.push({ kind: 'frozen', severity: 'warning', t: a.t, until: b.t, frames: j - i + 1, at: a.t, clip: clips.join('+'), value: +span.toFixed(2), key: `frozen|${a.t}`, worst: span, message: `nothing moves for ${span.toFixed(1)} s (${a.t.toFixed(2)} to ${b.t.toFixed(2)} s): hold a still this long on purpose, or give it some motion` });
     }
     i = j + 1;
+  }
+
+  // clips that draw text with fillText or strokeText and never report any: everything above is blind to that text
+  const drawn = new Map<string, { n: number; t: number; until: number; frames: number }>(), told = new Set<string>();
+  for (const s of samples) {
+    for (const b of s.boxes) if (b.kind === 'text') told.add(b.clip);
+    for (const [clip, n] of Object.entries(s.textDraws ?? {})) {
+      if (!n) continue;
+      const d = drawn.get(clip);
+      if (d) { d.n += n; d.until = s.t; d.frames++; } else drawn.set(clip, { n, t: s.t, until: s.t, frames: 1 });
+    }
+  }
+  for (const [clip, d] of drawn) {
+    if (told.has(clip) || exempt('unreported', clip)) continue;
+    raw.push({
+      kind: 'unreported', severity: 'warning', t: d.t, until: d.until, frames: d.frames, at: d.t, clip, value: d.n, key: `unreported|${clip}`, worst: d.n,
+      message: `'${clip}' draws text with fillText or strokeText (${d.n} call${d.n > 1 ? 's' : ''} in ${d.frames} frame${d.frames > 1 ? 's' : ''}) but reports none, so this check cannot see it: follow each fillText with reportText(c, text, x, y), or report({ kind: 'text', ... }) for text drawn another way (text drawn only on a scratch canvas that never shows as text: exempt the clip with check: { exempt: ['unreported'] })`,
+    });
   }
 
   // merge: one finding per problem, at its worst frame, spanning every frame that showed it

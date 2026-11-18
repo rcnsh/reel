@@ -2,6 +2,7 @@
 // glyph layout, text outlines as Path2D, and point sampling of text for particle effects.
 import * as opentype from 'opentype.js';
 import { htmlFamilies } from './html';
+import { uncounted } from './report';
 
 /**
  * Font keys. Archivo comes in static width instances (w = wdth*10) x weights so we can
@@ -245,7 +246,7 @@ export function textPoints(text: string, family: string, size: number, step = 6,
   c.fillStyle = '#fff';
   c.textBaseline = 'alphabetic';
   const base = Math.round(size * 1.15);
-  c.fillText(text, pad, base);
+  uncounted(() => c.fillText(text, pad, base));
   const data = c.getImageData(0, 0, W, H).data;
   const out: { x: number; y: number }[] = [];
   let s = seed >>> 0;

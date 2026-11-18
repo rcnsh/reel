@@ -182,7 +182,7 @@ function setupExport() {
       try { engine.render(t, 1 / FPS, true, samples, shutter); } finally { engine.collectBoxes = false; }
       const px = { data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE };
       const boxes = engine.lastBoxes.map((b) => ({ ...b, ...(b.kind === 'text' && b.color && /^#[0-9A-F]{6}$/i.test(b.color) && (b.alpha ?? 1) >= 0.05 ? { m: measureText(px, b, hexRgb(b.color)) } : {}) }));
-      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors };
+      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors, textDraws: engine.lastTextDraws };
     },
     /**
      * The last rendered frame as a PNG (base64): the export's pixels at full resolution, or `crop` (x, y, w, h in

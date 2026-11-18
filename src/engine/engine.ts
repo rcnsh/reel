@@ -150,6 +150,8 @@ export class Engine {
    */
   collectBoxes = false;
   lastBoxes: ReportedBox[] = [];
+  /** The Canvas2D text draws (fillText, strokeText) of the same render, per clip: text a clip may not have reported. */
+  lastTextDraws: Record<string, number> = {};
   /** The clip whose scene is being initialised or drawn (names errors that surface inside three.js). */
   private drawing = '';
 
@@ -568,13 +570,13 @@ export class Engine {
     let n = 1;
     const collect = this.collectBoxes;
     let nearestBoxes = Infinity;
-    if (collect) this.lastBoxes = [];
+    if (collect) { this.lastBoxes = []; this.lastTextDraws = {}; }
     if (samples === 1) {
       SS_TAP.value = -1;
       SUB_FRAME.index = -1;
       if (collect) boxes.begin();
       ({ outTex, post } = this.composite(t, dt, seeked));
-      if (collect) this.lastBoxes = boxes.end();
+      if (collect) { this.lastBoxes = boxes.end(); this.lastTextDraws = boxes.textDraws(); }
     } else {
       const adaptive = typeof samples !== 'number';
       let maxAdaptive = adaptive ? samples.max : 0;
@@ -621,7 +623,7 @@ export class Engine {
             this.setMasking(true);
           }
         }
-        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; } }
+        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; this.lastTextDraws = boxes.textDraws(); } }
         this.accum.u.src!.value = res!.outTex;
         this.accum.render(r, into);
         const d = Math.abs(u - POST_U);

@@ -4,8 +4,8 @@
 import { HEX } from './palette';
 
 /** The rules of `reel check` a box or a clip can be exempt from. */
-export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped' | 'tiny' | 'empty';
-export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped', 'tiny', 'empty'];
+export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped' | 'tiny' | 'empty' | 'unreported';
+export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped', 'tiny', 'empty', 'unreported'];
 
 export interface DrawnBox {
   /**
@@ -54,6 +54,40 @@ let sink: ReportedBox[] | null = null;
 let clip = '';
 let track = 0;
 let paused = false;
+/** fillText and strokeText calls of this frame, by clip: text the check can only see when it is also reported. */
+let draws: Record<string, number> = {};
+let lastDraws: Record<string, number> = {};
+
+let scratch = 0;
+/**
+ * Run `f` without counting its fillText calls toward `unreported`: the engine's own text on scratch canvases that
+ * never reach the frame as text (textPoints rasterising a word into particles, a missing asset's placeholder).
+ */
+export function uncounted<T>(f: () => T): T {
+  scratch++;
+  try { return f(); } finally { scratch--; }
+}
+
+/** Count the Canvas2D text draws while boxes are collected (installed on the first check, never in a preview or export). */
+let hooked = false;
+function hookTextDraws() {
+  if (hooked) return;
+  hooked = true;
+  const protos = [globalThis.CanvasRenderingContext2D?.prototype, globalThis.OffscreenCanvasRenderingContext2D?.prototype];
+  for (const p of protos) {
+    if (!p) continue;
+    for (const k of ['fillText', 'strokeText'] as const) {
+      const orig = p[k] as (...a: unknown[]) => void;
+      Object.defineProperty(p, k, {
+        configurable: true, writable: true,
+        value(this: unknown, ...a: unknown[]) {
+          if (sink && !paused && !scratch && clip && a[0]) draws[clip] = (draws[clip] ?? 0) + 1;
+          return orig.apply(this, a);
+        },
+      });
+    }
+  }
+}
 
 /** Whether this frame's boxes are being collected (to skip work that only feeds report()). */
 export const reporting = () => sink !== null && !paused;
@@ -112,7 +146,7 @@ const cssHex = (s: string) => parseCss(s)?.[0];
 
 /** The engine's side: collect the boxes of the next draws, naming the clip that draws. */
 export const boxes = {
-  begin() { sink = []; paused = false; },
+  begin() { hookTextDraws(); sink = []; draws = {}; paused = false; },
   clip(id: string, onTrack = 0) { clip = id; track = onTrack; },
   /** Scale the alpha of what `id` reported by `k` (its weight in a crossfade, its track's opacity). */
   fade(id: string, k: number) {
@@ -120,5 +154,7 @@ export const boxes = {
   },
   /** Draws that are not the frame's own (a stateful scene fast-forwarding) report nothing. */
   pause(on: boolean) { paused = on; },
-  end(): ReportedBox[] { const b = sink ?? []; sink = null; clip = ''; return b; },
+  end(): ReportedBox[] { const b = sink ?? []; sink = null; clip = ''; lastDraws = draws; draws = {}; return b; },
+  /** The fillText and strokeText calls per clip between the last begin() and end(). */
+  textDraws(): Record<string, number> { return lastDraws; },
 };
