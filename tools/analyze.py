@@ -18,14 +18,15 @@ Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit,
     follower: rms, low (<200 Hz), mid (200 Hz-2 kHz) and high (>2 kHz) of the mix, and drums, bass, other and
     vocal from stems separated by Demucs (htdemucs through demucs-mlx);
   * kick / snare / hat onsets from the drum stem (low, mid and high bands) and vocal onsets from the vocal stem,
-    strengths 0..1; raise a band's --onset-delta (peak-picking threshold) if it fires on other sounds;
+    strengths 0..1, each placed on its attack in the waveform; raise a band's --onset-delta (peak-picking
+    threshold) if it fires on other sounds;
   * sections: from --sections (a JSON list of {"name", "bar"} or {"name", "start"} in seconds, in order),
     else kept from the existing data/audio.json with --keep-sections (a narrated video with a music bed),
     else found by structural segmentation and named part1, part2, ... on downbeats.
 
 --fast skips the models (no download, seconds instead of tens of seconds): librosa's beat tracker with one
-fitted tempo and a kick/snare heuristic for the bar phase, and harmonic/percussive proxies for the stems. Good
-for drafts; it loses its place where the tempo moves.
+fitted tempo set on the kicks and a kick/snare heuristic for the bar phase, and harmonic/percussive proxies for
+the stems. Good for drafts; one tempo loses its place where the tempo moves (--free-tempo follows it).
 
 The timeline shows each section with the scene of the same name, so name sections after your scenes.
 Without --keep-sections the song becomes the video's sound: it is copied to audio/ and data/audio.json
@@ -47,8 +48,9 @@ from pathlib import Path
 
 import librosa
 import numpy as np
-from scipy.ndimage import median_filter
-from scipy.signal import butter, sosfiltfilt
+from scipy.fft import next_fast_len
+from scipy.ndimage import median_filter, uniform_filter1d
+from scipy.signal import butter, hilbert, sosfiltfilt
 
 # the project folder: the one `reel` was pointed at, else the current folder
 ROOT = Path(os.environ.get("REEL_PROJECT", ".")).resolve()
@@ -115,8 +117,27 @@ def hpss(y, kernel=31):
     return back(mask), back(1.0 - mask)
 
 
+def attack(x, times, before=0.04, after=0.02, smooth=0.005):
+    """Each onset moved to the steepest rise of the band's amplitude (its Hilbert envelope, smoothed over 5 ms)
+    from 40 ms before it to 20 ms after, and no further than halfway to its neighbours. The onset envelope's peaks come late by an amount that depends on the
+    sound (its log-mel flux sees an attack frames after it starts; 14 to 18 ms on drums with librosa's
+    framing), so peak picking finds the hits and the waveform says when they start."""
+    if len(times) == 0:
+        return np.array([])
+    e = np.abs(hilbert(x, N=next_fast_len(len(x)))[: len(x)])
+    slope = np.diff(uniform_filter1d(e, max(1, int(smooth * SR))))
+    out = []
+    for i, t in enumerate(times):
+        lo = max(t - before, (times[i - 1] + t) / 2 if i else 0.0)
+        hi = min(t + after, (t + times[i + 1]) / 2 if i + 1 < len(times) else t + after)
+        i0, i1 = max(0, int(lo * SR)), min(len(slope), int(hi * SR))
+        j = i0 + int(np.argmax(slope[i0:i1])) if i1 > i0 else -1
+        out.append(j / SR if j >= 0 and slope[j] > 0 else t)  # (no rise in reach: left where it was found)
+    return np.array(out)
+
+
 def onsets(x, delta, min_gap):
-    """Onset times and 0..1 strengths (dB of the onset envelope, 5th-95th percentile)."""
+    """Onset times (on the waveform: attack()) and 0..1 strengths (dB of the onset envelope, 5th-95th percentile)."""
     hop = 256
     env = librosa.onset.onset_strength(y=x, sr=SR, hop_length=hop)
     fr = librosa.onset.onset_detect(onset_envelope=env, sr=SR, hop_length=hop, delta=delta, wait=int(min_gap * SR / hop), backtrack=False)
@@ -125,7 +146,7 @@ def onsets(x, delta, min_gap):
     db = 20 * np.log10(env[fr] + 1e-9)
     lo, hi = np.percentile(db, 5), np.percentile(db, 95)
     s = np.clip((db - lo) / max(hi - lo, 1e-6), 0, 1) * 0.8 + 0.2
-    t = librosa.frames_to_time(fr, sr=SR, hop_length=hop)
+    t = attack(x, librosa.frames_to_time(fr, sr=SR, hop_length=hop))
     return [[round(float(a), 3), round(float(b), 3)] for a, b in zip(t, s)]
 
 
@@ -144,17 +165,34 @@ def beat_grid(y, duration, free):
     return 60.0 / period, [float(b) for b in grid]
 
 
-def refine_phase(beats, kick, free, duration):
-    """Move a fitted grid onto the strong kicks: the median offset of kicks within 60 ms of a beat."""
-    if free or not kick:
+def drum_offset(beats, hits):
+    """How far the hits (onsets) sit from the beats: the median offset of those within 60 ms of one (None under
+    4). Every hit counts: strengths are relative, so on a song of even kicks a strength cut keeps a handful."""
+    b = np.array(beats)
+    d = [t - b[np.abs(b - t).argmin()] for t, _ in hits] if len(b) else []
+    d = [x for x in d if abs(x) < 0.06]
+    return float(np.median(d)) if len(d) >= 4 else None
+
+
+def shifted(times, shift, duration):
+    return [float(x + shift) for x in times if 0 <= x + shift < duration]
+
+
+def drum_shift(beats, kick, snare):
+    """drum_offset of the kicks, else (too few near a beat) of the snares, else None."""
+    shift = drum_offset(beats, kick)
+    return shift if shift is not None else drum_offset(beats, snare)
+
+
+def refine_phase(beats, kick, snare, free, duration):
+    """Move the beats onto the drums (drum_shift): a fitted grid is laid again from its shifted phase, tracked
+    beats all move by it. librosa's beats come 30 ms or so late; onsets() puts the drums on their attacks."""
+    shift = drum_shift(beats, kick, snare)
+    if shift is None:
         return beats
     b = np.array(beats)
-    strong = [t for t, s in kick if s >= 0.5]
-    d = [t - b[np.abs(b - t).argmin()] for t in strong]
-    d = [x for x in d if abs(x) < 0.06]
-    if len(d) < 4:
-        return beats
-    shift = float(np.median(d))
+    if free:
+        return shifted(b, shift, duration)
     period = b[1] - b[0]
     return [float(x) for x in np.arange((b[0] + shift) % period, duration, period)]
 
@@ -296,7 +334,7 @@ def main():
         snare = onsets(band(perc, 150, 2500), delta=ds, min_gap=0.10)
         hat = onsets(band(perc, 6000, None), delta=dh, min_gap=0.05)
         vocal = onsets(band(harm, 300, 3400), delta=0.3, min_gap=0.12)
-        beats = refine_phase(beats, kick, a.free_tempo, duration)
+        beats = refine_phase(beats, kick, snare, a.free_tempo, duration)
         p = downbeat_phase(y, harm, beats, kick, snare)
         downbeats = beats[p::4]
         stems = {"drums": perc, "other": harm, "bass": band(harm, None, 200), "vocal": band(harm, 300, 3400)}
@@ -314,15 +352,11 @@ def main():
         hat = onsets(band(stems["drums"], 6000, None), delta=dh, min_gap=0.05)
         vocal = onsets(stems["vocal"], delta=0.3, min_gap=0.12)
         if gridded:
-            # the tracker works in 20 ms frames: move the grid onto the strong kicks of the drum stem (the median
-            # offset of those within 60 ms of a beat), which measured more consistent on songs with known beats
-            b = np.array(beats)
-            dd = [t - b[np.abs(b - t).argmin()] for t, st in kick if st >= 0.5]
-            dd = [x for x in dd if abs(x) < 0.06]
-            if len(dd) >= 4:
-                sh = float(np.median(dd))
-                beats = [x + sh for x in beats if 0 <= x + sh < duration]
-                downbeats = [x + sh for x in downbeats if 0 <= x + sh < duration]
+            # the tracker works in 20 ms frames: move the grid onto the drum stem's hits (drum_shift), which
+            # measured more consistent on songs with known beats
+            sh = drum_shift(beats, kick, snare)
+            if sh is not None:
+                beats, downbeats = shifted(beats, sh, duration), shifted(downbeats, sh, duration)
         how = f"Beat This! beats ({'one tempo' if gridded else 'as tracked'}), Demucs stems"
 
     if a.sections:
