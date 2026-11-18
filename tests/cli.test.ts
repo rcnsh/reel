@@ -104,6 +104,24 @@ test.skipIf(!hasChrome)('a syntax error in a scene is reported with its line thr
   expect(fixed.json().errors).toEqual([]);
 }, 120_000);
 
+test.skipIf(!hasChrome)('a custom transition whose GLSL does not compile fails the load, named after its clip, at any time', async () => {
+  const file = path.join(layers.dir, 'reel.config.ts'), good = readFileSync(file, 'utf8');
+  const dusk = "transition: { kind: 'wipe', direction: 'up', softness: 0.3 }";
+  expect(good).toContain(dusk);
+  writeFileSync(file, good.replace(dusk, "transition: { glsl: 'mix(getFromColor(uv), getToColor(uv), p * nope)' }"));
+  try {
+    // (t 0.2 is before the transition: the shader is compiled when the video loads)
+    const bad = await reel(['still', '--t', '0.2', '--json', '--project', layers.dir]);
+    expect(bad.code).toBe(1);
+    expect(bad.json().errors.join('\n')).toMatch(/\[dusk: its transition's glsl\] shader failed to compile: [^]*'nope' : undeclared identifier[^]*in: return \(mix\(getFromColor\(uv\), getToColor\(uv\), p \* nope\)\);/);
+    // (a pasted gl-transitions shader: its own PI, int and vec2 uniforms)
+    const pasted = '#define PI 3.141592653589\\nuniform int steps;\\nuniform ivec2 grid;\\nuniform vec2 dir;\\nvec4 transition(vec2 uv) { float s = float(steps + grid.x) * PI; return mix(getFromColor(uv), getToColor(uv), step(fract(uv.x * s + dir.x), progress)); }';
+    writeFileSync(file, good.replace(dusk, `transition: { glsl: '${pasted}', uniforms: { steps: 3, grid: [2, 2], dir: [0.5, 0] } }`));
+    const ok = await reel(['still', '--t', '3.25', '--json', '--project', layers.dir]);
+    expect(ok.json().errors).toEqual([]);
+  } finally { writeFileSync(file, good); }
+}, 120_000);
+
 test.skipIf(!hasChrome)('a config naming a scene file that is not there fails at once with the import, and the new file is picked up', async () => {
   const file = path.join(layers.dir, 'reel.config.ts'), good = readFileSync(file, 'utf8'), scene = path.join(layers.dir, 'scenes/later.ts');
   writeFileSync(file, good.replace("import('./scenes/title')", "import('./scenes/later')"));

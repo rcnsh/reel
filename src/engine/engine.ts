@@ -14,7 +14,7 @@ import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
-import { TransitionPass, transitionOf, transitionWeights } from './transitions';
+import { TransitionPass, transitionDisplaces, transitionOf, transitionWeights, type Transition } from './transitions';
 import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -119,6 +119,13 @@ export class Engine {
   private linearTex: THREE.Texture | null = null;
   private blit: FSPass;
   private transition = new TransitionPass();
+  /** Each clip's transition, checked once when the timeline loads (drawing looks it up every sub-frame). */
+  private transitions = new WeakMap<TimelineEntry, Transition>();
+  private transitionAt(e: TimelineEntry) {
+    let t = this.transitions.get(e);
+    if (!t) this.transitions.set(e, (t = transitionOf(e.transition, e.id)));
+    return t;
+  }
   private accum: FSPass;
   private lastT = -1;
   lastPost: PostParams = { ...DEFAULT_POST };
@@ -330,19 +337,19 @@ export class Engine {
   private setMasking: (on: boolean) => void = () => {};
 
   /**
-   * Scene targets read away from the pixel they land on this frame: during a slide or a zoom transition the
-   * transition samples its clips' targets at a moved position, so their tiles cannot be masked in place.
+   * Scene targets read away from the pixel they land on this frame: during a slide, whip, zoom or custom
+   * transition the transition samples its clips' targets at a moved position, so their tiles cannot be masked in place.
    */
   private displaced = new Set<THREE.WebGLRenderTarget>();
   private displacedAt(t: number, w: number) {
     this.displaced.clear();
     const moving = this.timeline.some((e) => {
-      const kind = transitionOf(e.transition, e.id).kind;
-      if (kind !== 'slide' && kind !== 'zoom') return false;
+      if (!transitionDisplaces(this.transitionAt(e))) return false;
       // (the transition runs from the clip's start to the end of the clip before it on its track)
       return this.timeline.some((o) => o !== e && (o.track ?? 0) === (e.track ?? 0) && o.start < e.start && o.end > e.start && o.end > t - w / 2 && e.start < t + w / 2);
     });
-    if (moving) for (const tr of this.trackRTs) for (const rt of tr.rts) this.displaced.add(rt);
+    // (with the mixes: a third clip's transition reads the mix of the two before it)
+    if (moving) for (const tr of this.trackRTs) for (const rt of [...tr.rts, ...tr.mix]) this.displaced.add(rt);
   }
 
   /** Write tileOn into the depth buffer of the masked targets (1 = still refining, 0 = converged). */
@@ -416,7 +423,7 @@ export class Engine {
       const ex = e.check?.exempt;
       if (ex !== undefined && ex !== true && !(Array.isArray(ex) && ex.every((r) => CHECK_RULES.includes(r))))
         throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
-      transitionOf(e.transition, `timeline: clip '${e.id}'`);
+      this.transitions.set(e, transitionOf(e.transition, `timeline: clip '${e.id}'`));
     }
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
@@ -445,6 +452,13 @@ export class Engine {
     // makes know their clip
     const mods = await Promise.all(entries.map((e): Promise<Imported> => e.scene().then((m) => ({ m }), (err: unknown) => ({ err }))));
     for (const [i, e] of entries.entries()) await this.loadEntry(e, mods[i]!);
+    // custom transitions' GLSL compiles now, so a source with a mistake fails the load, named after its clip
+    for (const e of entries) {
+      this.drawing = `${e.id}: its transition's glsl`;
+      try { this.transition.compile(this.renderer, this.transitionAt(e)); }
+      catch (err) { this.loadErrors.push(`[${e.id}] its transition: ${String((err as Error)?.message ?? err)}`); }
+      finally { this.drawing = ''; }
+    }
     for (const [id, msg] of await htmlLayers.settle()) this.fail(id, msg);
     await this.checkSounds();
   }
@@ -829,10 +843,12 @@ export class Engine {
       post = { ...post, ...(e.post ?? {}), ...(ov ?? {}) };
       if (idx > 0 && !s.handlesTransition && under) {
         // the clip's transition from the previous clip over the overlap (a crossfade unless it says otherwise)
-        const tr = transitionOf(e.transition, e.id);
+        const tr = this.transitionAt(e);
         const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
         // (in a transparent render the lowest track is like the others: a dip goes through transparent)
-        this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0 || ALPHA);
+        this.drawing = e.id;
+        try { this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0 || ALPHA); }
+        finally { this.drawing = ''; }
         outTex = mix.texture;
         const [wo, wi] = transitionWeights(tr, tin);
         for (let j = 0; j < idx; j++) weights[j]! *= wo;
