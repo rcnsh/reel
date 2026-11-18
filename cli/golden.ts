@@ -4,7 +4,7 @@
 // Linux, by more than any tolerance that would still catch a real change, while on one system the GL backend barely
 // matters (on a Mac, SwiftShader and Metal differ in a few dozen pixels of text edges). The Linux set is rendered by
 // SwiftShader, the backend of a machine without a GPU.
-import { mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { pageOf, samplesOf, type Values } from './args';
@@ -43,7 +43,9 @@ export async function renderGoldens(dir: string): Promise<{ files: Map<string, s
           if (!res.ok) continue;
           const rel = path.join(example, goldenName(g, t)), dest = path.join(dir, rel);
           mkdirSync(path.dirname(dest), { recursive: true });
-          renameSync(tmp, dest);
+          // (copied, not renamed: dir may be on another file system than the temp folder)
+          copyFileSync(tmp, dest);
+          rmSync(tmp, { force: true });
           files.set(rel, dest);
         }
       }
