@@ -2,8 +2,8 @@ import { expect, test } from 'bun:test';
 import { clipsFromSections, defineVideo, formatOf } from '../src/config';
 import { AudioData } from '../src/engine/audio';
 import { Words } from '../src/engine/words';
-import { loadConfig } from '../cli/server';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { loadConfig, workspaceOf } from '../cli/server';
+import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -30,4 +30,20 @@ test('loadConfig: a config that does not parse names the file, line and column',
     writeFileSync(path.join(dir, 'reel.config.ts'), "import { defineVideo } from 'reel/config';\nexport default defineVideo({ timeline: () => [] });\ngarbage(\n");
     await expect(loadConfig(dir)).rejects.toThrow(`${path.join(dir, 'reel.config.ts')}:3:9: Unexpected end of file`);
   } finally { rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('workspaceOf: a monorepo root with a workspace marker, never a stray package.json above the project', () => {
+  const root = mkdtempSync(path.join(tmpdir(), 'reel-ws-'));
+  try {
+    const project = path.join(root, 'a/b');
+    mkdirSync(project, { recursive: true });
+    writeFileSync(path.join(root, 'package.json'), '{}');
+    expect(workspaceOf(project, () => root)).toEqual([]);
+    expect(workspaceOf(project, () => project)).toEqual([]);
+    writeFileSync(path.join(root, 'package.json'), '{ "workspaces": ["a/*"] }');
+    expect(workspaceOf(project, () => root)).toEqual([root]);
+    writeFileSync(path.join(root, 'package.json'), '{}');
+    writeFileSync(path.join(root, 'pnpm-workspace.yaml'), 'packages: [a]');
+    expect(workspaceOf(project, () => root)).toEqual([root]);
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });

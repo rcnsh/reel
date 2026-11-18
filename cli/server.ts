@@ -3,7 +3,7 @@
 // `reel` (and its scenes as `reel/scenes/<name>`), and its files (audio/, data/, assets/ ...) are served from the
 // site root. The config's format and theme reach the page as compile-time constants (__REEL_FORMAT__, __REEL_THEME__).
 import type { ViteDevServer } from 'vite';
-import { existsSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { formatOf, type VideoConfig } from '../src/config';
@@ -54,6 +54,20 @@ export async function loadConfig(project: string): Promise<VideoConfig> {
   return mod.default as VideoConfig;
 }
 
+/**
+ * The monorepo a project sits in, for the dev server to serve its sources and packages: Vite's workspace root, but
+ * only when it really is one (a pnpm-workspace.yaml, a lerna.json or a package.json with workspaces). Without a
+ * marker Vite falls back to the nearest package.json, which may be a stray one in the home folder.
+ */
+export function workspaceOf(project: string, search: (dir: string) => string): string[] {
+  const root = search(project);
+  if (root === project) return [];
+  const has = (f: string) => existsSync(path.join(root, f));
+  let workspaces = false;
+  try { workspaces = !!JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')).workspaces; } catch {}
+  return has('pnpm-workspace.yaml') || has('lerna.json') || workspaces ? [root] : [];
+}
+
 /** A module Vite could not transform (a syntax error in a scene): the file, and the error with its code frame. */
 export interface ModuleError { file: string; message: string }
 
@@ -68,7 +82,7 @@ export async function startServer(project: string, opts: { port?: number; strict
   const format = formatOf(config);
   const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
   // (imported here: a command that only talks to the warm renderer never loads Vite)
-  const { createServer, createLogger } = await import('vite');
+  const { createServer, createLogger, searchForWorkspaceRoot } = await import('vite');
   const logger = createLogger('error');
   let moduleFailed = false;
   const logError = logger.error.bind(logger);
@@ -100,7 +114,8 @@ export async function startServer(project: string, opts: { port?: number; strict
     },
     optimizeDeps: { include: ['three', 'opentype.js', 'mp4box', 'lottie-web/build/player/esm/lottie_light_canvas.min.js'] },
     // (a render server keeps the page's console to itself: the CLI reports it per request)
-    server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project] } },
+    // (a project inside a monorepo reads its workspace's sources and node_modules, as Vite's own default allows)
+    server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project, ...workspaceOf(project, searchForWorkspaceRoot)] } },
     build: { target: 'esnext' },
     plugins: [{
       name: 'reel-project-files',
