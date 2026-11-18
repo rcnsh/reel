@@ -44,7 +44,19 @@ export default defineVideo({
 - The config's top level is plain data (the CLI reads it outside the browser). Scenes are lazy imports; anything that touches the engine goes inside `timeline()`.
 - A **clip** places a scene: `id` (unique; `--only` and findings use it), `scene`, `start`/`end` in seconds, `track` (default 0), `params` (handed to the scene as `ctx.params`, so one module serves many clips), `transition` (how it comes in over the clip before it on its track: `'crossfade'` (default), `'wipe'`, `'slide'`, `'zoom'`, `'dip'`, or `{ kind, direction: 'left'|'right'|'up'|'down', softness, color }`), `blend` (`normal`, `add`, `screen`, `multiply`, `max`), `opacity`, `post` (post-processing defaults while it shows), `maxSamples` (cap adaptive motion blur), `check: { exempt: [...] }`.
 - **Tracks** stack in number order. Clips that overlap on one track make a transition over the overlap (the incoming clip's `transition`, a crossfade by default; or the incoming scene composites it itself); clips that touch cut. A scene on a track above 0 must clear to transparent and draw over it.
-- Narrated video: `timeline: (src) => clipsFromSections(src, import.meta.glob('./scenes/*.ts'))` makes one clip per plate of `narration.txt` that has a scene of the same name.
+- Clips back to back: `sequence([{ id, scene, dur, transition?, overlap? }, …], { start?, track?, transition?, overlap? })` from `reel/config` places each clip where the one before ends, so the edit is written as lengths. A clip with a transition overlaps the one before by its `overlap` (default the sequence's, else 0.5 s), and the transition plays over it; one without cuts (or crossfades, given an `overlap`). No clip may overlap two before it. The rest of a clip's fields (`params`, `post`, `blend` …) pass through:
+
+  ```ts
+  timeline: () => {
+    const story = sequence([
+      { id: 'title', scene: () => import('./scenes/title'), dur: 4 },
+      { id: 'chart', scene: () => import('./scenes/chart'), dur: 6, transition: 'slide' },                 // 3.6 to 9.6
+      { id: 'close', scene: () => import('./scenes/close'), dur: 5, transition: { kind: 'dip', color: 'bg' }, overlap: 0.8 },
+    ], { overlap: 0.4 });
+    return [...story, { id: 'hud', scene: () => import('reel/scenes/hud'), start: 0, end: story.at(-1)!.end, track: 1 }];
+  },
+  ```
+- Narrated video: `timeline: (src) => clipsFromSections(src, import.meta.glob('./scenes/*.ts'))` makes one clip per plate of `narration.txt` that has a scene of the same name, cutting at each plate. `clipsFromSections(src, glob, { transition: 'crossfade', overlap: 0.6, params })` overlaps neighbouring clips by `overlap` (default 0.5 s with a transition) centred on the cut; `transition` and `params` may be functions of the plate's name (`(name) => name === 'outro' ? 'dip' : undefined`: a dip into the outro, cuts elsewhere).
 - Music: snap starts with `src.audio.beatBefore(t)` or `src.audio.nearestDownbeat(t)`.
 
 ## A scene
