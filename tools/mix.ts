@@ -1,13 +1,14 @@
 // `reel mix <in.mp4> <out.mp4> [--from 0]`: the finished sound under a rendered video. The project's track (the
 // narration, or a song) is read from its lossless file rather than from the render, music beds and cue sounds are
-// laid with it, and the sum is brought to a loudness target in two passes (EBU R128: measure, then a linear gain
-// under a true-peak ceiling) and encoded once, in the output container's codec (AAC in MP4, 24-bit PCM in MOV, Opus
+// laid with it, and the sum is brought to a loudness target in two passes (EBU R128: measure with ebur128, then a
+// linear gain where the true-peak ceiling allows it, else loudnorm's own two passes) and encoded once, in the output container's codec (AAC in MP4, 24-bit PCM in MOV, Opus
 // in WebM). The picture is copied. `reel video --mix` runs this after
 // rendering, so one command makes the finished file.
 //
 // mix.json in the project root says what to lay where (every key optional):
 //   {
-//     "music": [{ "file": "bed.flac", "from": "intro", "to": "outro", "db": -17, "fadeIn": 2, "fadeOut": 4 }],
+//     "music": [{ "file": "bed.flac", "from": "intro", "to": "outro", "db": -17, "fadeIn": 2, "fadeOut": 4 }, { "file": "pad.flac", "at": 12 }],
+//     "duck":  { "threshold": -30.5, "ratio": 4, "attack": 80, "release": 600 },
 //     "cues":  { "tick": { "file": "tick.wav", "db": 0, "minGap": 0.15 } },
 //     "entryCues": { "whoosh": ["chapter2", "chapter3"] },
 //     "loudness": { "integrated": -14, "truePeak": -1, "lra": 11 },
@@ -15,21 +16,25 @@
 //   }
 // Files are in the project's audio/ folder, or one of the cue sounds the engine ships in sounds/ (tick, click, pop,
 // whoosh, swell, impact) by name: "file": "whoosh". A cue kind named after one of those needs no entry (it plays at
-// -6 dB). music: looped, from the start of clip `from` (default: the video start) to the start of clip
-// `to` (default: the video end), ducked while the track sounds. Fades default to 1.5 s in at the video's start, 3 s
-// out at its end and 0.4 s elsewhere; a render that cuts a segment fades it at the cut. cues: the sound for each cue
+// -6 dB). music: from the start of clip `from`, or `at` seconds on the timeline (default: the video start), to the
+// start of clip `to` (default: the video end), looped ("loop": false: it stops at the end of its file), ducked while
+// the track sounds. A partial render hears a bed from where it has got to by the render's start. Fades default to
+// 1.5 s in at the video's start, 3 s out at its end and 0.4 s elsewhere; a render that cuts a segment fades it at the
+// cut. duck: how the track ducks the music (ffmpeg's sidechaincompress: threshold in dB, ratio, attack and release in
+// ms; by default a threshold of 0.03, about -30.5 dB, and the others as above), false for no ducking. cues: the sound for each cue
 // kind (data/cues.json, from `reel events`, holds the times scenes asked for); cues closer than minGap s share one.
 // entryCues: extra cues of that kind at the start of the listed clips. loudness: the target (false: none, and a
 // limiter at -0.4 dBFS instead). --from is the timeline time the video starts at (the render's --from).
 // Sounds on the timeline (the config's `sounds` and a scene's sound(), also in data/cues.json) are laid as they say:
 // from their file's `from`, at their `at`, for their `duration`, looped, at their speed, gain and fades.
 import { $ } from 'bun';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
-import { durationOf, measure } from './audio-io';
-import { loudnessTarget, loudnormFilter, parseLoudnorm } from './loudness';
-import { buildMix, type Events, type MixConfig } from './mix-graph';
+import { durationOf, ffmpegR128, loudnessOf } from './audio-io';
+import { EBUR128, linearGain, loudnessTarget, loudnormFilter, parseLoudnorm } from './loudness';
+import { buildMix, cueBlock, FMT, type CueLay, type Events, type MixConfig } from './mix-graph';
 
 export const MIX_HELP = `reel mix <in.mp4> <out.mp4> [--from 0]: the finished sound under a render
 
@@ -121,8 +126,14 @@ export async function mixVideo(o: MixOptions) {
   for (const c of ev.cues) if (!cfg.cues?.[c.kind] && bundled.includes(c.kind)) cfg.cues = { ...cfg.cues, [c.kind]: { file: c.kind, db: -6 } };
   const dur = await durationOf(input);
   const track = projectTrack(root);
-  // the timeline's sounds: each file must hold sound, and its length is needed where a sound plays to its end
-  const lengths = new Map<string, number>();
+  // the timeline's sounds: each file must hold sound, and its length is needed where a sound plays to its end; a music
+  // bed's, to start it part-way through or end it with its file
+  // (a bed whose container gives no duration counts as endless: if it does not loop it then plays to its `to`)
+  const lengths = new Map<string, number>(), bedLengths = new Map<string, number>();
+  for (const m of cfg.music ?? []) {
+    const f = soundFile(root, m.file);
+    if (!bedLengths.has(f)) { const d = await durationOf(f); bedLengths.set(f, d > 0 ? d : Infinity); }
+  }
   for (const s of ev.sounds ?? []) {
     const f = soundFile(root, s.file);
     if (lengths.has(f)) continue;
@@ -130,23 +141,53 @@ export async function mixVideo(o: MixOptions) {
     if (r.exitCode !== 0 || !r.stdout.toString().trim()) throw new Error(`the sound '${s.file}' (at ${s.at} s) has no audio stream`);
     lengths.set(f, await durationOf(f));
   }
-  const g = buildMix(cfg, ev, dur, from, track, (f) => soundFile(root, f), (f) => lengths.get(f) ?? Infinity);
+  const work = mkdtempSync(path.join(tmpdir(), 'reel-mix-'));
+  try {
+    let k = 0;
+    const g = buildMix(cfg, ev, dur, from, track, (f) => soundFile(root, f), (f) => lengths.get(f) ?? bedLengths.get(f) ?? Infinity, () => path.join(work, `cues-${k++}.f32`));
+    await Promise.all(g.cues.map(cueTrack));
+    return await encode(o, g, target, track);
+  } finally { rmSync(work, { recursive: true, force: true }); }
+}
+
+/** Write a cue kind's track: its sound decoded once and summed at each offset, a block at a time, as raw f32. */
+async function cueTrack(c: CueLay) {
+  const r = await $`ffmpeg -nostdin -loglevel error -i ${c.file} -map 0:a:0 -af ${FMT} -f f32le -`.quiet().nothrow();
+  if (r.exitCode !== 0) throw new Error(`ffmpeg (decoding ${c.file}, the sound of cue kind '${c.kind}'): ${r.stderr.toString().slice(-1200)}`);
+  const src = new Float32Array(r.arrayBuffer());
+  // (offsets are in time order)
+  const total = c.offsets.at(-1)! + src.length / 2, block = 48000 * 10;
+  const w = Bun.file(c.track).writer();
+  for (let s = 0; s < total; s += block) { w.write(cueBlock(src, c.gain, c.offsets, s, Math.min(block, total - s))); await w.flush(); }
+  await w.end();
+}
+
+async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: ReturnType<typeof loudnessTarget>, track: string | null) {
+  const { input, output } = o;
   const ins = ['-i', input, ...g.inputs];
   // (one thread through the filters: amix and the sidechain then see their inputs' frames in the same order every
   // run, so the same project mixes to the same samples)
   const det = ['-nostdin', '-hide_banner', '-filter_complex_threads', '1', '-threads', '1'];
-  let tail = '[mixed]anull[a]';
+  // the loudness: measured by ebur128, then a linear gain where the true peak allows it, else loudnorm's two passes
+  let gain = '';
   if (!g.silent && target) {
-    const r = await $`ffmpeg ${det} ${ins} -filter_complex ${`${g.filter};[mixed]loudnorm=I=${target.integrated}:TP=${target.truePeak}:LRA=${target.lra ?? 11}:print_format=json[a]`} -map [a] -f null -`.quiet().nothrow();
-    if (r.exitCode !== 0) throw new Error(`ffmpeg (measuring the mix): ${r.stderr.toString().slice(-1200)}`);
-    tail = `[mixed]${loudnormFilter(target, parseLoudnorm(r.stderr.toString()))}[a]`;
-  } else if (!g.silent) tail = '[mixed]alimiter=limit=0.955:level=false[a]';
+    const m = await ffmpegR128([...det, '-loglevel', 'error', ...ins, '-filter_complex', `${g.filter};[mixed]${EBUR128}[a]`, '-map', '[a]', '-f', 'null', '-'], 'measuring the mix');
+    const lin = linearGain(target, m);
+    if (lin !== null) gain = `volume=${lin.toFixed(4)}dB`;
+    else {
+      const r2 = await $`ffmpeg ${det} ${ins} -filter_complex ${`${g.filter};[mixed]loudnorm=I=${target.integrated}:TP=${target.truePeak}:LRA=${target.lra ?? 11}:print_format=json[a]`} -map [a] -f null -`.quiet().nothrow();
+      if (r2.exitCode !== 0) throw new Error(`ffmpeg (measuring the mix): ${r2.stderr.toString().slice(-1200)}`);
+      gain = loudnormFilter(target, parseLoudnorm(r2.stderr.toString()));
+    }
+  } else if (!g.silent) gain = 'alimiter=limit=0.955:level=false';
+  const tail = `[mixed]${gain || 'anull'}[a]`;
   const subs = o.subtitles ? ['-i', o.subtitles] : [];
   const box = containerOf(output);
   const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', box.subtitles, '-metadata:s:s:0', 'language=eng'] : [];
   const r = await $`ffmpeg ${det} -loglevel error -y ${ins} ${subs} -filter_complex ${`${g.filter};${tail}`} -map 0:v -c:v copy -map [a] ${box.audio} -ar 48000 ${subMap} -fflags +bitexact -flags:a +bitexact ${box.flags} ${output}`.quiet().nothrow();
   if (r.exitCode !== 0) throw new Error(`ffmpeg (the mix): ${r.stderr.toString().slice(-1200)}`);
-  const loud = g.silent ? null : await measure(output);
+  // (measured from the file, so what is reported includes the encoder's overshoot)
+  const loud = g.silent ? null : await loudnessOf(output);
   const what = [track ? `the track (${path.basename(track)})` : 'no track', `${g.segments} music segment${g.segments === 1 ? '' : 's'}`, ...g.counts].join(', ');
   return {
     file: output, warnings: g.warnings, silent: g.silent, loudness: loud && { integrated: +loud.integrated.toFixed(1), truePeak: +loud.truePeak.toFixed(1), lra: +loud.lra.toFixed(1) },
