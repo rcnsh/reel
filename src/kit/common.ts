@@ -68,6 +68,9 @@ export interface ComponentOptions {
   label?: string;
 }
 
+/** A text's graphemes: what a reader counts as one character (an emoji, a letter and its accent). */
+export const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
+
 /** HTML-escaped text. */
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
@@ -83,11 +86,15 @@ export abstract class HtmlComponent {
   readonly layer: HtmlLayer;
   protected opts: ComponentOptions;
 
-  constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string }) {
+  /** Room in the layer around the box, in px, for parts that move out of it (the markup starts `pad` in). */
+  protected readonly pad: number;
+
+  constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string; pad?: number }) {
     this.opts = o;
     this.box = o.box ?? defaults.box;
+    this.pad = Math.ceil(defaults.pad ?? 0);
     const update: HtmlUpdate = (f) => this.update(f);
-    this.layer = new HtmlLayer({ html: defaults.html, css: defaults.css + (o.css ?? ''), width: Math.ceil(this.box.w), height: Math.ceil(this.box.h), update, label: o.label ?? defaults.label });
+    this.layer = new HtmlLayer({ html: defaults.html, css: defaults.css + (o.css ?? ''), width: Math.ceil(this.box.w) + 2 * this.pad, height: Math.ceil(this.box.h) + 2 * this.pad, update, label: o.label ?? defaults.label });
   }
 
   /** Once per output frame while the clip shows: bring the markup up to date for f. */
@@ -101,6 +108,6 @@ export abstract class HtmlComponent {
     const [w0, w1] = this.window(f);
     const m = motionAt(this.opts.motion, f.lt, w0, w1);
     if (!m) return;
-    this.layer.draw(renderer, out, { x: this.box.x + m.dx, y: this.box.y + m.dy, scale: m.scale, opacity: m.opacity * (o.opacity ?? 1) });
+    this.layer.draw(renderer, out, { x: this.box.x - this.pad + m.dx, y: this.box.y - this.pad + m.dy, scale: m.scale, opacity: m.opacity * (o.opacity ?? 1) });
   }
 }
