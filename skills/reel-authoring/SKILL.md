@@ -49,7 +49,7 @@ export default defineVideo({
 
 ## A scene
 
-Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
+Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer, a code block, and SVG paths and arrows drawn on over time, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time; and layout helpers (`split`, `grid`, `inset`, `center`) that cut boxes from a box (reference/kit.md):
 
 ```ts
 import type * as THREE from 'three';
@@ -147,7 +147,7 @@ What a scene gets:
 
 Every render command takes `--size WxH` (and the MCP tools `size`), so a 16:9 project also delivers 9:16 or 1:1 without a second config: `reel video --size 1080x1920 --out out/vertical.mp4`. `W` and `H` are that size while it renders, so one scene lays out both:
 
-- Let proportions do most of it: boxes from `W`, `H` and `UNIT` (the short side), kit components' default boxes, HTML in % and `vmin`.
+- Let proportions do most of it: boxes from `W`, `H` and `UNIT` (the short side), cut with `split` and `grid` (`split(area, PORTRAIT ? 'v' : 'h', 2, 40)` stacks in a vertical cut), kit components' default boxes, HTML in % and `vmin`.
 - Where the composition must change (side by side becomes stacked, a 3D subject moves up to leave room for text), branch once at module level, `const PORTRAIT = H > W;`, and pick boxes, camera framing and font sizes from it. Keep the timing identical: both cuts share the narration.
 - Captions and lower thirds default to the safe area of whatever size is rendered; give a vertical cut more room at the bottom for a platform's own interface if it is going to one.
 - Check each: `reel check` and `reel check --size 1080x1920`, a `reel sheet` of both, and name the outputs yourself with `--out` (the default name is the same for every size).
