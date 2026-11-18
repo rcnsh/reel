@@ -4,13 +4,41 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ENGINE, hasChrome, reel, scratchCopy } from './helpers';
+import { ENGINE, fixture, hasChrome, reel, scratchCopy } from './helpers';
 
 const demo = scratchCopy('demo'), layers = scratchCopy('layers');
 const fresh = realpathSync(mkdtempSync(path.join(tmpdir(), 'reel-test-init-')));
+// a project inside a pnpm workspace whose scene lives outside the project folder, in the workspace's sources
+const ws = fixture('workspace', {
+  'pnpm-workspace.yaml': "packages: ['engine']\n",
+  // (a package at the workspace's root with a stylesheet, as KaTeX's is)
+  'node_modules/fake-style/package.json': '{ "name": "fake-style", "version": "1.0.0" }\n',
+  'node_modules/fake-style/style.css': '.fake-style { color: red; }\n',
+  'engine/src/card.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, Layer2D, W, H, clearRT, LIN } from 'reel';
+export default class Card extends Scene {
+  layer = new Layer2D();
+  css = '';
+  async init() { this.css = ((await import('fake-style/style.css?inline')) as { default: string }).default; }
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    const c = this.layer.ctx;
+    this.layer.clear();
+    c.fillStyle = this.css.includes('fake-style') ? '#2050d0' : '#000000'; c.fillRect(W / 4, H / 4, W / 2, H / 2);
+    c.font = '700 48px Archivo'; c.fillStyle = '#ffffff'; c.textAlign = 'center';
+    c.fillText('drawn, never reported', W / 2, H / 2);
+    this.ctx.comp.draw(this.ctx.renderer, this.layer.upload(), out);
+  }
+}
+`,
+  'engine/reel/card/reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({ size: [640, 360], fps: 30, theme: 'print', timeline: () => [{ id: 'card', scene: () => import('../../src/card'), start: 0, end: 1 }] });
+`,
+});
+const wsProject = realpathSync(path.join(ws.dir, 'engine/reel/card'));
 afterAll(async () => {
-  for (const p of [demo.dir, layers.dir]) await reel(['daemon', 'stop', '--project', p]);
-  demo.cleanup(); layers.cleanup(); rmSync(fresh, { recursive: true, force: true });
+  for (const p of [demo.dir, layers.dir, wsProject]) await reel(['daemon', 'stop', '--project', p]);
+  demo.cleanup(); layers.cleanup(); ws.cleanup(); rmSync(fresh, { recursive: true, force: true });
 });
 
 test('--help exits 0 and lists the commands; a bad command line exits 2', async () => {
@@ -92,6 +120,23 @@ test.skipIf(!hasChrome)('a config naming a scene file that is not there fails at
   const fixed = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);
   expect(fixed.json().errors).toEqual([]);
 }, 120_000);
+
+test.skipIf(!hasChrome)('a project inside a workspace loads a scene from outside its folder, and the warm renderer sees edits to it', async () => {
+  const first = await reel(['still', '--t', '0.5', '--json', '--project', wsProject]);
+  expect(first.json().errors).toEqual([]);
+  expect(first.code).toBe(0);
+  const saved = first.json().files[0];
+  // the next request is warm: an edit to the scene, outside the project, must show without touching the project
+  await reel(['still', '--t', '0.5', '--json', '--project', wsProject]);
+  const scene = path.join(ws.dir, 'engine/src/card.ts');
+  writeFileSync(scene, readFileSync(scene, 'utf8').replace("'#2050d0'", "'#d05020'"));
+  const after = await reel(['diff', '--t', '0.5', saved, '--json', '--project', wsProject]);
+  expect(after.code).toBe(1);
+  expect(after.json().changed).toBeGreaterThan(1000);
+  // its text is drawn with fillText and never reported: check says it cannot see it
+  const check = await reel(['check', '--json', '--project', wsProject]);
+  expect(check.json().findings.filter((f: { kind: string }) => f.kind === 'unreported').map((f: { clip: string }) => f.clip)).toEqual(['card']);
+}, 180_000);
 
 test.skipIf(!hasChrome)('the warm renderer shows in daemon status and stops', async () => {
   await reel(['info', '--project', layers.dir]);

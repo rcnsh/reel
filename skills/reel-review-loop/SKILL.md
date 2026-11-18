@@ -20,7 +20,7 @@ Commands are `reel <command>` (in a project made by `reel init`: `bun run reel <
 7. **Cuts and the whole**: `reel sheet --cuts` (four frames around every cut) for transitions; `reel sheet --n 24` for an overview of pacing and consistency.
 8. **Export** (below) once stills, strips and check are clean.
 
-Repeat 3 to 5 after every edit. The warm renderer reloads changed files by itself, so a still takes a fraction of a second; there is no server to restart.
+Repeat 3 to 5 after every edit. The warm renderer reloads changed files by itself (the project's, and any module its scenes import from outside it), so a still takes a fraction of a second; there is no server to restart.
 
 ## What to look for in a frame
 

@@ -11,6 +11,9 @@ import { checkChromeVersion, findChrome, glArgs, glBackend, missingLibsMessage, 
 import type { PageOpts } from './args';
 
 /** Paths in a project whose changes never matter to its pages (renders, review notes, tools' working files, the config loader's). */
+/** The engine's code, whose changes replace the warm renderer instead (cli/daemon.ts). */
+const ENGINE_CODE = ['src', 'cli'].map((d) => path.join(ENGINE, d) + path.sep).concat(path.join(ENGINE, 'index.html'));
+
 export const IGNORED = /^(out|review|node_modules|\.git|audio\/\.work|audio\/\.align|\.claude)(\/|$)|(^|\/)\.reel\.config\.[^/]*\.mjs$|(^|\/)\.DS_Store$/;
 
 /** The flags every Chrome the CLI starts gets. */
@@ -124,6 +127,9 @@ export class Renderer {
 
   /** What the project's files looked like at the last request (path -> mtime and size). */
   private seen = new Map<string, string>();
+  /** The same for the modules the pages loaded from outside the project, and when the last scan ran (ms). */
+  private outside = new Map<string, string>();
+  private scannedAt = Date.now();
   /** Files this renderer wrote into the project (stills to a folder of the project's own): not changes to it. */
   readonly written = new Set<string>();
 
@@ -150,8 +156,24 @@ export class Renderer {
       }
     };
     walk(this.project, '');
+    // the modules the pages loaded from outside the project (a scene importing a monorepo's sources): Vite's module
+    // graph names them. A file seen for the first time counts as changed when it was written after the last scan
+    // (the page may have loaded it before that edit). The engine's own files restart the warm renderer instead, and
+    // packages (node_modules) change only with an install.
     for (const [f, v] of now) if (this.seen.get(f) !== v) changed.push(f);
     for (const f of this.seen.keys()) if (!now.has(f)) changed.push(f);
+    const scanned = this.scannedAt;
+    this.scannedAt = Date.now();
+    const outside = new Map<string, string>(), loaded = this.srv?.server.moduleGraph.fileToModulesMap.keys() ?? [];
+    for (const f of new Set([...this.outside.keys(), ...loaded])) {
+      if (!path.isAbsolute(f) || f.startsWith(this.project + path.sep) || ENGINE_CODE.some((d) => f.startsWith(d)) || f.includes(`${path.sep}node_modules${path.sep}`)) continue;
+      let st;
+      try { st = statSync(f); } catch { if (this.outside.has(f)) changed.push(f); continue; }
+      const v = `${st.mtimeMs}:${st.size}`, was = this.outside.get(f);
+      outside.set(f, v);
+      if (was === undefined ? st.mtimeMs > scanned : was !== v) changed.push(f);
+    }
+    this.outside = outside;
     const first = this.seen.size === 0;
     this.seen = now;
     if (first || !changed.length) return;
