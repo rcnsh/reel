@@ -359,7 +359,7 @@ export const themeColor = colour;
 /**
  * Where a point of the world is on screen from a camera pose, in logical px: what `stage.project(point)` gives for
  * a stage whose camera is at `pose`, without the stage. For a clip on another track that pins labels to a stage's
- * objects: both import one rig and call it with the stage clip's time (`f.t - this.ctx.clip('<stage clip>').start`).
+ * objects: both import one rig and call it with the stage clip's time (`f.vt - this.ctx.clip('<stage clip>').start`).
  * `fov` is the stage's (default 35, as Stage3D's); a pose's own `fov` wins.
  */
 export const screenPoint = (pose: CameraPose, point: Vec3, o: { fov?: number } = {}): ScreenPoint => projectPoint(pose, point, o.fov ?? 35, W, H);

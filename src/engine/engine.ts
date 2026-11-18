@@ -15,6 +15,7 @@ import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
 import { TransitionPass, transitionOf, transitionWeights } from './transitions';
+import { clipTime, sceneRate, sceneTime, statefulBlocker, type ClipTime } from './cliptime';
 import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -136,6 +137,8 @@ export class Engine {
   }
 
   timeline: TimelineEntry[] = [];
+  /** Each clip's time mapping (identity unless it sets speed, offset, reverse, hold or freeze). */
+  private times = new Map<string, ClipTime>();
   /** The config's sounds on the timeline (scenes add theirs with sound(); see sounds()). */
   private configSounds: SoundClip[] = [];
   /** The span of the frame being prepared or rendered (Frame.exposure). */
@@ -417,6 +420,7 @@ export class Engine {
       if (ex !== undefined && ex !== true && !(Array.isArray(ex) && ex.every((r) => CHECK_RULES.includes(r))))
         throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
       transitionOf(e.transition, `timeline: clip '${e.id}'`);
+      this.times.set(e.id, clipTime(e, FPS));
     }
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
@@ -426,6 +430,7 @@ export class Engine {
       if (ids.has(OVERLAY_ID)) throw new Error(`timeline: '${OVERLAY_ID}' is the theme overlay's clip; call yours something else`);
       overlay = { id: OVERLAY_ID, scene: () => import('../scenes/hud'), start: 0, end: this._duration, track: Math.max(0, ...this.timeline.map((e) => e.track ?? 0)) + 1, params: { ...THEME.overlay } };
       this.timeline.push(overlay);
+      this.times.set(OVERLAY_ID, clipTime(overlay, FPS));
     }
     const tracks = new Set(this.timeline.map((e) => e.track ?? 0)).size;
     for (let i = 0; i < Math.max(1, tracks); i++) {
@@ -471,12 +476,21 @@ export class Engine {
     const rec: Loaded = { entry: e, scene: null, lastT: -1 };
     this.loaded.set(e.id, rec);
     htmlLayers.owner(e.id);
-    LOADING.clip = { id: e.id, start: e.start, end: e.end };
+    // (the scene's window is in its own time: the clip's, unless the clip remaps time)
+    const time = this.times.get(e.id)!, end = time.identity ? e.end : e.start + time.length;
+    LOADING.clip = { id: e.id, start: e.start, end, time };
     try {
       const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
       if (!m.m) throw m.err;
-      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end });
+      // (checked before init, to spare its work, and after, for a scene that turns stateful there)
+      const refuse = () => {
+        const no = s.stateful && statefulBlocker(time);
+        if (no) throw new Error(`the scene is stateful (it simulates forward from its start), so its clip cannot ${no}; speed works`);
+      };
+      refuse();
       await s.init();
+      refuse();
       rec.scene = s;
       for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
     } catch (err) {
@@ -537,12 +551,19 @@ export class Engine {
     return this.render(t, dt, toScreen, samples, shutter);
   }
 
+  /**
+   * The frame a clip's scene sees at video time t: its own time through the clip's mapping (a sub-frame's offset in
+   * the shutter maps with it, so the shutter scales with the speed and runs backwards reversed), the audio analysis
+   * at video time.
+   */
   private frameFor(e: TimelineEntry, t: number, dt: number, seeked: boolean, preroll: boolean, under: THREE.Texture | null, tin: number, tout: number): Frame {
-    const beat = this.audio.beatAt(t), bar = this.audio.barAt(t);
+    const beat = this.audio.beatAt(t), bar = this.audio.barAt(t), beatPhase = beat - Math.floor(beat), barPhase = bar - Math.floor(bar), a = this.audio.sample(t);
+    const m = this.times.get(e.id);
+    if (!m || m.identity) return { t, vt: t, dt, lt: t - e.start, p: (t - e.start) / (e.end - e.start), start: e.start, end: e.end, exposure: this.exposure, seeked, preroll, beat, bar, beatPhase, barPhase, a, under, tin, tout };
+    const lt = sceneTime(m, t);
     return {
-      t, dt, lt: t - e.start, p: (t - e.start) / (e.end - e.start), start: e.start, end: e.end, exposure: this.exposure, seeked, preroll,
-      beat, bar, beatPhase: beat - Math.floor(beat), barPhase: bar - Math.floor(bar),
-      a: this.audio.sample(t), under, tin, tout,
+      t: e.start + lt, vt: t, dt: dt * Math.abs(sceneRate(m, t)), lt, p: lt / m.length, start: e.start, end: e.start + m.length, exposure: this.exposure * m.speed,
+      seeked, preroll, beat, bar, beatPhase, barPhase, a, under, tin, tout,
     };
   }
 
@@ -807,7 +828,8 @@ export class Engine {
       if (s.stateful && sceneSeeked) {
         boxes.pause(true);
         s.reset();
-        const from = Math.max(e.start, t - s.prerollMax);
+        // (prerollMax is in the scene's seconds: at a speed, that many of the video's cover prerollMax / speed)
+        const from = Math.max(e.start, t - s.prerollMax / (this.times.get(e.id)?.speed ?? 1));
         const step = 1 / FPS;
         let first = true;
         for (let pt = from; pt < t - step * 0.5; pt += step) {

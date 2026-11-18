@@ -47,6 +47,24 @@ Sound files are the project's, in `audio/`, or the engine's bundled cue sounds b
 
 A sound that belongs to the edit rather than to a scene goes in the config's `sounds`, as data or a function of the sources: `sounds: (src) => [{ file: 'audio/rain.flac', at: src.words.get('it rained').start, duration: 8, loop: true, db: -12, fadeIn: 1 }]`. Each takes `file` (a project path, a video whose sound to use, or a bundled name), `at`, and optionally `from` (seconds into the file), `duration`, `loop`, `speed` (0.1 to 10, pitch kept), `db`, `fadeIn` and `fadeOut`. A scene can place one the same way with `sound({ … })` in `init()`. A file that is missing is a scene error that `reel check` reports.
 
+## Clip time
+
+A clip can play its scene at another speed, backwards, from partway in, or frozen, without the scene knowing. The scene runs in its own time, which the clip maps the video's onto:
+
+```ts
+{ id: 'replay', scene: () => import('./scenes/race'), start: 8, end: 12, speed: 0.5, offset: 3 },  // slow motion from 3 s in
+{ id: 'rewind', scene: () => import('./scenes/race'), start: 12, end: 14, speed: 2, reverse: true },
+{ id: 'still', scene: () => import('./scenes/race'), start: 14, end: 15, speed: 4, freeze: 2.4 },  // 2.4 s in, its window 4 s
+{ id: 'outro', scene: () => import('./scenes/end'), start: 15, end: 20, hold: 1.5 },  // plays 3.5 s, holds its last frame
+```
+
+- `speed`: scene seconds per video second (0.01 to 100; default 1). `offset`: the scene seconds the clip starts at (default 0). The scene's window is `offset + (end - start - hold) * speed` of its seconds, so `f.p`, `f.end` and the kit's default windows cover what the clip plays.
+- `reverse`: the frames the clip would show forward, in the opposite order (its last frame first).
+- `hold`: the last `hold` video seconds of the clip show its last frame played (with `reverse`, the moment it starts at forward).
+- `freeze`: the whole clip shows the scene at that many of its seconds, inside the window `speed` and `offset` give (not with `reverse` or `hold`).
+
+What follows the scene's time: `f.t`, `f.lt`, `f.p`, `f.start`/`f.end`, `ctx.start`/`ctx.end`, `f.dt` and `f.exposure`; every comparison of `f.t` with word times; the kit's `at` windows and motion; `VideoClip` frames, `LottieBox` frames and HTML layers' CSS animations; the motion-blur shutter (each sub-frame's time is mapped, so blur lengthens with speed, runs backwards reversed and vanishes when frozen); the cues and sounds a scene places from `init()`, whose times are in its own clock: a cue lands where the clip shows its moment (and is dropped if it never does), a sound is trimmed to what the clip plays and sped up with it, fades included (a reversed or frozen clip lays none, a `VideoClip`'s sound included, and nor does one that would play outside 0.1 to 10 times its speed; each says so in the page log). What stays on the video's clock: `f.vt`, the audio analysis (`f.a`, `f.beat`, `f.bar`, `ctx.audio` lookups at `f.vt`), transitions (`f.tin`, `f.tout`), the post chain's own time (grain, dither), `ctx.clip(id)` windows, and the narration itself: a slowed plate's text reveal no longer matches the voice. Validation is strict: a bad value fails the load naming the clip and the field. `reel check` does not report a clip with `freeze` as frozen; a `hold` of its `--frozen` seconds (default 3) or more is, unless the clip has `check: { exempt: ['frozen'] }`. Per-frame jitter on a remapped clip uses `frameIdx(f.vt)` (reference/sampling.md).
+
 ## Subtitles
 
 `reel subtitles` writes `out/subtitles/subtitles.srt` and `.vtt` from `data/words.json`: cues of at most two lines of 42 characters and 7 seconds, broken after punctuation where it can, each held 0.4 s after its last word and at least a second long. `reel video --subtitles` adds them to the finished file as a soft track. Burned-in captions are the kit's `Captions`.

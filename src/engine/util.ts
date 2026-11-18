@@ -2,6 +2,8 @@
 // pure function of time (or seeded), so frames render identically on export.
 import { FPS } from './format';
 import type { SoundClip } from '../config';
+import { LOADING } from './scene';
+import { videoSound, videoTime } from './cliptime';
 
 export const clamp = (x: number, a = 0, b = 1) => (x < a ? a : x > b ? b : x);
 export const lerp = (a: number, b: number, t: number) => a + (b - a) * t;
@@ -176,18 +178,37 @@ export function hexToLinear(hex: string): [number, number, number] {
 
 /**
  * Record a sound cue at time t (a pen tick, a whoosh, a page turn) for the mix: scenes call it from
- * init(), and `reel events` writes every cue to data/cues.json, sorted by time.
+ * init(), and `reel events` writes every cue to data/cues.json, sorted by time. t is in the scene's time (f.t's):
+ * on a clip that remaps time the cue lands where the clip shows that moment, and is dropped if it never does.
  */
 export function cue(kind: string, t: number) {
+  const c = LOADING.clip;
+  if (c && !c.time.identity) {
+    const v = videoTime(c.time, t - c.start);
+    if (v === null) return;
+    t = v;
+  }
   const g = globalThis as { __reelCues?: { kind: string; t: number }[] };
   (g.__reelCues ??= []).push({ kind, t });
 }
 
 /**
- * Put a sound on the timeline for the mix, from a scene's init(): a file of the project from `at` seconds of video
- * time. Like the config's `sounds`; `reel events` writes both to data/cues.json.
+ * Put a sound on the timeline for the mix, from a scene's init(): a file of the project from `at` seconds of the
+ * scene's time (video time, unless the clip remaps it: then trimmed to what the clip plays and sped up with it; a
+ * reversed or frozen clip lays none). Like the config's `sounds`; `reel events` writes both to data/cues.json.
+ * `clip`: the clip it belongs to, for a component that places its sound after init() (default the one loading).
  */
-export function sound(s: SoundClip) {
+export function sound(s: SoundClip, clip = LOADING.clip) {
+  let x: SoundClip | null = { ...s };
+  if (clip && !clip.time.identity) {
+    x = videoSound(clip.time, x);
+    if (!x) {
+      if (clip.time.reverse || clip.time.freeze !== null) console.warn(`[${clip.id}] the sound '${s.file}' is not laid: the clip is ${clip.time.reverse ? 'reversed' : 'frozen'}`);
+      return;
+    }
+    // (the mix plays sounds at 0.1 to 10 times their speed; a clip slowed or sped further lays it silent rather than fail)
+    if (!(x.speed! >= 0.1 && x.speed! <= 10)) { console.warn(`[${clip.id}] the sound '${s.file}' is not laid: at the clip's speed it would play at ${+x.speed!.toFixed(3)} times (0.1 to 10)`); return; }
+  }
   const g = globalThis as { __reelSounds?: SoundClip[] };
-  (g.__reelSounds ??= []).push({ ...s });
+  (g.__reelSounds ??= []).push(x);
 }

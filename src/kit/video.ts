@@ -99,11 +99,14 @@ export class VideoClip {
   private centre = NaN;
   /** The decoded frames' size, from the first (the track header's display size can differ: pixel aspect, crop). */
   private texSize: [number, number] | null = null;
+  /** Its clip plays the scene backwards: frames are wanted in falling order, so the decode keeps those before. */
+  private backward = false;
 
   constructor(o: VideoClipOptions) {
     this.o = o;
     this.box = o.box ?? safeBox();
     const clip = LOADING.clip;
+    this.backward = !!clip?.time.reverse;
     awaitBeforeFirstFrame((async () => {
       const res = await fetch(o.src);
       if (!res.ok) throw new Error(`video '${o.src}' did not load (a path in the project, served from its folder): ${res.status} ${res.statusText}`);
@@ -116,7 +119,7 @@ export class VideoClip {
       if (!(speed > 0)) throw new Error(`video '${o.src}': speed must be above 0`);
       const at: [number, number] = o.at ?? [0, clip ? clip.end - clip.start : (trim[1] - trim[0]) / speed];
       this.timing = { at, trim, speed, loop: !!o.loop };
-      if (clip && t.hasAudio && o.sound !== false) for (const s of videoSounds(o.src, clip.start, this.timing, typeof o.sound === 'object' ? o.sound.db : 0)) sound(s);
+      if (clip && t.hasAudio && o.sound !== false) for (const s of videoSounds(o.src, clip.start, this.timing, typeof o.sound === 'object' ? o.sound.db : 0)) sound(s, clip);
     })());
   }
 
@@ -159,10 +162,16 @@ export class VideoClip {
     const missing = need.filter((i) => !this.cache.has(i));
     if (!missing.length) { for (const i of need) this.touch(i); return; }
     const cap = Math.max(need.length + 2, Math.floor(((this.o.cacheMB ?? 384) * 2 ** 20) / this.bytesPerFrame()));
-    // frames worth keeping from the decode: the ones needed, then the ones after them that a playing export shows next
+    // frames worth keeping from the decode: the ones needed, then the ones a playing export shows next (after them,
+    // or before them on a reversed clip: those decode on the way to the ones needed anyway)
     const keep = new Set(need), ahead = Math.max(0, Math.min(cap - need.length, Math.floor(cap / 2)));
-    const top = Math.max(...need);
-    for (let i = top + 1; i < Math.min(t.frames.length, top + 1 + ahead); i++) keep.add(i);
+    if (this.backward) {
+      const low = Math.min(...need);
+      for (let i = low - 1; i >= Math.max(0, low - ahead); i--) keep.add(i);
+    } else {
+      const top = Math.max(...need);
+      for (let i = top + 1; i < Math.min(t.frames.length, top + 1 + ahead); i++) keep.add(i);
+    }
     // group the missing frames by keyframe (in decode order) and decode each group once
     const groups = new Map<number, number>();
     for (const i of missing) {

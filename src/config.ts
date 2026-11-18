@@ -49,6 +49,21 @@ export interface Clip {
   post?: Partial<PostParams>;
   /** Free-form values handed to the scene as ctx.params (one scene module can serve several clips). */
   params?: Record<string, unknown>;
+  /**
+   * Time remapping: the scene plays in its own time, which the clip maps the video's onto. Everything time-based
+   * the scene sees follows (f.t, f.lt, f.p, its window, kit components' `at`, video clips, Lottie, the motion-blur
+   * shutter, the cues and sounds it places from init()); the audio analysis (f.a, f.beat) and transitions stay on
+   * the video's clock. `speed`: scene seconds per video second (default 1; 0.01 to 100), so the scene's window is
+   * `offset + (end - start - hold) * speed` of its seconds. `offset`: the scene seconds the clip starts at (default 0).
+   * `reverse`: the frames the clip would show forward, last first. `hold`: the last `hold` video seconds of the clip
+   * show its last frame played. `freeze`: the whole clip shows the scene at that many of its seconds (inside its
+   * window; not with reverse or hold). A stateful scene takes speed only.
+   */
+  speed?: number;
+  offset?: number;
+  reverse?: boolean;
+  hold?: number;
+  freeze?: number;
   /** Cap on adaptive motion-blur sub-frames while the clip is on screen (for noise that converges slowly). */
   maxSamples?: number;
   /** `reel check` rules this clip is meant to break (a deliberate black frame: ['blank']); true: all of them. */
