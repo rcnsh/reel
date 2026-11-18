@@ -96,14 +96,10 @@ function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
   return s;
 }
 
-/** Bytes to base64 (in slices: a spread of a whole frame's bytes overflows the call stack). */
-function b64(b: Uint8Array) {
-  let s = '';
-  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
-  return btoa(s);
-}
+/** A canvas as a PNG, base64 (the native toBase64: Chrome 140+, and reel refuses anything before 157). */
 async function pngOf(cv: OffscreenCanvas) {
-  return b64(new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer()));
+  const b = new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer());
+  return b.toBase64();
 }
 /** Output size for a w x h image whose long side may be at most `max` px (never enlarged). */
 function fit(w: number, h: number, max?: number) {
