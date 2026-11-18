@@ -1,7 +1,7 @@
 // The output formats: which one a command line means, what each asks of the page, and the ffmpeg command for each.
 import { expect, test } from 'bun:test';
 import { UsageError } from '../cli/args';
-import { deepGainOf, defaultOut, draftEncoder, draftName, draftScale, GAIN_Y, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
+import { withExportDefaults, deepGainOf, defaultOut, draftEncoder, draftName, draftScale, GAIN_Y, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
 import { containerOf } from '../tools/mix';
 
 test('the format comes from --format, else the --out extension, else H.264', () => {
@@ -191,4 +191,27 @@ test('frames converted on the GPU are only tagged, or repacked for nv12', () => 
   expect(a).not.toContain('out_color_matrix');
   const d = ffmpegArgs(planOf(FORMATS.h264, { draft: 'videotoolbox' }, 30, [960, 540]), { draft: 'videotoolbox' }, { width: 960, height: 540, fps: 30, out: '/o/x.mp4' }).join(' ');
   expect(d).toContain('vflip,format=nv12,setparams=range=tv');
+});
+
+test("a project's export defaults sit under the flags, for the formats that take them", () => {
+  const d = { crf: 22, preset: 'veryfast' as const, noaudio: true, samples: 1 };
+  expect(withExportDefaults({}, d, formatOf('h264', undefined))).toEqual({ crf: '22', preset: 'veryfast', noaudio: true, samples: '1' });
+  // a flag wins
+  expect(withExportDefaults({ crf: '18', samples: 'auto' }, d, formatOf('h264', undefined))).toMatchObject({ crf: '18', samples: 'auto' });
+  // gif has no crf or preset; a draft takes one sample; --mix makes the sound
+  const gif = withExportDefaults({}, d, formatOf('gif', undefined));
+  expect(gif.crf).toBeUndefined();
+  expect(gif.preset).toBeUndefined();
+  expect(encodeOptsOf(gif, formatOf('gif', undefined))).toEqual({});
+  expect(withExportDefaults({ draft: true }, d, formatOf('h264', undefined)).samples).toBeUndefined();
+  expect(withExportDefaults({ mix: true }, d, formatOf('h264', undefined)).noaudio).toBeUndefined();
+  expect(encodeOptsOf(withExportDefaults({}, d, formatOf('h264', undefined)), formatOf('h264', undefined))).toMatchObject({ crf: 22, preset: 'veryfast' });
+  expect(withExportDefaults({ crf: '18' }, undefined, formatOf('h264', undefined))).toEqual({ crf: '18' });
+  // VP9's crf is another scale: the config's is not applied; --audio keeps the sound; adaptive flags keep their own samples
+  expect(withExportDefaults({}, d, formatOf('webm', undefined)).crf).toBeUndefined();
+  expect(withExportDefaults({ audio: true }, d, formatOf('h264', undefined)).noaudio).toBeUndefined();
+  expect(withExportDefaults({ 'min-samples': '8' }, d, formatOf('h264', undefined)).samples).toBeUndefined();
+  // a bad value names the config, not a flag nobody typed
+  expect(() => withExportDefaults({}, { crf: 70 }, formatOf('h264', undefined))).toThrow('reel.config.ts export.crf 70: expected a number from 0 to 51');
+  expect(() => withExportDefaults({}, { samples: 0 }, formatOf('h264', undefined))).toThrow('reel.config.ts export.samples 0');
 });

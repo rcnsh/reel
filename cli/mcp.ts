@@ -27,11 +27,12 @@ const page = {
   fps: z.number().positive().max(240).optional().describe('Render at another frame rate.'),
   scale: z.number().int().min(1).max(4).optional().describe('Physical px per logical px (2 renders 3840x2160 from a 1920x1080 project). Default 1.'),
   theme: z.enum(['print', 'film', 'neutral']).optional().describe("Render with a built-in theme instead of the project's."),
-  samples: z.union([z.number().int().min(1), z.literal('auto')]).optional().describe("Motion-blur sub-frames per frame: 1 (default, fast) or 'auto' (adaptive, what a final export uses)."),
+  samples: z.union([z.number().int().min(1), z.string().regex(/^(auto|[1-9]\d*)$/, "expected a whole number such as 1, or 'auto'")]).optional().describe("Motion-blur sub-frames per frame: a whole number, 1 by default (fast), or 'auto' (adaptive, what a final export of moving pictures uses)."),
   shutter: z.number().positive().max(1).optional().describe('Share of the frame time the sub-frames span (default 0.5).'),
 };
 const imageOpts = {
   full_size: z.boolean().optional().describe(`Return images at full resolution instead of at most ${PREVIEW} px on the long side. The files on disk are always full size.`),
+  max_size: z.number().int().min(128).max(4096).optional().describe(`The long side of the images returned, in px (default ${PREVIEW}): 640 makes a cheap overview of a contact sheet. The files on disk are always full size.`),
 };
 
 /** A request from a tool's arguments, checked by the same rules as the CLI's flags. */
@@ -46,7 +47,7 @@ function reqOf(op: Op, a: Record<string, any>, args: Record<string, unknown>): R
 const text = (x: unknown): Content => ({ type: 'text', text: typeof x === 'string' ? x : JSON.stringify(x, null, 1) });
 const image = (b64: string): Content => ({ type: 'image', data: b64, mimeType: 'image/png' });
 /** A PNG file as an inline image (downscaled unless full size is asked for). */
-const fileImage = (file: string, full?: boolean) => image((full ? readFileSync(file) : encodePng(downscale(readPng(file), PREVIEW))).toString('base64'));
+const fileImage = (file: string, full?: boolean, max = PREVIEW) => image((full ? readFileSync(file) : encodePng(downscale(readPng(file), max))).toString('base64'));
 
 /** A result's JSON for the model: without the inline image data (that goes in image blocks). */
 function summary(r: Result, drop: string[] = ['previews']) {
@@ -64,7 +65,7 @@ async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
 let pending = 0;
 
 // ---- video jobs: `reel video` in a child process, polled and cancellable ----
-interface Job { id: string; project: string; out: string; state: 'running' | 'done' | 'failed' | 'cancelled'; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
+interface Job { id: string; project: string; out: string; state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'; queue?: { running: string | null; ahead: number }; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
 const jobs = new Map<string, Job>();
 
 /**
@@ -76,8 +77,8 @@ export function videoArgs(a: Record<string, any>, proj: string): string[] {
   if (a.out) args.push('--out', path.resolve(a.out));
   const flag = (k: string, v: unknown) => { if (v !== undefined && v !== false) args.push(`--${k}`, ...(v === true ? [] : [Array.isArray(v) ? v.join(',') : String(v)])); };
   flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme);
-  flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); flag('mix', a.mix); flag('subtitles', a.subtitles);
-  flag('format', a.format); flag('chroma', a.chroma); flag('depth', a.depth); flag('alpha', a.alpha); flag('opaque', a.opaque); flag('quality', a.quality); flag('max-fps', a.max_fps); flag('max-size', a.max_size); flag('draft', a.draft);
+  flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); if (a.noaudio === false) args.push('--audio'); flag('mix', a.mix); flag('subtitles', a.subtitles);
+  flag('format', a.format); flag('chroma', a.chroma); flag('depth', a.depth); flag('alpha', a.alpha); flag('opaque', a.opaque); flag('quality', a.quality); flag('max-fps', a.max_fps); flag('max-size', a.max_size); flag('draft', a.draft); flag('wait', a.wait);
   return args;
 }
 
@@ -86,7 +87,7 @@ function startVideo(a: Record<string, any>): Job {
   const out = a.out ? path.resolve(a.out) : '(the format\'s default under out/; the result names the file)';
   const args = videoArgs(a, proj);
   const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: 'running', progress: null, started: Date.now(), output: '', proc };
+  const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: a.wait ? 'queued' : 'running', progress: null, started: Date.now(), output: '', proc };
   jobs.set(job.id, job);
   void (async () => {
     // progress: one JSON line per update on stderr; anything else there is kept as output
@@ -97,7 +98,12 @@ function startVideo(a: Record<string, any>): Job {
       let i;
       while ((i = buf.indexOf('\n')) >= 0) {
         const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        try { const p = JSON.parse(line); if (typeof p.frames === 'number') { job.progress = p; continue; } } catch {}
+        try {
+          const p = JSON.parse(line);
+          if (typeof p.frames === 'number') { job.progress = p; if (job.state === 'queued') { job.state = 'running'; job.queue = undefined; } continue; }
+          if (p.queued === true) { job.queue = { running: p.running, ahead: p.ahead }; continue; }
+          if (p.queued === false) { if (job.state === 'queued') job.state = 'running'; job.queue = undefined; continue; }
+        } catch {}
         job.output = (job.output + line + '\n').slice(-4000);
       }
     }
@@ -106,11 +112,11 @@ function startVideo(a: Record<string, any>): Job {
     const stdout = await new Response(proc.stdout as ReadableStream).text();
     const code = await proc.exited;
     try { job.result = JSON.parse(stdout); } catch { job.result = stdout.slice(-4000); }
-    if (job.state === 'running') job.state = code === 0 ? 'done' : 'failed';
+    if (job.state === 'running' || job.state === 'queued') job.state = code === 0 ? 'done' : 'failed';
   })();
   return job;
 }
-const jobView = (j: Job) => ({ job: j.id, state: j.state, out: j.out, progress: j.progress, seconds: +((Date.now() - j.started) / 1000).toFixed(1), ...(j.state !== 'running' ? { result: j.result } : {}), ...(j.output && j.state !== 'running' ? { output: j.output } : {}) });
+const jobView = (j: Job) => ({ job: j.id, state: j.state, out: j.out, ...(j.state === 'queued' && j.queue ? { queue: j.queue } : {}), progress: j.progress, seconds: +((Date.now() - j.started) / 1000).toFixed(1), ...(j.state !== 'running' && j.state !== 'queued' ? { result: j.result } : {}), ...(j.output && j.state !== 'running' && j.state !== 'queued' ? { output: j.output } : {}) });
 
 /** A project tool (narrate, align, analyze, mix) run to completion: its output and exit code. */
 async function tool(name: string, proj: string, args: string[]): Promise<ToolResult> {
@@ -145,7 +151,7 @@ export async function serveMcp() {
     annotations: { readOnlyHint: false },
   }, (a) => guard(async () => {
     const max = a.max_images ?? 6;
-    const r = await call(reqOf('still', a, { times: a.times, preview: a.full_size ? undefined : PREVIEW }));
+    const r = await call(reqOf('still', a, { times: a.times, preview: a.full_size ? undefined : (a.max_size ?? PREVIEW) }));
     const imgs = a.full_size ? (r.files as string[] ?? []).slice(0, max).map((f) => fileImage(f, true)) : ((r.previews as string[]) ?? []).slice(0, max).map(image);
     return { content: [text(summary(r)), ...imgs], isError: !r.ok };
   }));
@@ -158,7 +164,7 @@ export async function serveMcp() {
       times: z.array(z.number().min(0)).max(64).optional().describe('Exact times instead of from/to/n.'), cuts: z.boolean().optional().describe('Frames around every cut instead.'), cols: z.number().int().min(1).max(12).optional().describe('Columns (default 4).'), ...imageOpts,
     },
   }, (a) => guard(async () => {
-    const r = await call(reqOf('sheet', a, { from: a.from, to: a.to, n: a.n, times: a.times, cuts: a.cuts, cols: a.cols ?? 4, preview: a.full_size ? undefined : PREVIEW }));
+    const r = await call(reqOf('sheet', a, { from: a.from, to: a.to, n: a.n, times: a.times, cuts: a.cuts, cols: a.cols ?? 4, preview: a.full_size ? undefined : (a.max_size ?? PREVIEW) }));
     const img = a.full_size && r.file ? [fileImage(r.file as string, true)] : ((r.previews as string[]) ?? []).map(image);
     return { content: [text(summary(r)), ...img], isError: !r.ok };
   }));
@@ -171,7 +177,7 @@ export async function serveMcp() {
       frames: z.number().int().min(2).max(32).optional().describe('Consecutive frames from `from` instead (1/fps apart).'), ...imageOpts,
     },
   }, (a) => guard(async () => {
-    const r = await call(reqOf('strip', a, { from: a.from, to: a.to, n: a.n ?? 8, frames: a.frames, preview: a.full_size ? undefined : PREVIEW }));
+    const r = await call(reqOf('strip', a, { from: a.from, to: a.to, n: a.n ?? 8, frames: a.frames, preview: a.full_size ? undefined : (a.max_size ?? PREVIEW) }));
     const img = a.full_size && r.file ? [fileImage(r.file as string, true)] : ((r.previews as string[]) ?? []).map(image);
     return { content: [text(summary(r)), ...img], isError: !r.ok };
   }));
@@ -203,12 +209,12 @@ export async function serveMcp() {
     if (a.t === undefined && !a.a) throw new UsageError('give a and b, or project, t and b');
     const req = a.t !== undefined ? reqOf('still', { ...a, project: a.project ?? '' }, {}) : undefined;
     const r = await runDiff({ a: a.a, b: a.b, t: a.t, req, tol: a.tol ?? 0, threshold: a.threshold ?? 0, project: a.project ? projectDir(a.project) : undefined, render: call });
-    return { content: [text(summary(r)), ...(r.file ? [fileImage(r.file as string, a.full_size)] : [])], isError: !r.ok };
+    return { content: [text(summary(r)), ...(r.file ? [fileImage(r.file as string, a.full_size, a.max_size)] : [])], isError: !r.ok };
   }));
 
   server.registerTool('video_start', {
     title: 'Start a video render',
-    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details.",
+    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details, unless `wait` is true, which queues it (state 'queued', with the export ahead, until the slot frees; queued exports run in the order they started). The project's config can set export defaults (`export: { crf, preset, noaudio, samples }`); arguments given here override them.",
     inputSchema: {
       ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output path (its extension picks the format when `format` is not given; for sequences, the frames are named after it with the frame number).'),
       format: z.enum(['h264', 'hevc', 'prores', 'prores4444', 'webm', 'gif', 'webp', 'png', 'png16', 'jpeg', 'exr']).optional().describe('Output format (default from the out extension, else h264).'),
@@ -217,7 +223,8 @@ export async function serveMcp() {
       chroma: z.enum(['420', '444']).optional().describe('h264 chroma subsampling (default 420).'), depth: z.union([z.literal(8), z.literal(10)]).optional().describe('h264 bits per channel (default 8).'),
       alpha: z.boolean().optional().describe('A transparent background for webp, png, png16 and exr (prores4444 and webm have it unless opaque).'), opaque: z.boolean().optional().describe('prores4444 or webm without alpha.'),
       quality: z.number().int().min(1).max(100).optional().describe('jpeg (default 92) and webp (default 88) quality.'), max_fps: z.number().positive().optional().describe('gif/webp: the highest frame rate (default 25 / 30).'), max_size: z.number().int().min(16).optional().describe('gif/webp: the longest side in px (default 640 / 1080).'),
-      noaudio: z.boolean().optional().describe('Leave the audio track out.'),
+      noaudio: z.boolean().optional().describe("Leave the audio track out (true), or keep it despite the project config's export.noaudio (false)."),
+      wait: z.boolean().optional().describe('Queue behind the export that holds the machine\'s slot instead of failing (use it when several agents export on one machine).'),
       draft: z.boolean().optional().describe('A quick look while iterating, never a deliverable: half size with the same layout (full size when half would not pack), one sample, H.264 encoded in the browser; written as <name>.draft.mp4. Leave out samples and scale.'),
       mix: z.boolean().optional().describe('The finished file: render, then mix the track, music and cues at the loudness target (mp4, mov, webm).'), subtitles: z.boolean().optional().describe('Like mix, with the timed words as a soft subtitle track.'),
     },
@@ -228,7 +235,7 @@ export async function serveMcp() {
 
   server.registerTool('video_status', {
     title: 'Video render status',
-    description: 'The state of a video job (running, done, failed, cancelled), its progress (frames written of total, fps, seconds left) and, once finished, the result (file, frames, errors).',
+    description: 'The state of a video job (queued, running, done, failed, cancelled), its progress (frames written of total, fps, seconds left) and, once finished, the result (file, frames, errors).',
     inputSchema: { job: z.string().describe('The id video_start returned.') },
     annotations: { readOnlyHint: true },
   }, (a) => guard(async () => {
@@ -244,7 +251,7 @@ export async function serveMcp() {
   }, (a) => guard(async () => {
     const j = jobs.get(a.job);
     if (!j) throw new Error(`no job '${a.job}'`);
-    if (j.state === 'running') { j.state = 'cancelled'; j.proc.kill('SIGTERM'); await j.proc.exited; }
+    if (j.state === 'running' || j.state === 'queued') { j.state = 'cancelled'; j.proc.kill('SIGTERM'); await j.proc.exited; }
     return { content: [text(jobView(j))] };
   }));
 

@@ -70,6 +70,8 @@ test("video_start's options become reel video flags the CLI accepts; without out
     [{ chroma: '444', depth: 10, mix: true, from: 1, to: 2 }, ['--from', '1', '--to', '2', '--mix', '--chroma', '444', '--depth', '10']],
     [{ format: 'webp', alpha: true, quality: 70, max_fps: 12, max_size: 480 }, ['--format', 'webp', '--alpha', '--quality', '70', '--max-fps', '12', '--max-size', '480']],
     [{ draft: true, only: ['a', 'b'], noaudio: true }, ['--only', 'a,b', '--noaudio', '--draft']],
+    [{ samples: '1', wait: true }, ['--samples', '1', '--wait']],
+    [{ noaudio: false }, ['--audio']],
     [{ format: 'png', out: '/tmp/f/x.png' }, ['--out', '/tmp/f/x.png', '--format', 'png']],
   ];
   for (const [a, want] of cases) {
@@ -114,11 +116,12 @@ test.skipIf(!hasChrome)('check_video finds a line running off the frame, and pas
 
 test.skipIf(!hasChrome)('a short video render runs to completion through start and status', async () => {
   const out = `${layers.dir}/out/mcp.mp4`;
-  const s = await call('video_start', { project: layers.dir, to: 0.5, preset: 'ultrafast', out });
-  expect(s.json.state).toBe('running');
+  const s = await call('video_start', { project: layers.dir, to: 0.5, preset: 'ultrafast', out, wait: true });
+  // (queued until the machine's export slot is free, then running)
+  expect(['queued', 'running']).toContain(s.json.state);
   let st = s;
   // (polling is the tool's contract: the job runs in the background)
-  for (let i = 0; i < 600 && st.json.state === 'running'; i++) { await Bun.sleep(200); st = await call('video_status', { job: s.json.job }); }
+  for (let i = 0; i < 600 && (st.json.state === 'running' || st.json.state === 'queued'); i++) { await Bun.sleep(200); st = await call('video_status', { job: s.json.job }); }
   expect(st.json.state).toBe('done');
   expect(st.json.result.ok).toBe(true);
   expect(st.json.result.frames).toBe(15);

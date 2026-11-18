@@ -55,7 +55,7 @@ Give the output folder if it matters.
 
 ### 6. Limits
 
-What the agent cannot find out by itself: the machine's memory and what else it is doing, whether renders may run now or must wait, which API keys are set and which providers are allowed, a deadline, and anything private that must not leave the machine. One export runs at a time on a machine; say so if several agents share it.
+What the agent cannot find out by itself: the machine's memory and what else it is doing, whether renders may run now or must wait, which API keys are set and which providers are allowed, a deadline, and anything private that must not leave the machine. One export runs at a time on a machine; when several agents share it, tell them to pass `wait: true` to `video_start`, which queues the export instead of failing. Settings every export of a project needs (a `crf`, no sound) belong in its config's `export`, not in the brief.
 
 ### 7. Done, and the report
 
@@ -88,7 +88,7 @@ Deliver, in <folder>:
 - <9:16 at 1080x1920, laid out again for the tall frame>
 - <SRT; a 6 s WebP teaser; the title card as ProRes 4444 with alpha, no sound>
 
-Limits: <memory, other work on the machine, keys set, deadline>. One export at a time.
+Limits: <memory, other work on the machine, keys set, deadline>. One export at a time: start exports with `wait: true`.
 
 Before you stop: check_video clean at every size delivered; a full draft looked at as frames before
 any final; frames pulled from each final file and looked at; loudness measured.

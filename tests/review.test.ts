@@ -29,7 +29,7 @@ async function firstLine(p: ReturnType<typeof Bun.spawn>) {
 
 test.skipIf(!hasChrome)('review a draft: the page, the video in ranges, a note through the API, read back by the CLI and MCP', async () => {
   const dir = realpathSync(layers.dir);
-  const v = await reel(['video', '--draft', '--to', '1', '--json', '--project', dir]);
+  const v = await reel(['video', '--draft', '--to', '1', '--json', '--wait', '--project', dir]);
   expect(v.code).toBe(0);
 
   server = Bun.spawn(['bun', REEL, 'review', '--json', '--project', dir], { stdout: 'pipe', stderr: 'pipe' });

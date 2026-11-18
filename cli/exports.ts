@@ -2,8 +2,10 @@
 // reorder buffer; a few 4K exports at once have exhausted a 24 GB machine's memory and frozen it. Each running export
 // leaves a claim (its pid and that process's start time, project and output) in the temp folder; a new one refuses
 // while a live claim exists, unless forced. Claims of processes that are gone are cleared, and so are claims whose pid
-// now belongs to a process started at another time (a killed export's pid reused by another program).
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// now belongs to a process started at another time (a killed export's pid reused by another program). An export
+// started with --wait queues instead: it leaves a ticket in queue/, and the oldest live ticket takes the slot when it
+// frees, so several agents' exports run one after another, in the order they asked.
+import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
@@ -22,45 +24,115 @@ export function processStart(pid: number): string | null {
   } catch { return null; }
 }
 
+/** Claims whose process start was checked once: after that a pid that is still alive is still that process (cheap to poll). */
+const checked = new Set<string>();
 /** A claim's process is still the export that wrote it: alive, and (when both are known) started when it was. */
 function live(c: Claim) {
   if (!alive(c.pid)) return false;
-  if (!c.pstart) return true;
+  if (!c.pstart || checked.has(`${c.pid}|${c.pstart}`)) return true;
   const now = processStart(c.pid);
+  if (now === c.pstart) checked.add(`${c.pid}|${c.pstart}`);
   return now === null || now === c.pstart;
 }
 
-/** The exports running on this machine now (claims of dead processes are removed). */
-export function runningExports(): Claim[] {
+/** Write a claim or ticket whole (a reader never sees it half written): to a temporary name, then renamed. */
+function writeWhole(f: string, c: Claim) {
+  const tmp = `${f}.${process.pid}.tmp`;
+  writeFileSync(tmp, JSON.stringify(c));
+  renameSync(tmp, f);
+}
+
+/** The live claims (or tickets) in `dir`, other than this process's; the files of dead processes are removed. */
+function claimsIn(dir: string): Claim[] {
   const out: Claim[] = [];
   let names: string[] = [];
-  try { names = readdirSync(DIR()); } catch { return out; }
+  try { names = readdirSync(dir); } catch { return out; }
   for (const n of names.filter((x) => x.endsWith('.json'))) {
-    const f = path.join(DIR(), n);
+    const f = path.join(dir, n);
     let c: Claim | null = null;
     try { c = JSON.parse(readFileSync(f, 'utf8')); } catch {}
-    if (!c || !live(c)) { rmSync(f, { force: true }); continue; }
+    if (!c) {
+      // (unreadable: removed once it is old enough not to be one being written by an older reel)
+      try { if (Date.now() - statSync(f).mtimeMs > 10_000) rmSync(f, { force: true }); } catch {}
+      continue;
+    }
+    if (!live(c)) { rmSync(f, { force: true }); continue; }
     if (c.pid !== process.pid) out.push(c);
   }
   return out;
 }
+
+/** The exports running on this machine now (claims of dead processes are removed). */
+export const runningExports = () => claimsIn(DIR());
+
+/** The exports waiting for the slot (`reel video --wait`), first in line first. */
+export const queuedExports = () => claimsIn(path.join(DIR(), 'queue')).sort((a, b) => a.started - b.started || a.pid - b.pid);
+
+const claimOf = (project: string, out: string): Claim => ({ pid: process.pid, project, out, started: Date.now(), pstart: processStart(process.pid) ?? undefined });
+
+/**
+ * Write this process's claim, then look again: when two exports found the slot free at the same moment, both see the
+ * other's claim, both take theirs back (false) and try again after a random pause, so at most one ever keeps it.
+ */
+function take(project: string, out: string): (() => void) | false {
+  mkdirSync(DIR(), { recursive: true });
+  const f = path.join(DIR(), `${process.pid}.json`);
+  writeWhole(f, claimOf(project, out));
+  if (runningExports().length) { rmSync(f, { force: true }); return false; }
+  const release = () => { rmSync(f, { force: true }); process.off('exit', release); };
+  process.on('exit', release);
+  return release;
+}
+
+const busy = (o: Claim) => `pid ${o.pid}, ${o.project} -> ${o.out}, for ${Math.round((Date.now() - o.started) / 1000)} s`;
 
 /**
  * Claim the machine for an export: throws, naming the export already running, unless `force`. Returns the release
  * (also run when the process exits).
  */
 export function claimExport(project: string, file: string, force: boolean): () => void {
-  let others = runningExports();
-  // (an export that has written its file may still be closing its browsers: give it a moment before refusing)
-  for (let i = 0; i < 12 && others.length && !force; i++) { Bun.sleepSync(250); others = runningExports(); }
-  if (others.length && !force) {
-    const o = others[0]!;
-    throw new Error(`another reel export is running (pid ${o.pid}, ${o.project} -> ${o.out}, for ${Math.round((Date.now() - o.started) / 1000)} s): one export at a time keeps memory bounded; wait for it, or pass --force to run beside it`);
+  if (force) {
+    mkdirSync(DIR(), { recursive: true });
+    const f = path.join(DIR(), `${process.pid}.json`);
+    writeWhole(f, claimOf(project, file));
+    const release = () => { rmSync(f, { force: true }); process.off('exit', release); };
+    process.on('exit', release);
+    return release;
   }
-  mkdirSync(DIR(), { recursive: true });
-  const f = path.join(DIR(), `${process.pid}.json`);
-  writeFileSync(f, JSON.stringify({ pid: process.pid, project, out: file, started: Date.now(), pstart: processStart(process.pid) ?? undefined } satisfies Claim));
-  const release = () => { rmSync(f, { force: true }); process.off('exit', release); };
-  process.on('exit', release);
-  return release;
+  // (an export that has written its file may still be closing its browsers: give it a moment before refusing)
+  for (let i = 0; ; i++) {
+    const others = runningExports(), queued = queuedExports();
+    if (!others.length && !queued.length) { const r = take(project, file); if (r) return r; }
+    if (i >= 12) {
+      const o = others[0];
+      throw new Error(`${o ? `another reel export is running (${busy(o)})` : `${queued.length} reel export${queued.length > 1 ? 's are' : ' is'} queued for the slot`}: one export at a time keeps memory bounded; pass --wait to queue behind ${o ? 'it' : 'them'}, or --force to run beside it`);
+    }
+    Bun.sleepSync(150 + Math.random() * 200);
+  }
 }
+
+/**
+ * Queue for the machine's export slot: returns the release once this export holds it. `onWait` hears the export
+ * holding the slot (null when the slot is free and others are ahead in the queue) and how many wait ahead of this
+ * one, whenever that changes. Exports run in the order they queued.
+ */
+export async function queueExport(project: string, file: string, onWait: (running: Claim | null, ahead: number) => void = () => {}, poll = 1000): Promise<() => void> {
+  const q = path.join(DIR(), 'queue'), ticket = path.join(q, `${process.pid}.json`), mine = claimOf(project, file);
+  mkdirSync(q, { recursive: true });
+  writeWhole(ticket, mine);
+  const drop = () => { rmSync(ticket, { force: true }); process.off('exit', drop); };
+  process.on('exit', drop);
+  let told = '';
+  try {
+    for (;;) {
+      const running = runningExports()[0] ?? null;
+      const ahead = queuedExports().filter((o) => o.started < mine.started || (o.started === mine.started && o.pid < mine.pid)).length;
+      if (!running && !ahead) { const r = take(project, file); if (r) return r; }
+      const now = `${running?.pid}:${ahead}`;
+      if (now !== told) { told = now; onWait(running, ahead); }
+      await Bun.sleep(poll * (0.75 + Math.random() / 2));
+    }
+  } finally { drop(); }
+}
+
+export const describeClaim = busy;

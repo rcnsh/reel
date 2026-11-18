@@ -7,7 +7,7 @@ import path from 'node:path';
 
 const dir = mkdtempSync(path.join(tmpdir(), 'reel-exports-test-'));
 process.env.REEL_EXPORTS_DIR = dir;
-const { claimExport, processStart, runningExports } = await import('../cli/exports');
+const { claimExport, processStart, queueExport, queuedExports, runningExports } = await import('../cli/exports');
 afterAll(() => { delete process.env.REEL_EXPORTS_DIR; rmSync(dir, { recursive: true, force: true }); });
 
 test('a live export refuses another unless forced; a dead one is cleared', () => {
@@ -46,3 +46,38 @@ test("a claim whose pid was reused by a process started at another time is stale
   expect(JSON.parse(readFileSync(path.join(d, `${process.pid}.json`), 'utf8')).pstart).toBe(processStart(process.pid));
   r2();
 });
+
+test('--wait queues behind the running export and takes the slot when it frees; a plain start refuses while one is queued', async () => {
+  const d = path.join(dir, 'reel-exports');
+  mkdirSync(path.join(d, 'queue'), { recursive: true });
+  // the export holding the slot (this test's parent, alive)
+  const held = path.join(d, `${process.ppid}.json`);
+  writeFileSync(held, JSON.stringify({ pid: process.ppid, project: '/p/a', out: '/p/a/out/video.mp4', started: Date.now() - 5000 }));
+  const heard: [string | null, number][] = [];
+  let got: (() => void) | null = null;
+  const q = queueExport('/p/q', '/p/q/out/video.mp4', (r, ahead) => heard.push([r?.project ?? null, ahead]), 20).then((r) => { got = r; });
+  await Bun.sleep(100);
+  expect(got).toBeNull();
+  expect(heard[0]).toEqual(['/p/a', 0]);
+  expect(existsSync(path.join(d, 'queue', `${process.pid}.json`))).toBe(true);
+  rmSync(held);
+  await q;
+  expect(got).not.toBeNull();
+  expect(existsSync(path.join(d, 'queue', `${process.pid}.json`))).toBe(false);
+  expect(existsSync(path.join(d, `${process.pid}.json`))).toBe(true);
+  got!();
+  expect(runningExports()).toEqual([]);
+  // another export queued ahead (alive, earlier): a plain start refuses and names the queue, --wait waits for it
+  writeFileSync(path.join(d, 'queue', `${process.ppid}.json`), JSON.stringify({ pid: process.ppid, project: '/p/first', out: '/x', started: Date.now() - 1000 }));
+  expect(queuedExports().map((c) => c.project)).toEqual(['/p/first']);
+  expect(() => claimExport('/p/c', '/p/c/out/video.mp4', false)).toThrow('1 reel export is queued for the slot');
+  let second: (() => void) | null = null;
+  const heard2: number[] = [];
+  const q2 = queueExport('/p/second', '/x2', (_r, ahead) => heard2.push(ahead), 20).then((r) => { second = r; });
+  await Bun.sleep(100);
+  expect(second).toBeNull();
+  expect(heard2).toEqual([1]);
+  rmSync(path.join(d, 'queue', `${process.ppid}.json`));
+  await q2;
+  second!();
+}, 10_000);

@@ -43,7 +43,8 @@ function cornerAlpha(file: string, decoder?: string, n = 5) {
   return r.stdout[3];
 }
 async function render(name: string, ...flags: string[]) {
-  const r = await reel(['video', '--project', proj.dir, '--out', out(name), '--json', ...flags]);
+  // (--wait: queued behind any other export on the machine rather than failing)
+  const r = await reel(['video', '--project', proj.dir, '--out', out(name), '--json', '--wait', ...flags]);
   expect(r.err).not.toContain('ERRORS');
   expect(r.code).toBe(0);
   return r.json();

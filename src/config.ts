@@ -137,6 +137,20 @@ export interface VideoConfig {
    * sources (times from words or beats): `[{ file: 'audio/rain.flac', at: 2, duration: 8, loop: true, db: -12, fadeIn: 1 }]`.
    */
   sounds?: SoundClip[] | ((src: Sources) => SoundClip[]);
+  /** This project's defaults for `reel video` (and the MCP video_start); a flag given overrides each. Plain data. */
+  export?: ExportDefaults;
+}
+
+/** Defaults for a project's video exports. */
+export interface ExportDefaults {
+  /** x264/x265 quality for h264 (default 16) and hevc (default 18), 0 to 51; higher is smaller. Not applied to webm. */
+  crf?: number;
+  /** x264/x265 preset for h264 and hevc. */
+  preset?: 'ultrafast' | 'superfast' | 'veryfast' | 'faster' | 'fast' | 'medium' | 'slow' | 'slower' | 'veryslow' | 'placebo';
+  /** Leave the sound out (not with --mix or --subtitles, which make the finished sound; `--audio` keeps it). */
+  noaudio?: boolean;
+  /** Sub-frames per frame: a count, or 'auto' (not for drafts, which take one). */
+  samples?: number | 'auto';
 }
 
 export function defineVideo(c: VideoConfig): VideoConfig {

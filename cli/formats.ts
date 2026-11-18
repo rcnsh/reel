@@ -4,6 +4,7 @@
 import path from 'node:path';
 import { yuvFits, type Pixels } from '../src/engine/pixels';
 import { int, num, scaleFits, UsageError, type Values } from './args';
+import type { ExportDefaults } from '../src/config';
 
 export type FormatId = 'h264' | 'hevc' | 'prores' | 'prores4444' | 'webm' | 'gif' | 'webp' | 'png' | 'png16' | 'jpeg' | 'exr';
 
@@ -262,6 +263,28 @@ export function webpArgs(dir: string, n: number, fps: number, o: EncodeOpts, out
   }
   a.push('-o', out);
   return a;
+}
+
+/**
+ * The flags of a `reel video` with the project's export defaults (the config's `export`) under them: a flag given
+ * wins (`--audio` over `noaudio`); crf and preset apply to h264 and hevc only (VP9's crf is another scale), and
+ * samples not to a draft (one sample always) nor beside the adaptive flags. A bad value is an error naming the config.
+ */
+export function withExportDefaults(v: Values, d: ExportDefaults | undefined, f: FormatSpec): Values {
+  if (!d) return v;
+  const bad = (k: string, want: string) => new UsageError(`reel.config.ts export.${k} ${JSON.stringify((d as Record<string, unknown>)[k])}: expected ${want}`);
+  if (d.crf !== undefined && !(typeof d.crf === 'number' && d.crf >= 0 && d.crf <= 51)) throw bad('crf', 'a number from 0 to 51');
+  if (d.preset !== undefined && !PRESETS.includes(d.preset)) throw bad('preset', `one of ${PRESETS.join(', ')}`);
+  if (d.noaudio !== undefined && typeof d.noaudio !== 'boolean') throw bad('noaudio', 'true or false');
+  if (d.samples !== undefined && d.samples !== 'auto' && !(Number.isInteger(d.samples) && (d.samples as number) >= 1)) throw bad('samples', "a whole number of at least 1, or 'auto'");
+  const out = { ...v };
+  const x26 = f.id === 'h264' || f.id === 'hevc';
+  if (d.crf !== undefined && out.crf === undefined && x26) out.crf = String(d.crf);
+  if (d.preset !== undefined && out.preset === undefined && x26) out.preset = d.preset;
+  if (d.noaudio && out.noaudio === undefined && !out.audio && !out.mix && !out.subtitles) out.noaudio = true;
+  const adaptive = ['min-samples', 'max-samples', 'refine', 'tol'].some((k) => out[k] !== undefined);
+  if (d.samples !== undefined && out.samples === undefined && !out.draft && !adaptive) out.samples = String(d.samples);
+  return out;
 }
 
 const PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow', 'placebo'];

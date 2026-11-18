@@ -32,6 +32,7 @@ export default defineVideo({
   fps: 60,
   theme: 'print',              // 'print' | 'film' | 'neutral' (default) | a theme object
   // duration: 12,             // default: the audio's length, else the last clip's end
+  // export: { crf: 22, noaudio: true },  // this project's reel video defaults (crf, preset, noaudio, samples); flags override
   timeline: (src) => [         // src.words, src.audio: the project's timing (empty when it has none)
     { id: 'bg', scene: () => import('./scenes/wash'), start: 0, end: 12, params: { from: 'bg', to: 'accentLo' } },
     { id: 'title', scene: () => import('./scenes/title'), start: 0.5, end: 4, track: 1, params: { text: 'Hello' } },

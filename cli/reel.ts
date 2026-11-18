@@ -42,7 +42,7 @@ if (TOOLS[mode]) {
 
 let P!: ReturnType<typeof parseCommand>;
 try { P = parseCommand(argv); } catch (e) { fail((e as Error).message); }
-const A = P.values;
+let A = P.values;
 if (A.help) { console.log(HELP); process.exit(0); }
 // (the GL backend travels by environment: to the warm renderer, whose engine version includes it, and video's browsers)
 if (typeof A.gl === 'string') {
@@ -284,6 +284,14 @@ try {
     const { Renderer } = await import('./renderer');
     const F = await import('./formats');
     const format = F.formatOf(A.format as string | undefined, abs(A.out));
+    if (A.audio && A.noaudio) throw new UsageError('--audio and --noaudio contradict each other');
+    if (A.wait && A.force) throw new UsageError('--wait and --force contradict each other: --wait queues for the export slot, --force runs beside the export that holds it');
+    // the project's export defaults (the config's `export`), under the flags given
+    // (a config that does not load is reported by the renderer, with its line)
+    const cfg = await (await import('./server')).loadConfig(PROJECT).catch(() => null);
+    const given = A;
+    A = F.withExportDefaults(A, cfg?.export, format);
+    if (A.samples !== given.samples) samples = samplesOf(A);
     const enc = F.encodeOptsOf(A, format);
     if (A.draft) {
       // a quick look: half size (the layout of the full size), one sample, the fastest encoder; named and tagged a draft
@@ -306,7 +314,14 @@ try {
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
       // (with --mix the picture is rendered beside the output and the mix writes the output)
       const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;
-      release = (await import('./exports')).claimExport(PROJECT, out, !!A.force);
+      const X = await import('./exports');
+      release = A.wait
+        ? await X.queueExport(PROJECT, out, (running, ahead) => {
+          if (A.progress) console.error(JSON.stringify({ queued: true, running: running ? X.describeClaim(running) : null, ahead }));
+          else if (!json) console.error(`waiting for the export slot: ${running ? `running ${X.describeClaim(running)}` : 'free'}${ahead ? `, ${ahead} queued ahead` : ''}`);
+        })
+        : X.claimExport(PROJECT, out, !!A.force);
+      if (A.wait && A.progress) console.error(JSON.stringify({ queued: false }));
       // (the subtitles first: a project without timed words fails before it renders, not after)
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
