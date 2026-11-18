@@ -42,10 +42,29 @@ export default defineVideo({
 ```
 
 - The config's top level is plain data (the CLI reads it outside the browser). Scenes are lazy imports; anything that touches the engine goes inside `timeline()`.
-- A **clip** places a scene: `id` (unique; `--only` and findings use it), `scene`, `start`/`end` in seconds, `track` (default 0), `params` (handed to the scene as `ctx.params`, so one module serves many clips), `transition` (how it comes in over the clip before it on its track: `'crossfade'` (default), `'wipe'`, `'slide'`, `'zoom'`, `'dip'`, or `{ kind, direction: 'left'|'right'|'up'|'down', softness, color }`), `blend` (`normal`, `add`, `screen`, `multiply`, `max`), `opacity`, `post` (post-processing defaults while it shows), `maxSamples` (cap adaptive motion blur), `check: { exempt: [...] }`.
+- A **clip** places a scene: `id` (unique; `--only` and findings use it), `scene`, `start`/`end` in seconds, `track` (default 0), `params` (handed to the scene as `ctx.params`, so one module serves many clips), `transition` (how it comes in over the clip before it on its track: `'crossfade'` (default), `'wipe'`, `'slide'`, `'zoom'`, `'dip'`, or `{ kind, direction: 'left'|'right'|'up'|'down', softness, color }`), `blend` and `opacity` (how its track is drawn over the tracks below), `grade` and `matte` ("Tracks" below), `post` (post-processing defaults for the whole frame while it shows), `maxSamples` (cap adaptive motion blur), `check: { exempt: [...] }`.
 - **Tracks** stack in number order. Clips that overlap on one track make a transition over the overlap (the incoming clip's `transition`, a crossfade by default; or the incoming scene composites it itself); clips that touch cut. A scene on a track above 0 must clear to transparent and draw over it.
+- A **track's own settings**: the config's `tracks: { 1: { blend, opacity, grade, matte } }` sets a track's defaults; a clip's own values go over them while it is the top clip of its track.
 - Narrated video: `timeline: (src) => clipsFromSections(src, import.meta.glob('./scenes/*.ts'))` makes one clip per plate of `narration.txt` that has a scene of the same name.
 - Music: snap starts with `src.audio.beatBefore(t)` or `src.audio.nearestDownbeat(t)`.
+
+## Tracks: grades, mattes, blends
+
+Each track is composited on its own (its clips and their transitions), then graded and matted, then drawn over the tracks below:
+
+- **`grade`** changes only its track: `{ exposure: 1.5, saturation: 0.2, contrast: 1.3, tint: 'accent' | '#rrggbb' | [r, g, b], fade: 0..1, flash: 0..1+, blur: σ in logical px }`. `fade` goes to transparent (to black on track 0), `flash` adds the theme's light colour only where the track has coverage, `contrast` pivots on mid-grey. Set it on the track, on the clip (data, or `(f) => ({ fade: f.p })` of the clip's `t`, `lt`, `p`), or return `{ grade }` from `render()` for one that follows the scene; each goes over the one before, field by field, and it moves from clip to clip across a transition. A clip's `post` (and what render() returns besides `grade`) still grades the whole frame.
+- **`matte`**: `'alpha'` shows the track only where the next track above has coverage, `'luma'` where it is bright (as displayed: sRGB mid-grey keeps half), `'alpha-inverted'`/`'luma-inverted'` the opposite; `{ mode, from: 'below' }` reads the track below. The matte track is not drawn (nor its `post`): for the whole video when the matte is the track's (`tracks`), while the clip is on top when it is a clip's. Mattes may chain (a matte track matted in turn), not go round in a circle. `reel check` ignores a matte track's text; a matted track's text is reported whole, so where the matte cuts it check may measure what shows through instead (mark it `data-exempt="contrast"` if so). A clip cannot opt out of its track's matte or grade: put it on another track. `tracks` may only name tracks that have clips.
+- **`blend`**: `normal`, `add`, `screen`, `multiply`, `max`, and reading the tracks below `overlay`, `soft-light`, `hard-light`, `difference`, `color-dodge`. Frames are linear HDR: overlay, soft-light and hard-light work on display values (sRGB mid-grey is neutral as in an image editor, and light above 1 is cut to 1, so a glow under them loses its bloom); `difference` is linear and keeps HDR; `color-dodge` is linear and capped at 16.
+
+```ts
+tracks: { 1: { matte: 'alpha' }, 3: { blend: 'overlay', opacity: 0.6 } },
+timeline: () => [
+  { id: 'bg', scene: () => import('./scenes/sky'), start: 0, end: 8, grade: { saturation: 0.3, blur: 6 } },
+  { id: 'fill', scene: () => import('./scenes/stripes'), start: 0, end: 8, track: 1 },   // shows only inside…
+  { id: 'word', scene: () => import('./scenes/word'), start: 0, end: 8, track: 2 },      // …this word's letters
+  { id: 'grain', scene: () => import('./scenes/paper'), start: 0, end: 8, track: 3 },
+],
+```
 
 ## A scene
 

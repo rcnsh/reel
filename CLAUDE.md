@@ -27,7 +27,7 @@ song ──reel analyze──▶ audio/<song>  +  data/audio.json  (beats, envel
 cli/server.ts: Vite serving index.html + src/main.ts, with the project mapped in (@project, its files at the site root)
 Engine.init ─▶ load the clips' scenes (+ the theme's overlay clip) ─▶ each frame: prepare (scenes' prepare(f), HTML layers updated,
             painted and uploaded when changed) ─▶ sub-frames: scenes render HDR into targets
-            ─▶ transitions per track ─▶ tracks stacked ─▶ post (defaults from the theme)
+            ─▶ transitions per track ─▶ track grades and mattes ─▶ tracks stacked (blend modes) ─▶ post (defaults from the theme)
 src/main.ts: preview player (reel dev) or export API window.__reel (?export=1)
 cli/reel.ts (flags: cli/args.ts) drives window.__reel through cli/renderer.ts + cli/ops.ts: info | still | sheet | strip | check | events | perf | gpu;
             cli/video.ts: the video export, cli/formats.ts: its output formats and ffmpeg commands

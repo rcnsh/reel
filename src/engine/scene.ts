@@ -6,6 +6,7 @@ import type { AudioData, AudioSample } from './audio';
 import type { Words } from './words';
 import type { Compositor } from './gl';
 import type { PostParams } from './post';
+import type { Grade } from './tracks';
 
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
@@ -85,7 +86,11 @@ export interface Frame {
   tout: number;
 }
 
-export type PostOverrides = Partial<PostParams>;
+/**
+ * What render() may return: post-processing overrides for the whole frame, and `grade`, a grade of the scene's own
+ * track (over its clip's and track's, field by field; see Grade in tracks.ts).
+ */
+export type PostOverrides = Partial<PostParams> & { grade?: Grade };
 
 export abstract class Scene {
   /** If true, the engine fast-forwards (calls render with preroll=true) after seeks. */
