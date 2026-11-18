@@ -240,6 +240,7 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       res.frame = `${h.fmt.w}x${h.fmt.h}${h.fmt.scale !== 1 ? ` at scale ${h.fmt.scale}` : ''}, ${h.fmt.fps} fps`;
       res.errors.push(...await h.errors());
       res.logs.push(...h.logs);
+      r.release(h);
       break;
     } catch (e) {
       if (attempt === 0 && (h?.dead || isGone(e) || (h && await h.lost()))) {
@@ -250,6 +251,7 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       if (h && !h.dead) res.errors.push(...await h.errors());
       if (h) res.logs.push(...h.logs);
       if (h?.dead) await r.drop(h);
+      else if (h) r.release(h);
       if (e instanceof UsageError) res.usage = true;
       res.errors.push(String((e as Error)?.message ?? e));
       break;

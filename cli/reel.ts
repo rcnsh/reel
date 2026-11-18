@@ -161,7 +161,7 @@ if (mode === 'daemon') {
     res.daemons = list;
     finish(res, () => {
       if (!list.length) console.log('no warm renderer is running');
-      for (const x of list) console.log(`${x.project}\n  pid ${x.pid}, up ${Math.round(x.uptime / 1000)} s, ${x.busy ? 'busy' : `idle ${Math.round(x.idle / 1000)} s`}, ${x.requests} requests, ${x.pages} page${x.pages === 1 ? '' : 's'}${x.stale ? ', stale (the engine changed: the next command restarts it)' : ''}\n  log ${x.log}`);
+      for (const x of list) console.log(`${x.project}\n  pid ${x.pid}, up ${Math.round(x.uptime / 1000)} s, ${x.busy ? `busy${x.running > 1 ? ` (${x.running} requests)` : ''}` : `idle ${Math.round(x.idle / 1000)} s`}, ${x.requests} requests, ${x.pages} page${x.pages === 1 ? '' : 's'}${x.stale ? ', stale (the engine changed: the next command restarts it)' : ''}\n  log ${x.log}`);
     });
   }
   if (sub === 'stop') {
