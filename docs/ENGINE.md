@@ -38,7 +38,9 @@ Per tile (`refine: 'tiles'`, the default): a tile goes on while it or one of its
 
 A scene's own depth-tested 3D cannot draw into a masked target (the mask owns its depth buffer), so it draws into a target of its own and composites that into `out`. `ctx.maskDepth(rt)` clears that target's depth and, in a masked sub-frame, draws `nearPass` into it: depth 0, the near plane, over the tiles that have converged, so the 3D's own depth test rejects them before shading while live tiles depth-test normally. The composite into `out` is then masked like any draw. `Stage3D` (`src/three/stage.ts`) does this; what masking cannot save is per-sub-frame work outside fragment shading (shadow maps, vertices).
 
-In practice a still frame stops at 12, ordinary camera motion at 36, whips and fast zooms at 108 or 324; at 1:1 in 4K, 108 cannot be told from 324.
+In practice a still frame stops at 12, ordinary camera motion at 36, whips and fast zooms at 108 or 324; at 1:1 in 4K, 108 cannot be told from 324. The cap is the lowest of `max`, and for each clip in the shutter its `maxSamples` or, without one, the cap its scene asked for with `ctx.capSamples` (kept on the clip's `Loaded` record). `Stage3D` asks for 108: depth of field, area-light and anti-aliasing jitter on glossy highlights read as sampling error, so a 3D frame would otherwise always run to 324 (about 2.8x the time for no visible gain).
+
+In a sub-frame a soft light's `shadow.radius` drops to 1 texel (`render()` restores it after, with the light's position): three's PCF rotates its 5-tap disk by interleaved gradient noise of `gl_FragCoord`, the same in every sub-frame, so a wide radius would add its blur to the moving light's penumbra and leave a fixed dither pattern no number of sub-frames averages out.
 
 ## The 3D stage
 

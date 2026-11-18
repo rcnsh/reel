@@ -29,7 +29,7 @@ interface TrackRTs { rts: THREE.WebGLRenderTarget[]; mix: THREE.WebGLRenderTarge
 /** A scene module as imported, or why it did not import. */
 type Imported = { m?: { default: SceneClass }; err?: unknown };
 
-interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number }
+interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number; cap?: number }
 
 /**
  * Per-frame adaptive motion-blur sampling (see Engine.render): the sub-frame count steps through
@@ -67,7 +67,7 @@ function yieldTask() {
 
 export class Engine {
   renderer: THREE.WebGLRenderer;
-  ctx!: SceneCtx;
+  ctx!: Omit<SceneCtx, 'capSamples'>;
   audio!: AudioData;
   words!: Words;
   post!: Post;
@@ -475,8 +475,16 @@ export class Engine {
     try {
       const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
       if (!m.m) throw m.err;
-      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      // (only while the scene is made, so every frame of an export has the same cap whichever worker renders it;
+      // a later call, such as a Stage3D made on first use, is ignored)
+      let made = false;
+      const capSamples = (n: number) => {
+        if (!(n >= 1)) throw new Error(`ctx.capSamples: expected a count of at least 1, got ${n}`);
+        if (!made) rec.cap = Math.min(rec.cap ?? Infinity, n);
+      };
+      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end, capSamples });
       await s.init();
+      made = true;
       rec.scene = s;
       for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
     } catch (err) {
@@ -586,7 +594,8 @@ export class Engine {
         const on = this.timeline.filter((e) => t + w / 2 >= e.start && t - w / 2 < e.end);
         const st = on.find((e) => this.loaded.get(e.id)?.scene?.stateful);
         if (st) throw new Error(`adaptive sampling needs stateless scenes; '${st.id}' is stateful (use a fixed --samples)`);
-        for (const e of on) if (e.maxSamples) maxAdaptive = Math.min(maxAdaptive, e.maxSamples);
+        // (a clip's maxSamples, else the cap its scene asked for: ctx.capSamples)
+        for (const e of on) { const cap = e.maxSamples || this.loaded.get(e.id)?.cap; if (cap) maxAdaptive = Math.min(maxAdaptive, cap); }
       }
       // shaders that supersample share their 4 taps across the sub-frames when every set holds a multiple
       // of 4 (rotated by k/4 so a tap doesn't always land in the same part of the shutter)
