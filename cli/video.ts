@@ -195,10 +195,15 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   };
   let ok = false;
   try {
-    const opened = await Promise.allSettled(Array.from({ length: workers - 1 }, () => browserOf()));
-    for (const r of opened) if (r.status === 'fulfilled') pages.push(r.value);
-    for (const r of opened) if (r.status === 'rejected') throw r.reason;
-    const rendering = Promise.all(pages.map(async ({ page }, k) => {
+    // (the first page renders at once; the others launch alongside it and take chunks as soon as they are ready)
+    const rendering = Promise.all(Array.from({ length: workers }, async (_, k) => {
+      const p = k === 0 ? first : await browserOf();
+      if (k > 0) {
+        // (closePages closes the pages it finds; one that comes up after the render stopped is closed here)
+        if (ending || failure) { await p.browser.close().catch(() => {}); return; }
+        pages.push(p);
+      }
+      const { page } = p;
       for (let r = take(); r && !failure; r = take()) {
         for (let n = r[0]; n < r[1]; n++) queue[k]!.push(n);
         const h: Record<string, number> = await page.evaluate((x) => (window as any).__reel.stream(x), {
