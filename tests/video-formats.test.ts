@@ -50,6 +50,18 @@ async function render(name: string, ...flags: string[]) {
   return r.json();
 }
 const bt709 = (s: Stream) => [s.color_range, s.color_space, s.color_primaries, s.color_transfer];
+/** A finished file's integrated loudness and true peak, measured by ffmpeg's ebur128 on its decoded sound. */
+function r128(file: string) {
+  const e = Bun.spawnSync(['ffmpeg', '-nostdin', '-hide_banner', '-i', file, '-map', 'a', '-af', 'ebur128=peak=true:framelog=quiet', '-f', 'null', '-']).stderr.toString();
+  const at = (k: string) => { const v = e.slice(e.lastIndexOf('Summary:')).match(new RegExp(`${k}:\\s+(-?[\\d.]+|-inf)`))![1]!; return v === '-inf' ? -Infinity : Number(v); };
+  return { integrated: at('I'), truePeak: at('Peak') };
+}
+/** The mix lands on its target: within 1 LU, the true peak at or under its ceiling. */
+function onTarget(file: string, integrated = -14, truePeak = -1) {
+  const m = r128(file);
+  expect(Math.abs(m.integrated - integrated)).toBeLessThanOrEqual(1);
+  expect(m.truePeak).toBeLessThanOrEqual(truePeak);
+}
 
 test.skipIf(!hasChrome)('H.264: 8-bit 4:2:0 with AAC, and 10-bit 4:4:4, tagged BT.709 limited range', async () => {
   await render('a.mp4');
@@ -97,10 +109,23 @@ test.skipIf(!hasChrome)('ProRes 4444 and VP9 WebM carry alpha: the background is
   const m = await render('m.webm', '--mix');
   expect(m.loudness).toBeTruthy();
   expect(probe(out('m.webm')).map((x) => x.codec_name)).toEqual(['vp9', 'opus']);
+  onTarget(out('m.webm'));
   // --opaque: the same formats with the background
   await render('o.webm', '--opaque');
   expect(probe(out('o.webm'))[0]!.tags?.alpha_mode ?? '0').not.toBe('1');
 }, 90_000);
+
+test.skipIf(!hasChrome)('the mix lands on its loudness target: -14 LUFS and -1 dBTP by default, or what mix.json says', async () => {
+  const m = await render('loud.mp4', '--mix');
+  onTarget(out('loud.mp4'));
+  // (what it reports is what the file measures)
+  expect(Math.abs(m.loudness.integrated - r128(out('loud.mp4')).integrated)).toBeLessThanOrEqual(0.2);
+  await Bun.write(path.join(proj.dir, 'mix.json'), JSON.stringify({ loudness: { integrated: -20, truePeak: -3 } }));
+  try {
+    await render('quiet.mp4', '--mix');
+    onTarget(out('quiet.mp4'), -20, -3);
+  } finally { Bun.spawnSync(['rm', '-f', path.join(proj.dir, 'mix.json')]); }
+}, 60_000);
 
 test.skipIf(!hasChrome)('GIF and WebP loops: no sound, the rate capped', async () => {
   const g = await render('l.gif', '--max-fps', '5');
