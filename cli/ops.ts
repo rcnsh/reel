@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
-import { checkTimes, findingsOf, type Finding, type Sample } from '../src/check';
+import { checkTimes, findingsOf, judgeable, recheckOrder, type Finding, type Sample } from '../src/check';
 import { UsageError, type PageOpts } from './args';
 import { isGone, type PageHandle, type Renderer } from './renderer';
 import { glBackend } from './chrome';
@@ -22,7 +22,7 @@ export interface Req {
 /** What every command prints with --json; `errors` (scene, shader and page errors) make it exit 1, `usage` 2. */
 export interface Result { ok: boolean; errors: string[]; logs: string[]; warnings: string[]; usage?: boolean; [k: string]: unknown }
 
-export interface ClipInfo { id: string; start: number; end: number; track: number; exempt?: import('../src/engine/report').CheckRule[] | true }
+export type ClipInfo = import('../src/check').ClipSpan;
 export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[]; track: string | null; theme: string; W: number; H: number; fps: number; scale: number }
 
 export const meta = (h: PageHandle): Promise<PageMeta> => h.page.evaluate(() => {
@@ -129,15 +129,24 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     if (!times.length) throw new UsageError(`check: no frames between ${a.from ?? 0} and ${a.to ?? m.duration} s`);
     // one session: every time rendered and measured in this page, errors attributed to the frame that raised them
     const samples: Sample[] = [], seen = new Set<string>();
+    const fresh = (errors: string[]) => { const f = errors.filter((e) => !seen.has(e)); for (const e of f) seen.add(e); return f; };
     for (const t of times) {
       const r: Omit<Sample, 't'> = await h.page.evaluate(([t, s, sh]) => (window as any).__reel.inspect(t, s, sh), [t, req.samples, req.shutter] as const);
-      const fresh = r.errors.filter((e) => !seen.has(e));
-      for (const e of fresh) seen.add(e);
-      samples.push({ ...r, t, errors: fresh });
+      samples.push({ ...r, t, errors: fresh(r.errors) });
+    }
+    // some of the times again, out of order: a frame that is a pure function of t comes out the same
+    // (a scene error raised only by the second render is that error, not a different frame)
+    for (const i of recheckOrder(samples.map((s) => (judgeable(s, m.timeline) ? s.clips : null)))) {
+      const s = samples[i]!;
+      const r: Pick<Sample, 'stats' | 'errors'> & { failed: boolean } = await h.page.evaluate(([t, sm, sh]) => (window as any).__reel.recheck(t, sm, sh), [s.t, req.samples, req.shutter] as const);
+      s.errors.push(...fresh(r.errors));
+      if (!r.failed) s.again = r.stats;
     }
     const minSide = Math.min(m.W, m.H);
+    // (timeline problems the page found while loading: a transition with no overlap to play over)
+    const warnings: { clip: string; message: string }[] = await h.page.evaluate(() => (window as any).__reel.warnings ?? []);
     const findings: Finding[] = findingsOf(samples, {
-      W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette,
+      W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette, warnings,
     });
     // a crop of the worst frame of each finding (the whole frame, small, for frame-wide ones)
     const dir = a.out ?? path.join(req.project, 'out/check');

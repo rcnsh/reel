@@ -17,15 +17,15 @@ export default class Point extends Scene {
 }
 ```
 
-- Make components as fields of a scene (they belong to its clip) and call `draw(renderer, out, f, { opacity? })` in `render()`, in back-to-front order. On a track above 0, clear to transparent first.
+- Make components as fields of a scene (or in `init()`): that is how they belong to its clip. One made lazily in `prepare()` or `render()` (`this.x ??= new TextBlock(…)`) throws, and so does an HTML-based one (text, captions, charts, code) made at a module's top level: it belongs to no clip and would never draw. Call `draw(renderer, out, f, { opacity? })` in `render()`, in back-to-front order. On a track above 0, clear to transparent first.
 - Options every component takes:
   - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side.
-  - `at: [from, to]`: the seconds of the clip it shows in, counted from the clip's start (default the whole clip). Word times are video seconds, so take the clip's start off: `at: [this.ctx.words.get('the tide').start - this.ctx.start, 9]`.
+  - `at: [from, to]`: the seconds of the clip it shows in, counted from the clip's start (default the whole clip). Word times are video seconds, so take the clip's start off: `at: [this.ctx.words.get('the tide').start - this.ctx.start, 9]`. A window that starts at or after the clip's end (video seconds given by mistake) throws.
   - `motion`: its entrance and exit, `{ from: 'up' | 'down' | 'left' | 'right' | 'fade' | 'scale' | 'none', in: 0.6, out: 0.4, delay: 0, distance }`, or `false` for none. Motion is drawn in GL per sub-frame, so it gets motion blur under `--samples auto`.
   - `css`: CSS added to its layer, to restyle it (each component lists its classes below).
   - `label`: its name in `reel check` findings.
 - Values marked *Anim* take a value or a function of the frame, `(f) => …`, evaluated once per output frame: `text: (f) => f.lt < 2 ? 'Before' : 'After'`.
-- Colours are palette keys (`'accent'`, `'accentHi'`, `'muted'`) or CSS colours.
+- Colours are palette keys (`'accent'`, `'accentHi'`; `bg`, `fg`, `accent`, `accentHi` and `accentLo` are in every theme, the rest only in the theme that has them, such as neutral's `'muted'`) or CSS colours (`'#6f6f73'`, `'rgb(…)'`, `'white'`, `'var(--brand)'` for a custom property the component's `css` sets). A word that is neither a key of the project's theme nor a CSS colour throws, listing the keys.
 - Content changes once per output frame; keep what is shown a function of `f` (`f.lt`, `f.t`, word times), never of what was shown before.
 
 ## Text
@@ -38,7 +38,7 @@ Wraps, aligns, and shrinks until the text fits its box and `maxLines`.
 body = new TextBlock({
   text: 'Colours mix in linear light and are encoded once, at the end.',
   box: { x: W * 0.08, y: H * 0.3, w: W * 0.4, h: H * 0.4 },
-  size: 44, minSize: 26, maxLines: 4, align: 'left', valign: 'top', weight: 400, color: 'muted',
+  size: 44, minSize: 26, maxLines: 4, align: 'left', valign: 'top', weight: 400, color: 'fg',
 });
 ```
 

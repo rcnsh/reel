@@ -3,12 +3,12 @@
 import * as THREE from 'three';
 import { FSPass, H, SCALE } from '../engine/gl';
 import { assetPlaceholder, declaredAsset } from '../engine/assets';
-import { awaitBeforeFirstFrame } from '../engine/html';
+import { awaitBeforeFirstFrame, notLate } from '../engine/html';
 import { decodePng16, pngDepth } from '../engine/png16';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
-import { motionAt, safeBox, type Box, type ComponentOptions, type Motion } from './common';
+import { checkAt, motionAt, safeBox, type Box, type ComponentOptions, type Motion } from './common';
 
 /** A framing of the image: zoom (1 = fitted) and a pan from -1 to 1 across the room the zoom leaves. */
 export interface Framing { zoom?: number; x?: number; y?: number }
@@ -153,6 +153,8 @@ export class ImageBox {
 
   constructor(o: ImageBoxOptions) {
     this.o = o;
+    notLate(o.label ?? o.alt ?? o.src);
+    checkAt(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     awaitBeforeFirstFrame(this.load().catch(async (e: unknown) => {
       const a = await declaredAsset(o.src);

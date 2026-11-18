@@ -29,7 +29,7 @@ export default class Card extends Scene {
 
 ## How it runs
 
-- Make layers as fields (or in the constructor) of a scene: a layer belongs to the clip whose scene made it, shows while that clip is on screen and is hidden otherwise.
+- Make layers as fields of a scene (or in its constructor or `init()`): a layer belongs to the clip whose scene made it, shows while that clip is on screen and is hidden otherwise. One made anywhere else (a module's top level, lazily in `prepare()` or `render()`) belongs to no clip, so making it throws.
 - **Content changes once per output frame**, before the frame's sub-frames render: the layer's `update(f, layer)`, or the scene's `prepare(f)` (optional, may be async). A DOM change needs a browser paint before it can be uploaded; the engine waits for one paint per frame for all layers that changed, and skips it when none did. A layer that never changes uploads once.
 - **Motion that should blur comes from `draw()`**: `layer.draw(renderer, out, { x, y, scale, rotate, anchor, opacity, blend })` is evaluated per sub-frame, so a slide, zoom or fade drawn there gets motion blur under `--samples auto`. A CSS animation of position changes once per frame: fine for slow motion, stepped for fast motion.
 - Everything is a pure function of time. `update` and `prepare` compute what to show from `f` (`f.t`, `f.lt`, words, audio), never from what they showed last frame.

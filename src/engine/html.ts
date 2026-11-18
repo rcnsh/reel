@@ -44,7 +44,8 @@ export interface HtmlDraw {
   blend?: 'normal' | 'add' | 'screen';
 }
 
-const kebab = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+/** A palette key or camelCase property as a CSS name: accentHi -> accent-hi. */
+export const kebab = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 /** The theme as CSS custom properties: `--bg`, `--fg`, `--accent-hi` … for every palette key. */
 export const THEME_CSS_VARS = Object.entries(HEX).map(([k, v]) => `--${kebab(k)}: ${v};`).join(' ');
 
@@ -63,6 +64,8 @@ img, svg, video, canvas { display: block; max-width: 100%; }
 
 // ---- the registry the engine drives ----
 let owner = '';
+/** Loads of scenes under way (init, hot reloads, which may overlap): a load a component starts then is awaited before the next frame. */
+let loading = 1;
 const layers = new Set<HtmlLayer>();
 const loads: { owner: string; p: Promise<unknown> }[] = [];
 let host: HTMLCanvasElement | null = null;
@@ -86,6 +89,8 @@ export const htmlLayers = {
   },
   /** Layers made from here on belong to clip `id` (the engine sets it while a clip's scene is made and initialised). */
   owner(id: string) { owner = id; },
+  /** Scenes are being loaded (modules imported, scenes made and initialised): the engine sets it around init and a reload. */
+  loading(on: boolean) { loading = Math.max(0, loading + (on ? 1 : -1)); },
   /** Await the loads components started (images) before the first frame. Returns the failures, by clip. */
   async settle(): Promise<Map<string, string>> {
     const errors = new Map<string, string>();
@@ -123,9 +128,27 @@ export const htmlLayers = {
 
 /** Keep a promise (an image a component loads) for the engine to await before the first frame. */
 export function awaitBeforeFirstFrame<T>(p: Promise<T>): Promise<T> {
+  if (!loading) { p.catch(() => {}); notLate('a kit component'); }
   loads.push({ owner, p });
   p.catch(() => {}); // (reported by settle)
   return p;
+}
+
+const PLACE = 'make it a field of the scene or create it in init(), not at a module\'s top level or in prepare() or render()';
+/**
+ * Throw unless a clip's scene is being made: an HTML layer made at a module's top level, or lazily in prepare() or
+ * render(), belongs to no clip, so it would never be shown.
+ */
+export function inClip(label: string) {
+  if (!owner) throw new Error(`${label}: an HTML layer or kit component was made outside a scene's construction, so it belongs to no clip and would never draw: ${PLACE}`);
+}
+/**
+ * Throw when scenes are no longer being loaded: a component that loads something (an image, a video, a Lottie)
+ * made lazily in prepare() or render() would draw nothing until its load lands, a different frame every run.
+ * (One made at a module's top level is loaded with the scenes, and fine.)
+ */
+export function notLate(label: string) {
+  if (!loading) throw new Error(`${label}: a kit component was made after the scenes loaded (lazily in prepare() or render()), so what it loads is not there for the frames before it lands: ${PLACE}`);
 }
 
 /** One rendering update of the page: what a DOM change needs before a layer can be uploaded. */
@@ -186,7 +209,7 @@ interface DomBox { kind: DrawnBox['kind']; x: number; y: number; w: number; h: n
 
 /**
  * An HTML layer: markup and CSS rendered into a texture at the output resolution. Make it in a scene's field
- * (or constructor) so it belongs to the scene's clip; change it in `update(f, layer)` (or the scene's
+ * (or constructor, or init()) so it belongs to the scene's clip (made anywhere else, it throws); change it in `update(f, layer)` (or the scene's
  * `prepare(f)`); draw it with `layer.draw(renderer, out, { x, y, scale, opacity })` in render().
  */
 export class HtmlLayer {
@@ -214,6 +237,7 @@ export class HtmlLayer {
     this.height = opts.height ?? H;
     this.update = opts.update;
     this.label = opts.label ?? 'html';
+    inClip(this.label);
     this.owner = owner;
     this.el = document.createElement('div');
     this.el.setAttribute('drawable', '');

@@ -14,7 +14,7 @@ import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
-import { TransitionPass, transitionOf, transitionWeights } from './transitions';
+import { idleTransitions, TransitionPass, transitionOf, transitionWeights } from './transitions';
 import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -130,6 +130,8 @@ export class Engine {
   loadErrors: string[] = [];
   renderErrors: string[] = [];
   get errors() { return [...this.loadErrors, ...this.renderErrors]; }
+  /** Problems with the timeline that are not errors (a transition that never plays), by clip. */
+  warnings: { clip: string; message: string }[] = [];
   clearRenderErrors() {
     this.renderErrors = [];
     for (const rec of this.loaded.values()) rec.renderError = undefined;
@@ -152,6 +154,10 @@ export class Engine {
   lastBoxes: ReportedBox[] = [];
   /** The Canvas2D text draws (fillText, strokeText) of the same render, per clip: text a clip may not have reported. */
   lastTextDraws: Record<string, number> = {};
+  /** For `reel check`: Math.random, Date.now and performance.now calls per clip in the frame lastBoxes are from. */
+  lastClocks: Record<string, Record<string, number>> = {};
+  /** For `reel check`: stateful clips the last collected frame stepped on from the frame before instead of reaching by a seek. */
+  lastStepped = new Set<string>();
   /** The clip whose scene is being initialised or drawn (names errors that surface inside three.js). */
   private drawing = '';
 
@@ -418,6 +424,8 @@ export class Engine {
         throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
       transitionOf(e.transition, `timeline: clip '${e.id}'`);
     }
+    this.warnings = idleTransitions(this.timeline, 1 / FPS);
+    for (const w of this.warnings) console.warn(`timeline: ${w.message}`);
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
     // the theme's overlay: the HUD scene over the whole video, on a track above every clip
@@ -446,6 +454,7 @@ export class Engine {
     const mods = await Promise.all(entries.map((e): Promise<Imported> => e.scene().then((m) => ({ m }), (err: unknown) => ({ err }))));
     for (const [i, e] of entries.entries()) await this.loadEntry(e, mods[i]!);
     for (const [id, msg] of await htmlLayers.settle()) this.fail(id, msg);
+    htmlLayers.loading(false);
     await this.checkSounds();
   }
 
@@ -467,15 +476,14 @@ export class Engine {
     console.error(`scene ${id} failed`, msg);
   }
 
-  private async loadEntry(e: TimelineEntry, mod?: Imported) {
+  private async loadEntry(e: TimelineEntry, mod: Imported) {
     const rec: Loaded = { entry: e, scene: null, lastT: -1 };
     this.loaded.set(e.id, rec);
     htmlLayers.owner(e.id);
     LOADING.clip = { id: e.id, start: e.start, end: e.end };
     try {
-      const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
-      if (!m.m) throw m.err;
-      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      if (!mod.m) throw mod.err;
+      const s = new mod.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
       await s.init();
       rec.scene = s;
       for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
@@ -485,16 +493,35 @@ export class Engine {
   }
 
   /** Hot-swap a scene module (used by Vite HMR in preview). */
-  async reload(id: string) {
+  reload(id: string): Promise<void> {
+    // (one at a time: a scene is made with the clip it belongs to set globally, so two reloads must not overlap)
+    const next = this.reloads.then(() => this.reloadOne(id));
+    this.reloads = next.catch(() => {});
+    return next;
+  }
+  private reloads: Promise<void> = Promise.resolve();
+  private async reloadOne(id: string) {
     const e = this.timeline.find((x) => x.id === id);
     if (!e) return;
     const old = this.loaded.get(id)?.scene;
     for (const m of old?.tileMasked ?? []) this.maskedRTs.delete(m.rt);
     old?.dispose();
+    const rec = this.loaded.get(id);
+    if (rec) rec.scene = null; // (drawn as nothing, not as the disposed scene, while the module imports)
     htmlLayers.drop(id);
-    await this.loadEntry(e);
-    for (const [cid, msg] of await htmlLayers.settle()) this.fail(cid, msg);
+    htmlLayers.loading(true);
+    try {
+      // (imported before the clip owns new layers: an HTML layer made at the module's top level must throw here too)
+      await this.loadEntry(e, await e.scene().then((m): Imported => ({ m }), (err: unknown) => ({ err })));
+      for (const [cid, msg] of await htmlLayers.settle()) this.fail(cid, msg);
+    } finally { htmlLayers.loading(false); }
     this.lastT = -1;
+  }
+
+  /** Forget what was rendered last: the next frame is a seek for every clip (stateful scenes reset and pre-roll). */
+  forgetTime() {
+    this.lastT = -1;
+    for (const rec of this.loaded.values()) rec.lastT = -1;
   }
 
   get duration() { return this._duration; }
@@ -524,7 +551,10 @@ export class Engine {
     }
   }
 
+  /** Render and prepare failures so far, each counted (errors keeps only a clip's first). */
+  failures = 0;
   private renderFailed(rec: Loaded, msg: string) {
+    this.failures++;
     if (rec.renderError) return;
     rec.renderError = msg;
     this.renderErrors.push(msg);
@@ -570,13 +600,13 @@ export class Engine {
     let n = 1;
     const collect = this.collectBoxes;
     let nearestBoxes = Infinity;
-    if (collect) { this.lastBoxes = []; this.lastTextDraws = {}; }
+    if (collect) { this.lastBoxes = []; this.lastTextDraws = {}; this.lastClocks = {}; this.lastStepped.clear(); }
     if (samples === 1) {
       SS_TAP.value = -1;
       SUB_FRAME.index = -1;
       if (collect) boxes.begin();
       ({ outTex, post } = this.composite(t, dt, seeked));
-      if (collect) { this.lastBoxes = boxes.end(); this.lastTextDraws = boxes.textDraws(); }
+      if (collect) { this.lastBoxes = boxes.end(); this.lastTextDraws = boxes.textDraws(); this.lastClocks = boxes.clocks(); }
     } else {
       const adaptive = typeof samples !== 'number';
       let maxAdaptive = adaptive ? samples.max : 0;
@@ -623,7 +653,7 @@ export class Engine {
             this.setMasking(true);
           }
         }
-        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; this.lastTextDraws = boxes.textDraws(); } }
+        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; this.lastTextDraws = boxes.textDraws(); this.lastClocks = boxes.clocks(); } }
         this.accum.u.src!.value = res!.outTex;
         this.accum.render(r, into);
         const d = Math.abs(u - POST_U);
@@ -803,6 +833,7 @@ export class Engine {
       const s = rec.scene;
       // (sub-frames of one frame may step back within its shutter: not a seek)
       const sceneSeeked = seeked || rec.lastT < 0 || Math.abs(t - rec.lastT) > 0.25;
+      if (this.collectBoxes && s.stateful && !sceneSeeked && SUB_FRAME.index <= 0) this.lastStepped.add(e.id);
       boxes.clip(e.id, e.track ?? 0);
       if (s.stateful && sceneSeeked) {
         boxes.pause(true);

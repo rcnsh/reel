@@ -2,9 +2,10 @@
 // drawn in GL (evaluated per sub-frame, so they get motion blur), values that may be functions of the frame, and
 // an HTML layer the size of its box.
 import type * as THREE from 'three';
-import { HtmlLayer, type HtmlUpdate } from '../engine/html';
+import { HtmlLayer, kebab, type HtmlUpdate } from '../engine/html';
 import { H, W } from '../engine/gl';
-import type { Frame } from '../engine/scene';
+import { HEX } from '../engine/palette';
+import { LOADING, type Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
 
 /** A value, or a function of the frame giving it (evaluated once per output frame for content, per sub-frame for motion). */
@@ -71,8 +72,35 @@ export interface ComponentOptions {
 /** HTML-escaped text. */
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
-/** A CSS colour from a palette key ('accent', 'accentHi') or any CSS colour. */
-export const cssColor = (c: string) => (/^[a-z][A-Za-z0-9]*$/.test(c) && !['transparent', 'white', 'black', 'currentcolor', 'inherit'].includes(c.toLowerCase()) ? `var(--${c.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()})` : c);
+const CSS_KEYWORDS = ['transparent', 'white', 'black', 'currentcolor', 'inherit', 'initial', 'unset', 'revert', 'none'];
+
+/**
+ * A CSS colour from a palette key ('accent', 'accentHi': `var(--accent-hi)`) or any CSS colour ('#fff',
+ * 'rgb(…)', 'white'). A bare word that is neither a key of the theme's palette nor a CSS colour throws, listing the
+ * keys: an unknown key would otherwise be a custom property that does not exist, and the text silently inherits.
+ */
+export function cssColor(c: string): string {
+  // (a bare word, hyphens and all: 'accent-hi' and 'dark-blue' are no CSS colours either)
+  if (!/^[a-z][A-Za-z0-9-]*$/.test(c) || CSS_KEYWORDS.includes(c.toLowerCase())) return c;
+  if (Object.prototype.hasOwnProperty.call(HEX, c)) return `var(--${kebab(c)})`;
+  const css = (globalThis as { CSS?: { supports(p: string, v: string): boolean } }).CSS;
+  if (css?.supports('color', c)) return c;
+  throw new Error(`colour '${c}': the theme has no such palette key (it has ${Object.keys(HEX).join(', ')}), and it is not a CSS colour. Use one of those keys (bg, fg, accent, accentHi and accentLo are in every theme), a CSS colour such as '#6f6f73', or 'var(--name)' for a custom property your css defines`);
+}
+
+/**
+ * A kit piece's `at`, checked against the clip being loaded: seconds from the clip's start, so a window that starts
+ * at or after the clip's end (video seconds given by mistake) never shows. Throws saying so.
+ */
+export function checkAt(at: [number, number] | undefined, label: string) {
+  const clip = LOADING.clip;
+  if (!at) return;
+  if (!(at[1] > at[0])) throw new Error(`${label}: at [${at.join(', ')}] ends before it starts`);
+  if (!clip) return;
+  const len = clip.end - clip.start;
+  if (at[1] <= 0) throw new Error(`${label}: at [${at.join(', ')}] ends before clip '${clip.id}' starts, so it never shows: \`at\` is in seconds from the clip's start`);
+  if (at[0] >= len) throw new Error(`${label}: at [${at.join(', ')}] starts after the end of clip '${clip.id}', which is ${+len.toFixed(3)} s long, so it never shows: \`at\` is in seconds from the clip's start, not the video's (video time t is t - this.ctx.start)`);
+}
 
 /**
  * A component drawn from an HTML layer the size of its box. Subclasses give the markup, the CSS and what to
@@ -85,6 +113,7 @@ export abstract class HtmlComponent {
 
   constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string }) {
     this.opts = o;
+    checkAt(o.at, o.label ?? defaults.label);
     this.box = o.box ?? defaults.box;
     const update: HtmlUpdate = (f) => this.update(f);
     this.layer = new HtmlLayer({ html: defaults.html, css: defaults.css + (o.css ?? ''), width: Math.ceil(this.box.w), height: Math.ceil(this.box.h), update, label: o.label ?? defaults.label });
