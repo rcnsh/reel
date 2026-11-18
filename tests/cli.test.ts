@@ -36,9 +36,32 @@ export default defineVideo({ size: [640, 360], fps: 30, theme: 'print', timeline
 `,
 });
 const wsProject = realpathSync(path.join(ws.dir, 'engine/reel/card'));
+// two clips of a moving square, 4 s then 1 s: check --only probe must not judge intro, which it never loads (and so draws nothing)
+const MOVING = `import type * as THREE from 'three';
+import { Scene, type Frame, Layer2D, W, H, clearRT, LIN, rgba } from 'reel';
+export default class Moving extends Scene {
+  layer = new Layer2D();
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    const c = this.layer.ctx;
+    this.layer.clear();
+    c.fillStyle = rgba('accent'); c.fillRect((f.t % 1) * (W - 100), H / 2 - 50, 100, 100);
+    this.ctx.comp.draw(this.ctx.renderer, this.layer.upload(), out);
+  }
+}
+`;
+const two = fixture('only', {
+  'reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({ size: [640, 360], fps: 30, timeline: () => [
+  { id: 'intro', scene: () => import('./scenes/moving'), start: 0, end: 4 },
+  { id: 'probe', scene: () => import('./scenes/moving'), start: 4, end: 5 },
+] });
+`,
+  'scenes/moving.ts': MOVING,
+});
 afterAll(async () => {
-  for (const p of [demo.dir, layers.dir, wsProject]) await reel(['daemon', 'stop', '--project', p]);
-  demo.cleanup(); layers.cleanup(); ws.cleanup(); rmSync(fresh, { recursive: true, force: true });
+  for (const p of [demo.dir, layers.dir, wsProject, two.dir]) await reel(['daemon', 'stop', '--project', p]);
+  demo.cleanup(); layers.cleanup(); ws.cleanup(); two.cleanup(); rmSync(fresh, { recursive: true, force: true });
 });
 
 test('--help exits 0 and lists the commands; a bad command line exits 2', async () => {
@@ -91,6 +114,16 @@ test.skipIf(!hasChrome)('check passes the demo at 16:9 and vertical (its text wr
     expect(r.json().findings.filter((f: { severity: string }) => f.severity !== 'info')).toEqual([]);
   }
 }, 180_000);
+
+test.skipIf(!hasChrome)('check --only looks at the loaded clips alone: no blank or frozen frames where the others would be', async () => {
+  const r = await reel(['check', '--only', 'probe', '--json', '--project', two.dir]);
+  expect(r.code).toBe(0);
+  expect(r.json().findings).toEqual([]);
+  expect(r.json().frames).toBeGreaterThan(0);
+  const bad = await reel(['check', '--only', 'probe', '--to', '3', '--json', '--project', two.dir]);
+  expect(bad.code).toBe(2);
+  expect(bad.out + bad.err).toContain('in --only probe');
+}, 120_000);
 
 test.skipIf(!hasChrome)('a syntax error in a scene is reported with its line through the warm renderer, and its fix is picked up', async () => {
   const file = path.join(layers.dir, 'scenes/title.ts'), good = readFileSync(file, 'utf8');
