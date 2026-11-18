@@ -194,11 +194,19 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     }
   };
   let ok = false;
+  // the extra workers' launches: the first page renders at once, the others take chunks as soon as they are ready
+  const launches: Promise<unknown>[] = [];
   try {
-    // (the first page renders at once; the others launch alongside it and take chunks as soon as they are ready)
     const rendering = Promise.all(Array.from({ length: workers }, async (_, k) => {
-      const p = k === 0 ? first : await browserOf();
+      let p = first;
       if (k > 0) {
+        const launch = browserOf();
+        launches.push(launch.catch(() => {}));
+        try { p = await launch; } catch (e) {
+          // (the pages that came up render every chunk: one that did not start costs speed, not the export)
+          logs.push(`worker ${k}: its Chrome did not start (${String((e as Error)?.message ?? e).split('\n')[0]}); the other workers rendered its share`);
+          return;
+        }
         // (closePages closes the pages it finds; one that comes up after the render stopped is closed here)
         if (ending || failure) { await p.browser.close().catch(() => {}); return; }
         pages.push(p);
@@ -231,6 +239,8 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     // (killed, ffmpeg leaves an unplayable file rather than a finished-looking truncated one)
     if (!ok) ff.kill(9);
     await closePages();
+    // (a Chrome still launching closes itself once it is up: wait for that, so none outlives the export)
+    await Promise.all(launches);
     server.stop(true);
     rmSync(spoolDir, { recursive: true, force: true });
     if (webpFrames) rmSync(webpFrames, { recursive: true, force: true });
