@@ -53,6 +53,71 @@ export const ease = {
 export const prog = (x: number, a: number, b: number, fn: (t: number) => number = ease.linear) =>
   fn(clamp((x - a) / (b - a)));
 
+/** How a group of items is staggered: each item eases from 0 to 1 over `dur`, the items starting `each` apart. */
+export interface StaggerOptions {
+  /** When the first item starts (default 0), in the same seconds as t. */
+  at?: number;
+  /** Seconds between one item's start and the next's (default 0.08). */
+  each?: number;
+  /** Or: seconds from the first start to the last, shared out between the items (overrides `each`). */
+  total?: number;
+  /** Seconds each item takes (default 0.5; 0 steps from 0 to 1 at its start). */
+  dur?: number;
+  /** The curve of each item's progress (default ease.outCubic). */
+  ease?: (t: number) => number;
+  /**
+   * Which item goes first: 'start' (default, in order), 'end' (last first), 'center' (from the middle outwards,
+   * mirrored pairs together), 'edges' (from both ends inwards), 'random' (a shuffle fixed by `seed`).
+   */
+  order?: 'start' | 'end' | 'center' | 'edges' | 'random';
+  seed?: number;
+}
+
+const shuffles = new Map<string, number[]>();
+
+/** Item i's place in the queue: 0 goes first, items of one rank start together. */
+function staggerRank(i: number, n: number, order: StaggerOptions['order'], seed: number) {
+  const c = (n - 1) / 2, far = Math.floor(c);
+  switch (order ?? 'start') {
+    case 'end': return n - 1 - i;
+    case 'center': return Math.floor(Math.abs(i - c));
+    case 'edges': return far - Math.floor(Math.abs(i - c));
+    case 'random': {
+      // (each item's rank in a shuffle fixed by n and seed, made once: callers ask for every item every frame)
+      const key = `${n}:${seed}`;
+      let ranks = shuffles.get(key);
+      if (!ranks) {
+        const rnd = mulberry32(seed), idx = Array.from({ length: n }, (_, k) => k);
+        for (let k = n - 1; k > 0; k--) { const j = Math.floor(rnd() * (k + 1)); [idx[k], idx[j]] = [idx[j]!, idx[k]!]; }
+        ranks = new Array<number>(n);
+        idx.forEach((item, r) => { ranks![item] = r; });
+        if (shuffles.size > 64) shuffles.clear();
+        shuffles.set(key, ranks);
+      }
+      return ranks[i] ?? i;
+    }
+    default: return i;
+  }
+}
+
+/** The time item i of n starts, staggered as `o` says. */
+export function staggerStart(i: number, n: number, o: StaggerOptions = {}) {
+  const order = o.order ?? 'start';
+  const last = n <= 1 ? 0 : order === 'center' || order === 'edges' ? Math.floor((n - 1) / 2) : n - 1;
+  const each = o.total !== undefined ? (last > 0 ? o.total / last : 0) : (o.each ?? 0.08);
+  return (o.at ?? 0) + staggerRank(i, n, order, o.seed ?? 1) * each;
+}
+
+/**
+ * Item i of n's eased progress (0 to 1) at time t, the items starting one after another: titles word by word,
+ * a grid tile by tile, bars of a chart. A pure function of t: `stagger(f.lt, i, n, { at: 0.5, each: 0.06 })`.
+ */
+export function stagger(t: number, i: number, n: number, o: StaggerOptions = {}) {
+  const s = staggerStart(i, n, o), dur = o.dur ?? 0.5;
+  if (dur <= 0) return t >= s ? 1 : 0;
+  return (o.ease ?? ease.outCubic)(clamp((t - s) / dur));
+}
+
 /** Damped spring response to a step at time 0 (value goes 0 -> 1 with overshoot). */
 export const springStep = (t: number, freq = 4, damping = 0.35) => {
   if (t <= 0) return 0;
