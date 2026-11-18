@@ -4,9 +4,9 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ENGINE, fixture, hasChrome, reel, scratchCopy } from './helpers';
+import { ENGINE, fixture, hasChrome, middleColor, PROPS, reel, REEL, scratchCopy } from './helpers';
 
-const demo = scratchCopy('demo'), layers = scratchCopy('layers');
+const demo = scratchCopy('demo'), layers = scratchCopy('layers'), props = fixture('props', PROPS);
 const fresh = realpathSync(mkdtempSync(path.join(tmpdir(), 'reel-test-init-')));
 // a project inside a pnpm workspace whose scene lives outside the project folder, in the workspace's sources
 const ws = fixture('workspace', {
@@ -37,8 +37,8 @@ export default defineVideo({ size: [640, 360], fps: 30, theme: 'print', timeline
 });
 const wsProject = realpathSync(path.join(ws.dir, 'engine/reel/card'));
 afterAll(async () => {
-  for (const p of [demo.dir, layers.dir, wsProject]) await reel(['daemon', 'stop', '--project', p]);
-  demo.cleanup(); layers.cleanup(); ws.cleanup(); rmSync(fresh, { recursive: true, force: true });
+  for (const p of [demo.dir, layers.dir, wsProject, props.dir]) await reel(['daemon', 'stop', '--project', p]);
+  demo.cleanup(); layers.cleanup(); props.cleanup(); ws.cleanup(); rmSync(fresh, { recursive: true, force: true });
 });
 
 test('--help exits 0 and lists the commands; a bad command line exits 2', async () => {
@@ -61,6 +61,64 @@ test('a --scale that does not fit the frame exits 2 before a browser starts', as
     expect(r.err).toContain('1080x1348 (--size 1080x1348) renders at --scale 0.5');
   }
 });
+
+test.skipIf(!hasChrome)('--props reaches timeline() and scenes through the warm renderer, inline or from a file, over the defaults', async () => {
+  const still = async (...extra: string[]) => {
+    const r = await reel(['still', '--t', '0.5', '--json', '--project', props.dir, ...extra]);
+    expect(r.code).toBe(0);
+    return middleColor(r.json().files[0]);
+  };
+  const [r, g, b] = await still();
+  expect(r).toBeGreaterThan(200); expect(g).toBeLessThan(40); expect(b).toBeLessThan(40);
+  // (the same warm renderer, one request after another: each set of props gets its own page, never a stale one)
+  const blue = await still('--props', '{"color":"#0000ff"}');
+  expect(blue[2]).toBeGreaterThan(200); expect(blue[0]).toBeLessThan(40);
+  writeFileSync(path.join(props.dir, 'green.json'), '{ "color": "#00ff00" }');
+  const green = await still('--props', path.join(props.dir, 'green.json'));
+  expect(green[1]).toBeGreaterThan(200); expect(green[0]).toBeLessThan(40);
+  expect((await still())[0]).toBeGreaterThan(200);
+  // (props larger than a URL can hold: they do not travel in the page's URL)
+  const big = await still('--props', JSON.stringify({ color: '#00ff00', note: 'x'.repeat(40000) }));
+  expect(big[1]).toBeGreaterThan(200);
+  // timeline() reads them: the clip's length, and info reports the props it rendered with
+  const info = (await reel(['info', '--json', '--project', props.dir, '--props', '{"seconds":2.5}'])).json();
+  expect(info.duration).toBe(2.5);
+  expect(info.props).toEqual({ color: '#ff0000', seconds: 2.5, note: '' });
+  // a key the config's defaults lack, or a value of another kind, fails in the page (exit 1) naming the defaults
+  const typo = await reel(['still', '--t', '0.5', '--json', '--project', props.dir, '--props', '{"colour":"#000000"}']);
+  expect(typo.code).toBe(1);
+  expect(typo.json().errors.join('\n')).toContain("'colour' is not one of the config's props (color, seconds, note)");
+  const kind = await reel(['info', '--json', '--project', props.dir, '--props', '{"seconds":"2"}']);
+  expect(kind.code).toBe(1);
+  expect(kind.json().errors.join('\n')).toContain("'seconds' expected a number, as in the config's props, got a string");
+}, 120_000);
+
+test('--props that is not a JSON object, or a file that is not there, exits 2 before a browser starts', async () => {
+  const env = { CHROME_PATH: '/nonexistent/chrome' };
+  for (const [arg, msg] of [['{"a":', 'not JSON'], ['[1]', 'neither a JSON object nor a file'], [path.join(fresh, 'none.json'), 'neither a JSON object nor a file']]) {
+    const r = await reel(['still', '--t', '1', '--project', layers.dir, '--props', arg!], ENGINE, env);
+    expect(r.code).toBe(2);
+    expect(r.err).toContain(msg!);
+  }
+  writeFileSync(path.join(fresh, 'list.json'), '[1, 2]');
+  const list = await reel(['still', '--t', '1', '--project', layers.dir, '--props', path.join(fresh, 'list.json')], ENGINE, env);
+  expect(list.code).toBe(2);
+  expect(list.err).toContain('expected a JSON object, got an array');
+});
+
+test('reel dev --props puts them in the page, escaped; bad props exit 2 before a server starts', async () => {
+  const bad = await reel(['dev', '--project', props.dir, '--props', '[1]']);
+  expect(bad.code).toBe(2);
+  expect(bad.err).toContain('neither a JSON object nor a file');
+  const p = Bun.spawn(['bun', REEL, 'dev', '--project', props.dir, '--port', '0', '--props', '{"note":"</script>+"}'], { stdout: 'pipe', stderr: 'ignore' });
+  try {
+    const reader = p.stdout.getReader();
+    let out = '';
+    while (!/http:\/\/\S+/.test(out)) { const r = await reader.read(); if (r.done) break; out += new TextDecoder().decode(r.value); }
+    const html = await (await fetch(/http:\/\/\S+/.exec(out)![0])).text();
+    expect(html).toContain('window.__REEL_PROPS__ = "{\\"note\\":\\"\\u003c/script>+\\"}"');
+  } finally { p.kill(); await p.exited; }
+}, 30_000);
 
 test.skipIf(!hasChrome)('stills are named after clip and time and never overwrite each other', async () => {
   const a = await reel(['still', '--t', '1', '--json', '--project', layers.dir]);

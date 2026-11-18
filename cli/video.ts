@@ -13,6 +13,8 @@ export interface VideoOpts {
   fmt: Format;
   only?: string;
   theme?: string;
+  /** The render's props, JSON text (--props). */
+  props?: string;
   samples: number | AdaptiveSampling;
   shutter: number;
   from?: number;

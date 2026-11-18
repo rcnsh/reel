@@ -83,10 +83,20 @@ export interface SoundClip {
   fadeOut?: number;
 }
 
-/** What `timeline()` is given: the project's timed words and audio analysis (both empty when it has none). */
-export interface Sources {
+/**
+ * A render's props: a JSON object (`--props`), over the config's `props` defaults. (`any`, not `unknown`: a config
+ * typing its props with an interface, which has no index signature, is then still a VideoConfig.)
+ */
+export type Props = Record<string, any>;
+
+/**
+ * What `timeline()` is given: the project's timed words and audio analysis (both empty when it has none), and the
+ * render's props (the config's `props` with `--props` over them; `{}` without either).
+ */
+export interface Sources<P extends object = Props> {
   words: Words;
   audio: AudioData;
+  props: P;
 }
 
 /**
@@ -110,7 +120,7 @@ export interface NarrationSettings {
   language?: string;
 }
 
-export interface VideoConfig {
+export interface VideoConfig<P extends object = Props> {
   /** Logical frame size in px, [width, height] (default [1920, 1080]). The width is a multiple of 4, the height even. */
   size?: [number, number];
   /** Output frames per second (default 60). */
@@ -130,13 +140,21 @@ export interface VideoConfig {
   audio?: string | false;
   /** How narration.txt is voiced and spaced (reel narrate, reel align). Plain data. */
   narration?: NarrationSettings;
+  /**
+   * The props a render gets when none are given, and their shape: a plain JSON object. With defaults, `--props`
+   * may only name keys they have, each with a value of the same kind (string, number, boolean, array, object;
+   * a default of null or undefined, for an optional prop, takes anything), and its values replace theirs key by key. Without, any object is taken.
+   * Read as `src.props` in timeline() and sounds(), and as `ctx.props` in scenes.
+   */
+  props?: P;
   /** The edit: every clip of the video. Called once the sources are loaded. */
-  timeline(src: Sources): Clip[];
+  timeline(src: Sources<P>): Clip[];
   /**
    * Sounds on the timeline that the mix lays in (`reel mix`, `reel video --mix`), as data or a function of the
    * sources (times from words or beats): `[{ file: 'audio/rain.flac', at: 2, duration: 8, loop: true, db: -12, fadeIn: 1 }]`.
    */
-  sounds?: SoundClip[] | ((src: Sources) => SoundClip[]);
+  // (a method's type, so a config with its own props is still a VideoConfig, as timeline() is)
+  sounds?: SoundClip[] | { fn(src: Sources<P>): SoundClip[] }['fn'];
   /** This project's defaults for `reel video` (and the MCP video_start); a flag given overrides each. Plain data. */
   export?: ExportDefaults;
 }
@@ -153,8 +171,42 @@ export interface ExportDefaults {
   samples?: number | 'auto';
 }
 
-export function defineVideo(c: VideoConfig): VideoConfig {
+export function defineVideo<P extends object = Props>(c: VideoConfig<P>): VideoConfig<P> {
   return c;
+}
+
+/** A JSON value's kind: 'null', 'array', 'object', 'string', 'number', 'boolean' (or another typeof). */
+export const kindOf = (v: unknown) => (v === null ? 'null' : Array.isArray(v) ? 'array' : typeof v);
+/** A kind with its article: 'a string', 'an array', 'null'. */
+export const an = (kind: string) => (kind === 'null' ? 'null' : `${/^[aeiou]/.test(kind) ? 'an' : 'a'} ${kind}`);
+
+/** Whether `v` is a plain JSON object (not null, not an array). */
+export const isProps = (v: unknown): v is Props => kindOf(v) === 'object';
+
+/** Props as JSON text, parsed and checked to be a JSON object (`what` names them in an error). */
+export function parseProps(text: string, what: string): Props {
+  let v: unknown;
+  try { v = JSON.parse(text); } catch (e) { throw new Error(`${what}: not JSON (${(e as Error).message})`); }
+  if (!isProps(v)) throw new Error(`${what}: expected a JSON object, got ${an(kindOf(v))}`);
+  return v;
+}
+
+/**
+ * A render's props: `given` (the page's `?props=`, from `--props`) over the config's `defaults`, key by key, checked
+ * against them: a key they lack, or a value of another kind than theirs, throws, naming what they have (a default
+ * of null or undefined, an optional prop, takes any value).
+ */
+export function resolveProps(defaults: unknown, given: Props | null | undefined): Props {
+  if (defaults !== undefined && !isProps(defaults)) throw new Error(`the config's props: expected an object, got ${an(kindOf(defaults))}`);
+  if (!defaults) return { ...given };
+  const out: Props = { ...defaults };
+  for (const [k, v] of Object.entries(given ?? {})) {
+    if (!Object.hasOwn(defaults, k)) throw new Error(`props: '${k}' is not one of the config's props (${Object.keys(defaults).join(', ') || 'it has none'})`);
+    const want = kindOf(defaults[k]), got = kindOf(v);
+    if (want !== 'null' && want !== 'undefined' && got !== want) throw new Error(`props: '${k}' expected ${an(want)}, as in the config's props, got ${an(got)}`);
+    out[k] = v;
+  }
+  return out;
 }
 
 /** The format a config asks for, with defaults, checked. */
@@ -171,7 +223,7 @@ export function formatOf(c: VideoConfig): { w: number; h: number; fps: number } 
  * (the first from 0): the edit of a narrated video, whose sections are the plates of its script.
  * `modules` is `import.meta.glob('./scenes/*.ts')`.
  */
-export function clipsFromSections(src: Sources, modules: Record<string, () => Promise<unknown>>): Clip[] {
+export function clipsFromSections(src: Sources<object>, modules: Record<string, () => Promise<unknown>>): Clip[] {
   const mod = (name: string) => modules[`./scenes/${name}.ts`] as Clip['scene'] | undefined;
   const have = src.audio.sections.filter((s) => mod(s.name));
   return have.map((s, k) => ({ id: s.name, scene: mod(s.name)!, start: k === 0 ? 0 : s.start, end: have[k + 1]?.start ?? src.audio.duration }));

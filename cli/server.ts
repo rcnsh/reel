@@ -74,10 +74,11 @@ export interface ModuleError { file: string; message: string }
 /**
  * Start the server for `project`. `hmr: false` for renders: a file saved mid-render must not reload the page.
  * `port: 0` picks a free port; a port with `strictPort: false` falls back to the next free one. `theme` names a
- * built-in theme to use instead of the config's. `onModuleError` takes the modules Vite fails to transform
+ * built-in theme to use instead of the config's, `props` the preview's props (JSON text, set in the page as
+ * window.__REEL_PROPS__; render pages get theirs from openPage). `onModuleError` takes the modules Vite fails to transform
  * (the page only learns that a dynamic import failed); without it they are printed.
  */
-export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string; onModuleError?: (e: ModuleError) => void } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
+export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string; props?: string; onModuleError?: (e: ModuleError) => void } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
   const config = await loadConfig(project);
   const format = formatOf(config);
   const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
@@ -118,6 +119,10 @@ export async function startServer(project: string, opts: { port?: number; strict
     server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project, ...workspaceOf(project, searchForWorkspaceRoot)] } },
     build: { target: 'esnext' },
     plugins: [{
+      name: 'reel-props',
+      // (`<` escaped: the JSON may hold '</script>')
+      transformIndexHtml: () => opts.props ? [{ tag: 'script', children: `window.__REEL_PROPS__ = ${JSON.stringify(opts.props).replace(/</g, '\\u003c')};`, injectTo: 'head-prepend' }] : [],
+    }, {
       name: 'reel-project-files',
       configureServer(s) {
         s.middlewares.use((req, res, next) => {

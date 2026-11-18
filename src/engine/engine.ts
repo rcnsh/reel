@@ -15,7 +15,40 @@ import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
 import { TransitionPass, transitionOf, transitionWeights } from './transitions';
-import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
+import { BUNDLED_SOUNDS, parseProps, resolveProps, type Clip, type Props, type SoundClip, type VideoConfig } from '../config';
+
+/**
+ * The props the page was given, or null: `?props=<JSON object>` in its URL (typed into the preview by hand), else
+ * `window.__REEL_PROPS__`, the JSON text the CLI sets before any module runs (an init script for its pages, a
+ * script in the page for `reel dev --props`: a URL holds a few kilobytes at most).
+ */
+function pageProps(): Props | null {
+  // (not URLSearchParams, which reads a '+' typed into the JSON as a space; a '&' or '%' in it is typed %26, %25)
+  const m = typeof location === 'undefined' ? null : /[?&]props=([^&]*)/.exec(location.search);
+  if (m) {
+    let text: string;
+    try { text = decodeURIComponent(m[1]!); } catch { throw new Error(`?props=: not URL-encoded (a % in the JSON is written %25)`); }
+    return parseProps(text, '?props=');
+  }
+  const injected = (globalThis as { __REEL_PROPS__?: string }).__REEL_PROPS__;
+  return injected === undefined ? null : parseProps(injected, 'props');
+}
+
+/**
+ * A copy of `v` frozen all the way down: props are shared by every clip and every request of a warm page (a copy:
+ * the config's own default objects stay as they are). Typed arrays are copied but cannot be frozen.
+ */
+function frozenCopy<T>(v: T): T {
+  let c: T;
+  try { c = structuredClone(v); } catch (e) { throw new Error(`props: expected plain data (${(e as Error).message})`); }
+  const freeze = (x: unknown) => {
+    if (!x || typeof x !== 'object' || ArrayBuffer.isView(x)) return;
+    Object.freeze(x);
+    for (const y of Object.values(x)) freeze(y);
+  };
+  freeze(c);
+  return c;
+}
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
 export type TimelineEntry = Clip;
@@ -70,6 +103,8 @@ export class Engine {
   ctx!: SceneCtx;
   audio!: AudioData;
   words!: Words;
+  /** The render's props: the page's over the config's defaults (resolveProps), frozen. */
+  props: Props = {};
   post!: Post;
   comp = new Compositor();
   loaded = new Map<string, Loaded>();
@@ -406,8 +441,10 @@ export class Engine {
   async init(only?: (e: TimelineEntry) => boolean) {
     const c = this.config;
     [this.audio, this.words] = await Promise.all([AudioData.load(c.audio), Words.load(c.words), loadFonts(), loadStrokeFonts()]) as [AudioData, Words, void, void];
-    this.timeline = c.timeline({ words: this.words, audio: this.audio });
-    this.configSounds = typeof c.sounds === 'function' ? c.sounds({ words: this.words, audio: this.audio }) : c.sounds ?? [];
+    this.props = frozenCopy(resolveProps(c.props, pageProps()));
+    const src = { words: this.words, audio: this.audio, props: this.props };
+    this.timeline = c.timeline(src);
+    this.configSounds = typeof c.sounds === 'function' ? c.sounds(src) : c.sounds ?? [];
     const ids = new Set<string>();
     for (const e of this.timeline) {
       if (ids.has(e.id)) throw new Error(`timeline: two clips are called '${e.id}'`);
@@ -433,7 +470,7 @@ export class Engine {
       this.trackRTs.push(t);
       for (const rt of [...t.rts, ...t.mix]) this.maskedRTs.set(rt, { margin: 0 });
     }
-    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, clip: (id) => {
+    this.ctx = { renderer: this.renderer, audio: this.audio, words: this.words, props: this.props, comp: this.comp, W, H, id: '', params: {}, start: 0, end: 0, clip: (id) => {
       const e = this.timeline.find((x) => x.id === id);
       if (!e) throw new Error(`no clip '${id}' on the timeline (it has ${this.timeline.map((x) => x.id).join(', ')})`);
       return { id: e.id, start: e.start, end: e.end, track: e.track ?? 0 };

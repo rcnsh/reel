@@ -23,11 +23,11 @@ export interface Req {
 export interface Result { ok: boolean; errors: string[]; logs: string[]; warnings: string[]; usage?: boolean; [k: string]: unknown }
 
 export interface ClipInfo { id: string; start: number; end: number; track: number; exempt?: import('../src/engine/report').CheckRule[] | true }
-export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[]; track: string | null; theme: string; W: number; H: number; fps: number; scale: number }
+export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[]; track: string | null; theme: string; props: Record<string, unknown>; W: number; H: number; fps: number; scale: number }
 
 export const meta = (h: PageHandle): Promise<PageMeta> => h.page.evaluate(() => {
   const R = (window as any).__reel;
-  return { duration: R.duration, timeline: R.timeline, cues: R.cues, sounds: R.sounds, track: R.track, theme: R.theme, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
+  return { duration: R.duration, timeline: R.timeline, cues: R.cues, sounds: R.sounds, track: R.track, theme: R.theme, props: R.props, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
 });
 
 /** `dir/base.png`, or `dir/base-2.png`, `-3` … when that is taken: stills and sheets never overwrite each other. */
@@ -62,7 +62,7 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
   async info(h, ctx) {
     const m = await meta(h);
     const tracks = [...new Set(m.timeline.map((c) => c.track))].sort((a, b) => a - b);
-    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues, sounds: m.sounds };
+    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, props: m.props, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues, sounds: m.sounds };
   },
 
   async still(h, ctx) {

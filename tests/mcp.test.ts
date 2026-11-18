@@ -7,9 +7,9 @@ import { PNG } from 'pngjs';
 import { parseCommand } from '../cli/args';
 import { encodeOptsOf, formatOf, planOf } from '../cli/formats';
 import { videoArgs } from '../cli/mcp';
-import { fixture, hasChrome, OFF_FRAME, reel, REEL, scratchCopy } from './helpers';
+import { fixture, hasChrome, middleColor, OFF_FRAME, PROPS, reel, REEL, scratchCopy } from './helpers';
 
-const demo = scratchCopy('demo'), layers = scratchCopy('layers'), wide = fixture('offframe', OFF_FRAME);
+const demo = scratchCopy('demo'), layers = scratchCopy('layers'), wide = fixture('offframe', OFF_FRAME), props = fixture('props', PROPS);
 let client: Client;
 
 beforeAll(async () => {
@@ -18,7 +18,7 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await client?.close();
-  for (const p of [demo, layers, wide]) { await reel(['daemon', 'stop', '--project', p.dir]); p.cleanup(); }
+  for (const p of [demo, layers, wide, props]) { await reel(['daemon', 'stop', '--project', p.dir]); p.cleanup(); }
 });
 
 type Block = { type: string; text?: string; data?: string; mimeType?: string };
@@ -73,6 +73,7 @@ test("video_start's options become reel video flags the CLI accepts; without out
     [{ samples: '1', wait: true }, ['--samples', '1', '--wait']],
     [{ noaudio: false }, ['--audio']],
     [{ format: 'png', out: '/tmp/f/x.png' }, ['--out', '/tmp/f/x.png', '--format', 'png']],
+    [{ props: { title: 'Q3', n: [1, 2] } }, ['--props', '{"title":"Q3","n":[1,2]}']],
   ];
   for (const [a, want] of cases) {
     const args = videoArgs(a, '/p');
@@ -88,6 +89,20 @@ test.skipIf(!hasChrome)('project_info', async () => {
   expect(r.isError).toBe(false);
   expect(r.json.size).toEqual([1080, 1920]);
   expect(r.json.timeline.map((c: { id: string }) => c.id)).toEqual(['dawn', 'dusk', 'title', 'overlay']);
+}, 120_000);
+
+test.skipIf(!hasChrome)('props reach project_info and render_still; a prop the config lacks is an error', async () => {
+  const info = await call('project_info', { project: props.dir, props: { seconds: 2 } });
+  expect(info.isError).toBe(false);
+  expect(info.json.duration).toBe(2);
+  expect(info.json.props).toEqual({ color: '#ff0000', seconds: 2, note: '' });
+  const red = await call('render_still', { project: props.dir, times: [0.5] });
+  const blue = await call('render_still', { project: props.dir, times: [0.5], props: { color: '#0000ff' } });
+  expect(middleColor(red.json.files[0])[0]).toBeGreaterThan(200);
+  expect(middleColor(blue.json.files[0])[2]).toBeGreaterThan(200);
+  const bad = await call('render_still', { project: props.dir, times: [0.5], props: { colour: '#000' } });
+  expect(bad.isError).toBe(true);
+  expect(JSON.stringify(bad.json)).toContain("'colour' is not one of the config's props");
 }, 120_000);
 
 test.skipIf(!hasChrome)('render_still returns downscaled images and the files on disk', async () => {

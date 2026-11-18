@@ -12,6 +12,12 @@ export interface SceneCtx {
   audio: AudioData;
   /** The project's timed words (narration, sung lyrics, captions). */
   words: Words;
+  /**
+   * The render's props (`--props` over the config's `props` defaults; `{}` without either), the same for every
+   * clip. Cast to the project's own type: `this.ctx.props as Props` (the type reel.config.ts exports).
+   */
+  // (any, not unknown: so that cast compiles for an interface as well as a type alias)
+  props: Readonly<Record<string, any>>;
   comp: Compositor;
   W: number;
   H: number;

@@ -51,6 +51,8 @@ Every file you want, with what the engine needs to know to make it:
 - **Sound**: mixed to the default target (-14 LUFS) or another; subtitles as a soft track, as SRT/VTT files, or burned in as captions.
 - **Parts**: a title card alone, a teaser of the first seconds, a range.
 
+- **Variants**: the same video with other data (a title, a figure, a list per region or per customer). Say what varies; the agent gives the config `props` defaults and renders each variant with `--props` (the MCP tools' `props` argument).
+
 Give the output folder if it matters.
 
 ### 6. Limits
