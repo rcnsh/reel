@@ -21,7 +21,7 @@ export default defineVideo({ size: [64, 36], fps: 30, theme: 'neutral', timeline
 const projects = [project(false), project(true)];
 afterAll(() => { for (const p of projects) p.cleanup(); });
 
-/** The frames the page renders for two ranges that do not follow on from each other (an ack server takes them). */
+/** The frames the page renders for two ranges that do not follow on from each other and a third that goes on from the second (an ack server takes them). */
 async function framesRendered(dir: string) {
   const r = new Renderer(dir);
   let n = 0;
@@ -38,6 +38,8 @@ async function framesRendered(dir: string) {
       E.renderFrame = (...a: unknown[]) => { calls++; return render(...a); };
       await P.stream({ from: 10 / 30, to: 13 / 30, ws });
       await P.stream({ from: 30 / 30, to: 33 / 30, ws });
+      // (one that goes on where the last ended never needs one)
+      await P.stream({ from: 33 / 30, to: 35 / 30, ws });
       return calls;
     }, `ws://localhost:${server.port}/`);
   } finally {
@@ -47,6 +49,6 @@ async function framesRendered(dir: string) {
 }
 
 test.skipIf(!hasChrome)('a stateless range starts with no warm-up frame; a stateful one with one', async () => {
-  expect(await framesRendered(projects[0]!.dir)).toBe(6);
-  expect(await framesRendered(projects[1]!.dir)).toBe(8);
+  expect(await framesRendered(projects[0]!.dir)).toBe(8);
+  expect(await framesRendered(projects[1]!.dir)).toBe(10);
 }, 120_000);
