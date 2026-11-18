@@ -779,6 +779,20 @@ export class Engine {
     return { outTex, post };
   }
 
+  /**
+   * Clear a scene target's colour to transparent before a scene renders into it, so what a scene leaves undrawn
+   * (a transparent Stage3D, an upper track that forgets to clear) is the same whatever the page drew before:
+   * the target is shared by sub-frames, frames and requests. Depth is left alone: it holds the tile mask.
+   */
+  private blankPrev = new THREE.Color();
+  private blank(rt: THREE.WebGLRenderTarget) {
+    const r = this.renderer, prevC = r.getClearColor(this.blankPrev), prevA = r.getClearAlpha();
+    r.setRenderTarget(rt);
+    r.setClearColor(0x000000, 0);
+    r.clear(true, false, false);
+    r.setClearColor(prevC, prevA);
+  }
+
   /** One track at t: its active clips in start order, the later ones transitioning in over the earlier. */
   private compositeTrack(active: TimelineEntry[], t: number, dt: number, seeked: boolean, rt3: TrackRTs): { outTex: THREE.Texture; post: PostOverrides; weights: number[] } {
     const r = this.renderer;
@@ -811,6 +825,7 @@ export class Engine {
         const step = 1 / FPS;
         let first = true;
         for (let pt = from; pt < t - step * 0.5; pt += step) {
+          this.blank(rt);
           s.render(this.frameFor(e, pt, first ? 0 : step, first, true, null, 1, 0), rt);
           first = false;
         }
@@ -819,6 +834,7 @@ export class Engine {
       let ov: PostOverrides | void = undefined;
       this.drawing = e.id;
       try {
+        this.blank(rt);
         ov = s.render(this.frameFor(e, t, sceneSeeked ? 0 : dt, sceneSeeked && !s.stateful, false, idx > 0 ? under : null, tin, tout), rt);
       } catch (err) {
         this.renderFailed(rec, `[${e.id}] render at ${t.toFixed(3)} s: ${String((err as Error)?.stack ?? err)}`);

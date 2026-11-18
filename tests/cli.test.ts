@@ -36,9 +36,30 @@ export default defineVideo({ size: [640, 360], fps: 30, theme: 'print', timeline
 `,
 });
 const wsProject = realpathSync(path.join(ws.dir, 'engine/reel/card'));
+// a stage with a transparent background on track 0, nothing drawn under it: a box that moves across the frame
+const glass = fixture('glass', {
+  'reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({ size: [320, 180], fps: 30, theme: 'print', timeline: () => [{ id: 'glass', scene: () => import('./scenes/glass'), start: 0, end: 1 }] });
+`,
+  'scenes/glass.ts': `import * as THREE from 'three';
+import { Scene, type Frame, Stage3D } from 'reel';
+export default class Glass extends Scene {
+  stage = new Stage3D(this.ctx, { background: null, shadows: false });
+  box = new THREE.Mesh(new THREE.BoxGeometry(0.6, 0.6, 0.6), new THREE.MeshBasicMaterial({ color: 0xff8020 }));
+  async init() { this.stage.scene.add(this.box); }
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    this.stage.camera({ position: [0, 0, 4], target: [0, 0, 0] });
+    this.box.position.x = -1.6 + 3.2 * f.lt;
+    this.box.rotation.y = 4 * f.lt;
+    this.stage.render(out);
+  }
+  dispose() { this.stage.dispose(); }
+}
+`,
+});
 afterAll(async () => {
-  for (const p of [demo.dir, layers.dir, wsProject]) await reel(['daemon', 'stop', '--project', p]);
-  demo.cleanup(); layers.cleanup(); ws.cleanup(); rmSync(fresh, { recursive: true, force: true });
+  for (const p of [demo.dir, layers.dir, wsProject, glass.dir]) await reel(['daemon', 'stop', '--project', p]);
+  demo.cleanup(); layers.cleanup(); ws.cleanup(); glass.cleanup(); rmSync(fresh, { recursive: true, force: true });
 });
 
 test('--help exits 0 and lists the commands; a bad command line exits 2', async () => {
@@ -137,6 +158,17 @@ test.skipIf(!hasChrome)('a project inside a workspace loads a scene from outside
   const check = await reel(['check', '--json', '--project', wsProject]);
   expect(check.json().findings.filter((f: { kind: string }) => f.kind === 'unreported').map((f: { clip: string }) => f.clip)).toEqual(['card']);
 }, 180_000);
+
+test.skipIf(!hasChrome)('a scene that leaves its target undrawn renders the same whatever the page drew before', async () => {
+  // (a transparent stage composites over its target: what an earlier frame left there must not show through)
+  for (const samples of ['1', 'auto']) {
+    const first = await reel(['still', '--t', '0.2', '--samples', samples, '--json', '--project', glass.dir]);
+    expect(first.json().errors).toEqual([]);
+    await reel(['still', '--t', '0.8', '--samples', samples, '--json', '--project', glass.dir]);
+    const again = await reel(['diff', '--t', '0.2', '--samples', samples, first.json().files[0], '--json', '--project', glass.dir]);
+    expect(again.json().changed).toBe(0);
+  }
+}, 120_000);
 
 test.skipIf(!hasChrome)('the warm renderer shows in daemon status and stops', async () => {
   await reel(['info', '--project', layers.dir]);
