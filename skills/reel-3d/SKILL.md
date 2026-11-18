@@ -92,7 +92,7 @@ Give the pose `fstop` (f-number) or `aperture` (lens radius in world units), and
 ## Animation
 
 - `new Animation(gltf.scene, gltf.animations, { play: ['Walk'], loop })` then `anim.at(t, speed)` in render(). It sets the clips' time from scratch each call (skeletons, morph targets and transforms), so any t in any order gives the same pose. `anim.duration` is the longest clip.
-- Your own motion: set `position`, `rotation`, `scale` from `f.lt` (`keys()`, `ease`, `springStep` from reel).
+- Your own motion: set `position`, `rotation`, `scale` from `f.lt` (`keys()`, `interpolate`, `ease`, `spring` from reel).
 - `new Instances(geometry, material, count, (i, t, p) => { p.position.set(…); p.rotation.set(…); p.scale.setScalar(…); p.color = … })`, added to the scene, and `instances.update(f.lt)` in render(): thousands of objects in one draw, each placed by a function of its index and time (seed with `hash(i)`, never `Math.random()`).
 - Physics or simulation that integrates state is a `stateful` scene: fixed `--samples N`, never `auto`.
 
