@@ -210,11 +210,12 @@ def at_beats(onsets_, beats, tol=0.05):
 
 
 def downbeat_phase(y, harm, beats, kick, snare):
-    """The bar phase (of 4) on the one: kicks on 1 and 3 against snares on 2 and 4 choose the pair of phases,
-    then low-end energy plus harmonic change at the beat choose within it."""
+    """The bar phase (of 4) on the one: the phase with most kick and least snare on its beats and the one two beats
+    on are the candidates (kicks on 1 and 3 with snares on 2 and 4 leave them level; a half-time snare on 3 keeps 1
+    ahead), and low-end energy and harmonic change at the beat choose between them."""
+    if len(beats) < 4:
+        return 0
     k, s = at_beats(kick, beats), at_beats(snare, beats)
-    pair = lambda p: np.r_[k[p::4], k[p + 2::4]].mean() - np.r_[s[p::4], s[p + 2::4]].mean()
-    p0 = 0 if pair(0) >= pair(1) else 1
     # low end: rms below 200 Hz in the 100 ms after each beat (raw, so a louder kick on the one counts)
     lowb = band(y, None, 200)
     low = np.array([np.sqrt(np.mean(lowb[int(b * SR):int((b + 0.1) * SR)] ** 2) + 1e-12) for b in beats])
@@ -225,8 +226,10 @@ def downbeat_phase(y, harm, beats, kick, snare):
     seg = librosa.util.sync(ch, np.r_[0, fr, ch.shape[1]], aggregate=np.mean)
     nov = np.r_[np.linalg.norm(np.diff(seg, axis=1), axis=0)[: len(beats)], np.zeros(len(beats))][: len(beats)]
     n01 = lambda x: x / x.max() if x.max() > 0 else x
-    score = lambda p: n01(low)[p::4].mean() + n01(nov)[p::4].mean()
-    return p0 if score(p0) >= score(p0 + 2) else p0 + 2
+    drums = [(k - s)[p::4].mean() for p in range(4)]
+    p0 = int(np.argmax(drums))
+    score = lambda p: drums[p] + n01(low)[p::4].mean() + n01(nov)[p::4].mean()
+    return max((p0, (p0 + 2) % 4), key=score)
 
 
 def auto_sections(y, beats, downbeats, duration):
