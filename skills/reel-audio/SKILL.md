@@ -34,6 +34,9 @@ it; `//` lines are comments. `reel narrate` voices each plate as one passage and
 - Plates are cached in `audio/.narration/` by text, voice, speed, model and language: after editing one line only that plate
   is voiced again (with a hosted voice, the others cost nothing). Pauses are applied afterwards, so changing them
   voices nothing. `--force` voices everything again.
+- With a hosted voice each plate is cached as soon as it arrives, and requests are retried on HTTP 429, 5xx and network errors
+  (after the service's Retry-After when it sends one). After a failure (a spent quota, a rejected key) fix it and
+  run `reel narrate` again: only the plates still missing are voiced.
 - Each plate is trimmed and brought to -16 LUFS; word edges are snapped to the pauses in the audio.
 - Writes `audio/narration.flac` (lossless), `data/words.json` (`lines[]` with `plate`, `text`, `start`, `end`,
   `words[]` of `{ w, start, end }`) and `data/audio.json` (the track, the length, one section per plate, a silent
@@ -119,7 +122,8 @@ Burned-in captions are the kit's `Captions` component.
 
 - `reel assets` generates what is missing (or whose prompt, size or duration changed) when the key is set: images
   with OpenAI (`OPENAI_API_KEY`, `REEL_IMAGE_MODEL`), sound effects and music with ElevenLabs. Each is fitted to its
-  size and format; `data/generated-assets.json` records what was made.
+  size and format; `data/generated-assets.json` records what was made. Requests are retried on HTTP 429, 5xx and
+  network errors, like a hosted voice's.
 - Without a key it lists each missing asset's prompt, size and path and exits 1: tell the person what to make and
   where to save it. A file put there by hand is used and never overwritten.
 - Until an image exists, `ImageBox` draws a labelled placeholder of its size, so layout work goes on; `reel check`
