@@ -3,8 +3,7 @@
 // wipe or a slide is motion blurred like anything else.
 import * as THREE from 'three';
 import { FSPass } from './gl';
-import { HEX } from './palette';
-import { hexToLinear } from './util';
+import { HEX, colorLinear, isColor } from './palette';
 
 export type TransitionKind = 'crossfade' | 'wipe' | 'slide' | 'zoom' | 'dip';
 export type TransitionDirection = 'left' | 'right' | 'up' | 'down';
@@ -41,7 +40,7 @@ export function transitionOf(t: unknown, where: string): Transition {
   if (!TRANSITION_KINDS.includes(o.kind as TransitionKind)) fail(`kind must be one of ${TRANSITION_KINDS.join(', ')}`);
   if (o.direction !== undefined && !Object.prototype.hasOwnProperty.call(DIRS, o.direction as string)) fail(`direction must be left, right, up or down`);
   if (o.softness !== undefined && !(typeof o.softness === 'number' && o.softness >= 0 && o.softness <= 1)) fail('softness must be a share of the frame from 0 to 1');
-  if (o.color !== undefined && !(typeof o.color === 'string' && (/^#[0-9a-f]{6}$/i.test(o.color) || Object.prototype.hasOwnProperty.call(HEX, o.color)))) fail(`color must be '#rrggbb' or a palette key (${Object.keys(HEX).join(', ')})`);
+  if (o.color !== undefined && !isColor(o.color)) fail(`color must be '#rrggbb' or a palette key (${Object.keys(HEX).join(', ')})`);
   return o as unknown as Transition;
 }
 
@@ -102,7 +101,7 @@ export class TransitionPass {
     (u.dir!.value as THREE.Vector2).set(...DIRS[t.direction ?? 'left']);
     u.colA!.value = upper && t.color === undefined ? 0 : 1;
     const c = t.color ?? 'bg';
-    (u.col!.value as THREE.Vector3).set(...(c.startsWith('#') ? hexToLinear(c) : hexToLinear(HEX[c]!)));
+    (u.col!.value as THREE.Vector3).set(...colorLinear(c));
     this.pass.render(renderer, out);
   }
 }
