@@ -42,10 +42,12 @@ import subprocess
 import sys
 import tempfile
 from collections import Counter
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 
 import librosa
 import numpy as np
+from scipy.ndimage import median_filter
 from scipy.signal import butter, sosfiltfilt
 
 # the project folder: the one `reel` was pointed at, else the current folder
@@ -91,6 +93,26 @@ def norm01(x, pct=99.0):
 
 def envelope(x, n):
     return [round(float(v), 3) for v in follow(norm01(frame_rms(x, n)))]
+
+
+def hpss(y, kernel=31):
+    """librosa.effects.hpss (kernel 31, margin 1) with its two median filters run in threads over slices of the
+    spectrogram (each slice whole along the filtered axis, so the result is the same to the bit): the filters
+    are nearly all of its time, and single-threaded they took 7 s of a 4-minute song."""
+    S, phase = librosa.magphase(librosa.stft(y))
+
+    def med(size, axis):
+        n = S.shape[1 - axis]
+        cuts = np.linspace(0, n, min(n, os.cpu_count() or 1) + 1).astype(int)
+        take = (lambda a, b: S[a:b]) if axis == 1 else (lambda a, b: S[:, a:b])
+        with ThreadPoolExecutor() as ex:
+            out = list(ex.map(lambda ab: median_filter(take(*ab), size=size, mode="reflect"), zip(cuts[:-1], cuts[1:])))
+        return np.concatenate(out, axis=1 - axis)
+
+    harm, perc = med((1, kernel), 1), med((kernel, 1), 0)
+    mask = librosa.util.softmask(harm, perc, power=2, split_zeros=True)
+    back = lambda m: librosa.istft((S * m) * phase, dtype=y.dtype, length=len(y))
+    return back(mask), back(1.0 - mask)
 
 
 def onsets(x, delta, min_gap):
@@ -169,15 +191,19 @@ def downbeat_phase(y, harm, beats, kick, snare):
     return p0 if score(p0) >= score(p0 + 2) else p0 + 2
 
 
-def auto_sections(y, downbeats, duration):
-    """Structural segmentation (chroma + MFCC, agglomerative), boundaries snapped to downbeats."""
+def auto_sections(y, beats, downbeats, duration):
+    """Structural segmentation (chroma + MFCC averaged over each beat, agglomerative), boundaries snapped to
+    downbeats. Clustering beats rather than frames keeps it quick on a long song (it grows with the square)."""
     hop = 512
     feat = np.vstack([
         librosa.util.normalize(librosa.feature.chroma_cqt(y=y, sr=SR, hop_length=hop), axis=0),
         librosa.util.normalize(librosa.feature.mfcc(y=y, sr=SR, hop_length=hop, n_mfcc=13), axis=1),
     ])
+    edges = librosa.util.fix_frames(librosa.time_to_frames(beats, sr=SR, hop_length=hop), x_min=0, x_max=feat.shape[1])
+    feat = librosa.util.sync(feat, edges, aggregate=np.mean)
     k = int(np.clip(round(duration / 25), 2, 12))  # about one section per 25 s
-    bounds = librosa.frames_to_time(librosa.segment.agglomerative(feat, k), sr=SR, hop_length=hop)
+    k = min(k, feat.shape[1])
+    bounds = librosa.frames_to_time(edges[librosa.segment.agglomerative(feat, k)], sr=SR, hop_length=hop)
     db = np.array(downbeats) if downbeats else np.array([0.0])
     starts = sorted({0.0} | {float(db[np.abs(db - b).argmin()]) for b in bounds[1:]})
     return [{"name": f"part{i + 1}", "start": s} for i, s in enumerate(starts)]
@@ -263,7 +289,7 @@ def main():
     dk, ds, dh = (float(x) for x in a.onset_delta.split(","))
     meter = 4
     if a.fast:
-        harm, perc = librosa.effects.hpss(y)
+        harm, perc = hpss(y)
         bpm, beats = beat_grid(y, duration, a.free_tempo)
         # (a free-tempo grid from a shifted song starts at its first beat; a fitted one extends back to 0)
         kick = onsets(band(perc, None, 150), delta=dk, min_gap=0.10)
@@ -315,7 +341,7 @@ def main():
     elif prev:
         starts = None
     else:
-        starts = auto_sections(y, downbeats, duration)
+        starts = auto_sections(y, beats, downbeats, duration)
     if starts is not None:
         sections = [{"name": s["name"], "start": round(float(s["start"]), 3), "end": round(float(starts[i + 1]["start"] if i + 1 < len(starts) else duration), 3)} for i, s in enumerate(starts)]
     else:
