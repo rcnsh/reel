@@ -178,27 +178,32 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
 
   async perf(h, ctx) {
     const { req } = ctx;
+    // render: renderFrame returning (the CPU side, and with --samples auto the GPU too: the sampler waits for each
+    // step's error); gpu: the GPU work still queued after that, waited for with a fence; readback: the copy out alone
     return h.page.evaluate(async ({ from, to, samples, shutter, pixels }) => {
       const P = (window as any).__reel, dt = 1 / P.fps, E = P.engine;
       const ms: number[] = [];
-      let render = 0, readback = 0;
+      let render = 0, gpu = 0, readback = 0;
       const buf = new Uint8Array(E.constructor.bytes(pixels));
       await P.still(from);
+      await E.gpuIdle();
       const used: Record<number, number> = {};
       for (let t = from; t < to; t += dt) {
         const a = performance.now();
         const k = await E.renderFrame(t, dt, false, samples, shutter);
         const b = performance.now();
+        await E.gpuIdle();
+        const c = performance.now();
         E.readStart(0, pixels);
         await E.readFinish(0, buf);
-        const c = performance.now();
+        const d = performance.now();
         used[k] = (used[k] ?? 0) + 1;
-        render += b - a; readback += c - b;
-        ms.push(c - a);
+        render += b - a; gpu += c - b; readback += d - c;
+        ms.push(d - a);
       }
       ms.sort((a, b) => a - b);
       const n = ms.length;
-      return { frames: n, pixels, avg: ms.reduce((a, b) => a + b, 0) / n, render: render / n, readback: readback / n, p50: ms[n >> 1]!, p95: ms[Math.floor(n * 0.95)]!, max: ms[n - 1]!, subFrames: used };
+      return { frames: n, pixels, avg: ms.reduce((a, b) => a + b, 0) / n, render: render / n, gpu: gpu / n, readback: readback / n, p50: ms[n >> 1]!, p95: ms[Math.floor(n * 0.95)]!, max: ms[n - 1]!, subFrames: used, adaptive: typeof samples !== 'number' };
     }, { from: req.args.from ?? 0, to: req.args.to ?? 5, samples: req.samples, shutter: req.shutter, pixels: req.args.pixels ?? 'rgb8' });
   },
 

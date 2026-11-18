@@ -956,6 +956,20 @@ export class Engine {
     gl.flush();
   }
 
+  /** Resolve once the GPU has done everything queued so far (a fence, polled between tasks). For `reel perf`. */
+  async gpuIdle() {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext, s = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0)!;
+    gl.flush();
+    try {
+      for (;;) {
+        const st = gl.clientWaitSync(s, 0, 0);
+        if (st === gl.ALREADY_SIGNALED || st === gl.CONDITION_SATISFIED) return;
+        if (st === gl.WAIT_FAILED) throw new Error('gpuIdle: fence wait failed');
+        await yieldTask();
+      }
+    } finally { gl.deleteSync(s); }
+  }
+
   /** Wait for readStart(slot)'s copy and copy it into `out` (Engine.bytes of its mode). */
   async readFinish(slot: number, out: Uint8Array) {
     const gl = this.renderer.getContext() as WebGL2RenderingContext, p = this.packs[slot];
