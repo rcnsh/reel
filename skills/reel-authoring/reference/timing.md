@@ -14,6 +14,7 @@ Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a si
 - `lines[]`: `{ i, text, start, end, words[] }`, each word `{ w, start, end }`. Text comes with typographic punctuation (`don’t`).
 - `words.get('sudden drop')`: the first line containing the text (case-insensitive, straight or curly quotes); throws when none does. `words.get(text, n)` for the n-th. `find(s)`: all such lines.
 - `lineAt(t)`, `lastLine(t)`, `nextLine(t)`, `linesIn(t0, t1)`, `wordAt(t)`, `lastWord(t)`, `findWords('word')`.
+- A kit component's `at` takes lines and words directly, in video time: `new TextBlock({ text: '…', at: this.ctx.words.get('sudden drop') })` shows while the line is said (reference/kit.md).
 - `Words.wordProgress(word, t)` (0..1 through a word), `Words.lineCharProgress(line, t)` (characters said so far: for letter-by-letter reveals and wipes).
 - Empty (no lines) in a project without `data/words.json`.
 

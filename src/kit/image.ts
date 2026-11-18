@@ -8,7 +8,7 @@ import { decodePng16, pngDepth } from '../engine/png16';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
-import { motionAt, safeBox, type Box, type ComponentOptions, type Motion } from './common';
+import { motionAt, safeBox, windowOf, type Box, type ComponentOptions, type Motion } from './common';
 
 /** A framing of the image: zoom (1 = fitted) and a pan from -1 to 1 across the room the zoom leaves. */
 export interface Framing { zoom?: number; x?: number; y?: number }
@@ -145,6 +145,8 @@ function halfFloats(f: Float32Array): Uint16Array {
  */
 export class ImageBox {
   readonly box: Box;
+  /** `at` in clip seconds (undefined: the whole clip). */
+  private at: [number, number] | undefined;
   private o: ImageBoxOptions;
   private tex: THREE.Texture | null = null;
   private size: [number, number] = [1, 1];
@@ -153,6 +155,7 @@ export class ImageBox {
 
   constructor(o: ImageBoxOptions) {
     this.o = o;
+    this.at = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     awaitBeforeFirstFrame(this.load().catch(async (e: unknown) => {
       const a = await declaredAsset(o.src);
@@ -220,7 +223,7 @@ export class ImageBox {
 
   draw(renderer: THREE.WebGLRenderer, out: THREE.WebGLRenderTarget, f: Frame, o: { opacity?: number } = {}) {
     if (!this.tex) return;
-    const [w0, w1] = this.o.at ?? [0, f.end - f.start];
+    const [w0, w1] = this.at ?? [0, f.end - f.start];
     drawPicture(renderer, out, f, {
       tex: this.tex, size: this.size, box: this.box, fit: this.o.fit, radius: this.o.radius, framing: kenBurnsAt(this.o.kenBurns, f.lt, w0, w1),
       label: this.missing ? `missing asset ${this.missing}` : this.o.label ?? this.o.alt ?? this.o.src,

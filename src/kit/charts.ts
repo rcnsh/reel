@@ -10,9 +10,8 @@ export interface ProgressOptions extends ComponentOptions {
 }
 
 /** The default progress: grows over the first 1.4 s of the window (after a 0.2 s beat), eased out. */
-function progressOf(o: ProgressOptions, f: Frame) {
+function progressOf(o: ProgressOptions, f: Frame, w0: number) {
   if (o.progress !== undefined) return clamp(val(o.progress, f));
-  const w0 = o.at?.[0] ?? 0;
   return prog(f.lt, w0 + 0.2, w0 + 1.6, ease.outCubic);
 }
 
@@ -62,7 +61,7 @@ export class BarChart extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const o = this.o, p = progressOf(o, f), n = o.data.length, max = o.max ?? Math.max(...o.data.map((d) => d.value), 1e-9);
+    const o = this.o, p = progressOf(o, f, this.window(f)[0]), n = o.data.length, max = o.max ?? Math.max(...o.data.map((d) => d.value), 1e-9);
     this.layer.$$('.bar').forEach((e, i) => {
       // bar i grows over its own share of the progress, overlapping its neighbours
       const k = o.stagger === false ? p : ease.outCubic(clamp((p * (n + 2) - i) / 3)), v = o.data[i]!.value;
@@ -129,7 +128,7 @@ export class LineChart extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const p = progressOf(this.o, f), h = this.head(p), on = p > 0 && !Number.isNaN(h.v);
+    const p = progressOf(this.o, f, this.window(f)[0]), h = this.head(p), on = p > 0 && !Number.isNaN(h.v);
     this.layer.vars({ x: `${h.x.toFixed(2)}px` });
     this.layer.set('.head', { style: { left: `${h.x.toFixed(2)}px`, top: `${h.y.toFixed(2)}px`, display: on ? '' : 'none' } });
     // (the value's label slides from left aligned at the start to right aligned at the end, so it stays in the box)
@@ -171,7 +170,7 @@ export class Counter extends HtmlComponent {
     this.o = o;
   }
   protected update(f: Frame) {
-    const o = this.o, v = (o.from ?? 0) + (o.to - (o.from ?? 0)) * progressOf(o, f);
+    const o = this.o, v = (o.from ?? 0) + (o.to - (o.from ?? 0)) * progressOf(o, f, this.window(f)[0]);
     this.layer.text('.num', `${o.prefix ?? ''}${o.format ? o.format(v) : formatNumber(v, o.digits ?? 0)}${o.suffix ?? ''}`);
   }
 }

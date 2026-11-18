@@ -7,7 +7,7 @@ import { awaitBeforeFirstFrame } from '../engine/html';
 import { LOADING, type Frame } from '../engine/scene';
 import { sound } from '../engine/util';
 import { drawPicture, kenBurnsAt, type Framing } from './image';
-import { safeBox, type Box, type ComponentOptions } from './common';
+import { safeBox, windowOf, type Box, type ComponentOptions } from './common';
 import { framesAt, videoSounds, type FrameSpan, type VideoTiming } from './video-time';
 
 export interface VideoClipOptions extends Omit<ComponentOptions, 'css'> {
@@ -102,6 +102,7 @@ export class VideoClip {
 
   constructor(o: VideoClipOptions) {
     this.o = o;
+    const own = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     const clip = LOADING.clip;
     awaitBeforeFirstFrame((async () => {
@@ -114,7 +115,7 @@ export class VideoClip {
       if (!(trim[1] > trim[0])) throw new Error(`video '${o.src}': the trim [${o.trim}] holds no frames (the file is ${length.toFixed(2)} s)`);
       const speed = o.speed ?? 1;
       if (!(speed > 0)) throw new Error(`video '${o.src}': speed must be above 0`);
-      const at: [number, number] = o.at ?? [0, clip ? clip.end - clip.start : (trim[1] - trim[0]) / speed];
+      const at: [number, number] = own ?? [0, clip ? clip.end - clip.start : (trim[1] - trim[0]) / speed];
       this.timing = { at, trim, speed, loop: !!o.loop };
       if (clip && t.hasAudio && o.sound !== false) for (const s of videoSounds(o.src, clip.start, this.timing, typeof o.sound === 'object' ? o.sound.db : 0)) sound(s);
     })());

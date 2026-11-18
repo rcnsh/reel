@@ -4,7 +4,7 @@
 import type * as THREE from 'three';
 import { HtmlLayer, type HtmlUpdate } from '../engine/html';
 import { H, W } from '../engine/gl';
-import type { Frame } from '../engine/scene';
+import { LOADING, type Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
 
 /** A value, or a function of the frame giving it (evaluated once per output frame for content, per sub-frame for motion). */
@@ -54,12 +54,51 @@ export function motionAt(m: Motion | false | undefined, lt: number, w0: number, 
   return { opacity: from === 'none' ? 1 : k, dx, dy, scale: from === 'scale' ? 0.92 + 0.08 * k : 1 };
 }
 
+/** A stretch of video time with a start and an end: a line or a word of the timed words (`ctx.words.get('…')`). */
+export interface Span { start: number; end: number }
+
+/**
+ * When a component shows: [from, to] in seconds of its clip, either end of which may be a span of the words (it
+ * opens the window at its start, closes it at its end), or a span alone (the window is the span).
+ */
+export type At = [number | Span, number | Span] | Span;
+
+const isSpan = (x: unknown): x is Span => !!x && typeof x === 'object' && Number.isFinite((x as Span).start) && Number.isFinite((x as Span).end);
+
+/**
+ * A component's `at` in clip seconds. Spans are in video time, so they are taken off the start of the clip being
+ * loaded: a component whose `at` holds one is made while its scene is (as a field, or in init()).
+ */
+export function windowOf(at: At | undefined, label: string): [number, number] | undefined {
+  if (at === undefined) return undefined;
+  const show = (x: unknown): string => (isSpan(x) ? `{ start: ${x.start}, end: ${x.end} }` : Array.isArray(x) ? `[${x.map(show).join(', ')}]` : String(x));
+  const bad = (m: string): never => { throw new Error(`${label}: at ${show(at)}: ${m}`); };
+  const ends: unknown[] = Array.isArray(at) ? at : [at, at];
+  if (ends.length !== 2) bad('expected [from, to] or a span of the words (ctx.words.get(…))');
+  const clip = LOADING.clip;
+  const local = (x: unknown, end: boolean): number => {
+    // (a window may run to Infinity: to the end of the clip)
+    if (typeof x === 'number') return Number.isFinite(x) || (end && x === Infinity) ? x : bad('expected seconds');
+    if (!isSpan(x)) return bad('each end is clip seconds or a span of the words with a start and an end (a line or word: ctx.words.get(…))');
+    if (!clip) return bad('a span of the words is in video time, and the component was not made while a scene was: make it as a field of the scene or in init()');
+    return (end ? x.end : x.start) - clip.start;
+  };
+  const w: [number, number] = [local(ends[0], false), local(ends[1], true)];
+  if (w[1] < w[0]) bad(`its window [${w[0]}, ${w[1]}] in clip seconds ends before it starts`);
+  // (a span of words said wholly outside the clip is a line found in another plate, or a clip moved off its words)
+  if (clip && ends.some(isSpan) && (w[1] <= 0 || w[0] >= clip.end - clip.start)) bad(`its window [${w[0]}, ${w[1]}] in clip seconds is outside the clip '${clip.id}' (0 to ${clip.end - clip.start}): those words are said before or after it`);
+  return w;
+}
+
 /** Options every component takes. */
 export interface ComponentOptions {
   /** Where it sits, in logical px (each component has a default laid out from W and H). */
   box?: Box;
-  /** The seconds of the clip it shows in, [from, to) from the clip's start (default the whole clip). */
-  at?: [number, number];
+  /**
+   * The seconds of the clip it shows in, [from, to) from the clip's start (default the whole clip). Either end may
+   * be a span of the words instead (`ctx.words.get('the tide')`: from its start, to its end), or the whole of `at`.
+   */
+  at?: At;
   /** Its entrance and exit (false: none). */
   motion?: Motion | false;
   /** CSS added to its layer (its elements' classes are listed with each component). */
@@ -82,9 +121,12 @@ export abstract class HtmlComponent {
   readonly box: Box;
   readonly layer: HtmlLayer;
   protected opts: ComponentOptions;
+  /** `at` in clip seconds (undefined: the whole clip). */
+  protected at: [number, number] | undefined;
 
   constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string }) {
     this.opts = o;
+    this.at = windowOf(o.at, o.label ?? defaults.label);
     this.box = o.box ?? defaults.box;
     const update: HtmlUpdate = (f) => this.update(f);
     this.layer = new HtmlLayer({ html: defaults.html, css: defaults.css + (o.css ?? ''), width: Math.ceil(this.box.w), height: Math.ceil(this.box.h), update, label: o.label ?? defaults.label });
@@ -94,7 +136,7 @@ export abstract class HtmlComponent {
   protected abstract update(f: Frame): void;
 
   /** The component's window in clip seconds. */
-  protected window(f: Frame): [number, number] { return this.opts.at ?? [0, f.end - f.start]; }
+  protected window(f: Frame): [number, number] { return this.at ?? [0, f.end - f.start]; }
 
   /** Draw it over `out` (call in render(); a component outside its window draws nothing). */
   draw(renderer: THREE.WebGLRenderer, out: THREE.WebGLRenderTarget, f: Frame, o: { opacity?: number } = {}) {
