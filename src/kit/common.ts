@@ -90,6 +90,8 @@ export function windowOf(at: At | undefined, label: string): [number, number] | 
   if (w[1] < w[0]) bad(`its window [${w[0]}, ${w[1]}] in clip seconds ends before it starts`);
   // (a span of words said wholly outside the clip is a line found in another plate, or a clip moved off its words)
   if (clip && ends.some(isSpan) && (w[1] <= 0 || w[0] >= clip.end - clip.start)) bad(`its window [${w[0]}, ${w[1]}] in clip seconds is outside the clip '${clip.id}' (0 to ${clip.end - clip.start}): those words are said before or after it`);
+  // (seconds that start after the clip ends, or end before it starts, are video seconds given by mistake)
+  else if (clip && (w[1] <= 0 || w[0] >= clip.end - clip.start)) bad(`its window [${w[0]}, ${w[1]}] is outside the clip '${clip.id}', which is ${+(clip.end - clip.start).toFixed(3)} s long, so it never shows: \`at\` is in seconds from the clip's start, not the video's (video time t is t - this.ctx.start in the clip)`);
   return w;
 }
 
