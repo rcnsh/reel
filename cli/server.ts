@@ -3,7 +3,7 @@
 // `reel` (and its scenes as `reel/scenes/<name>`), and its files (audio/, data/, assets/ ...) are served from the
 // site root. The config's format and theme reach the page as compile-time constants (__REEL_FORMAT__, __REEL_THEME__).
 import type { ViteDevServer } from 'vite';
-import { existsSync, readFileSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { stripVTControlCharacters } from 'node:util';
 import { formatOf, type VideoConfig } from '../src/config';
@@ -68,16 +68,53 @@ export function workspaceOf(project: string, search: (dir: string) => string): s
   return has('pnpm-workspace.yaml') || has('lerna.json') || workspaces ? [root] : [];
 }
 
+/**
+ * The packages the engine's page imports, pre-bundled by Vite when its server starts. Every one is listed (a test
+ * checks `src/` against it): one Vite finds on its own while a page loads makes it bundle again mid-load and answer
+ * the page's older imports with 504 Outdated Optimize Dep.
+ */
+export const PREBUNDLED = [
+  'three', 'opentype.js', 'mp4box', 'lottie-web/build/player/esm/lottie_light_canvas.min.js',
+  ...['GLTFLoader', 'DRACOLoader', 'KTX2Loader', 'HDRLoader', 'EXRLoader'].map((l) => `three/examples/jsm/loaders/${l}.js`),
+  'three/examples/jsm/libs/meshopt_decoder.module.js', 'three/examples/jsm/environments/RoomEnvironment.js',
+  'highlight.js/lib/core',
+  ...['bash', 'cpp', 'css', 'diff', 'glsl', 'go', 'javascript', 'json', 'python', 'rust', 'sql', 'typescript', 'xml', 'yaml'].map((l) => `highlight.js/lib/languages/${l}`),
+];
+
+/** Where the dev servers keep their pre-bundled packages: a folder per project, under the engine's node_modules. */
+export const VITE_CACHE = path.join(ENGINE, 'node_modules/.vite/reel');
+
+/**
+ * The Vite cache folder of `project`, its own so that servers of different projects running at once (warm
+ * renderers, tests, another session) never bundle into the same folder: Vite's bundle hash includes the project's
+ * path, so with one shared folder each server would replace the others' files under their pages. Folders whose
+ * project folder is gone (tests' scratch copies) are removed on the way. Projects outside this repo get one here too.
+ */
+export function viteCacheDir(project: string, root = VITE_CACHE) {
+  try {
+    for (const d of readdirSync(root)) {
+      let owner: string;
+      try { owner = readFileSync(path.join(root, d, 'project'), 'utf8'); } catch { continue; }
+      if (!existsSync(owner)) rmSync(path.join(root, d), { recursive: true, force: true });
+    }
+  } catch {}
+  const dir = path.join(root, `${path.basename(project).replace(/[^\w.-]/g, '_')}-${Bun.hash(project).toString(36)}`);
+  mkdirSync(dir, { recursive: true });
+  writeFileSync(path.join(dir, 'project'), project);
+  return dir;
+}
+
 /** A module Vite could not transform (a syntax error in a scene): the file, and the error with its code frame. */
 export interface ModuleError { file: string; message: string }
 
 /**
  * Start the server for `project`. `hmr: false` for renders: a file saved mid-render must not reload the page.
  * `port: 0` picks a free port; a port with `strictPort: false` falls back to the next free one. `theme` names a
- * built-in theme to use instead of the config's. `onModuleError` takes the modules Vite fails to transform
+ * built-in theme to use instead of the config's, `props` the preview's props (JSON text, set in the page as
+ * window.__REEL_PROPS__; render pages get theirs from openPage). `onModuleError` takes the modules Vite fails to transform
  * (the page only learns that a dynamic import failed); without it they are printed.
  */
-export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string; onModuleError?: (e: ModuleError) => void } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
+export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string; props?: string; onModuleError?: (e: ModuleError) => void } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
   const config = await loadConfig(project);
   const format = formatOf(config);
   const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
@@ -98,6 +135,7 @@ export async function startServer(project: string, opts: { port?: number; strict
   const server = await createServer({
     configFile: false,
     root: ENGINE,
+    cacheDir: viteCacheDir(project),
     publicDir: path.join(ENGINE, 'public'),
     customLogger: logger,
     clearScreen: false,
@@ -112,12 +150,16 @@ export async function startServer(project: string, opts: { port?: number; strict
       // (a project outside this repo has no node_modules of its own: its scenes get the engine's three.js)
       dedupe: ['three'],
     },
-    optimizeDeps: { include: ['three', 'opentype.js', 'mp4box', 'lottie-web/build/player/esm/lottie_light_canvas.min.js'] },
+    optimizeDeps: { include: PREBUNDLED },
     // (a render server keeps the page's console to itself: the CLI reports it per request)
     // (a project inside a monorepo reads its workspace's sources and node_modules, as Vite's own default allows)
     server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project, ...workspaceOf(project, searchForWorkspaceRoot)] } },
     build: { target: 'esnext' },
     plugins: [{
+      name: 'reel-props',
+      // (`<` escaped: the JSON may hold '</script>')
+      transformIndexHtml: () => opts.props ? [{ tag: 'script', children: `window.__REEL_PROPS__ = ${JSON.stringify(opts.props).replace(/</g, '\\u003c')};`, injectTo: 'head-prepend' }] : [],
+    }, {
       name: 'reel-project-files',
       configureServer(s) {
         s.middlewares.use((req, res, next) => {

@@ -1,16 +1,17 @@
 // `reel narrate`: narration.txt to a voice and word times. Each plate is voiced as one passage, trimmed,
 // brought to -16 LUFS and timed (by the voice's own timestamps where it has them, else by the forced aligner),
 // then cached in audio/.narration/ under a key of its text and the voice, so re-running after an edit voices only
-// the plates that changed. Writes audio/narration.flac, data/words.json and data/audio.json.
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+// the plates that changed. A hosted voice's plates are kept as each arrives, so after a failure part-way a re-run
+// voices only those still missing. Writes audio/narration.flac, data/words.json and data/audio.json.
+import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { forcedAlign, refine } from './aligner';
 import { decode, normalize, trimSilence, writeAudio } from './audio-io';
 import { report, writeNarration, type PlateAudio } from './narration-files';
-import { parseScript, plateText, plateWords } from './script';
+import { parseScript, plateText, plateWords, type TimedWord } from './script';
 import { DEFAULTS, plateKey, resolveSettings } from './settings';
-import { SOURCES, voiceOf, type SynthRequest } from './voices';
+import { SOURCES, voiceOf, type SynthRequest, type VoiceEnv } from './voices';
 import { loadConfig } from '../cli/server';
 
 export const NARRATE_HELP = `reel narrate [flags]: voice narration.txt and time every word
@@ -32,6 +33,8 @@ ${Object.values(SOURCES).map((s) => `      ${s.about}`).join('\n')}
   --project <folder>      the project (default: the current folder)
 
 Hosted voices are opt-in: text leaves the machine only for elevenlabs (ELEVENLABS_API_KEY) or fish (FISH_API_KEY).
+Their requests are retried on HTTP 429, 5xx and network errors (after Retry-After when sent), and each plate is
+cached as soon as it is voiced, so after a failure a re-run voices only the plates still missing.
 Kokoro and the forced aligner run locally (MLX on Apple Silicon, PyTorch on CPU elsewhere) and fetch their models on
 first use. The say voice is macOS only.`;
 
@@ -49,50 +52,68 @@ if (import.meta.main) {
   } catch (e) { console.error(`reel narrate: ${(e as Error).message}`); process.exit(1); }
 }
 
-export async function narrate(root: string, flags: Record<string, string | boolean | undefined>) {
+export async function narrate(root: string, flags: Record<string, string | boolean | undefined>, ctx?: VoiceEnv) {
   const scriptFile = path.join(root, 'narration.txt');
   if (!existsSync(scriptFile)) throw new Error(`${scriptFile} is missing (plates: '# name' headers, each followed by its lines)`);
   const plates = parseScript(readFileSync(scriptFile, 'utf8'), scriptFile);
   const s = resolveSettings((await loadConfig(root)).narration, flags);
-  const voice = voiceOf(s.voice);
+  const voice = voiceOf(s.voice, ctx);
   const cache = path.join(root, 'audio/.narration'), work = path.join(cache, 'work');
   mkdirSync(work, { recursive: true });
 
+  // A plate's cache is <name>-<key>.flac and .json (its words), each written whole or not at all and kept as soon as
+  // the voice hands the plate over, so a later plate's failure keeps what was paid for. The words go first when the
+  // voice gives them; a .flac alone was voiced by a voice without timestamps but not yet aligned.
   const keys = plates.map((p) => plateKey(voice.id, s, plateText(p)));
   const file = (k: number) => path.join(cache, `${plates[k]!.name}-${keys[k]}`);
+  const writeWords = (k: number, words: TimedWord[]) => {
+    writeFileSync(`${file(k)}.part.json`, JSON.stringify(words));
+    renameSync(`${file(k)}.part.json`, `${file(k)}.json`);
+  };
+  const keep = async (k: number, pcm: Float32Array, words?: TimedWord[]) => {
+    for (const ext of ['flac', 'json']) rmSync(`${file(k)}.${ext}`, { force: true }); // (a previous voicing, under --force)
+    if (words) writeWords(k, words);
+    await writeAudio(pcm, `${file(k)}.part.flac`);
+    renameSync(`${file(k)}.part.flac`, `${file(k)}.flac`);
+  };
   const parts: (PlateAudio | null)[] = plates.map(() => null);
-  const todo: number[] = [];
+  const todo: number[] = [], toAlign: { k: number; pcm: Float32Array }[] = [];
+  let retimed = 0;
   for (let k = 0; k < plates.length; k++) {
-    if (!flags.force && existsSync(`${file(k)}.flac`) && existsSync(`${file(k)}.json`)) parts[k] = { pcm: await decode(`${file(k)}.flac`), words: JSON.parse(readFileSync(`${file(k)}.json`, 'utf8')) };
+    const voiced = !flags.force && existsSync(`${file(k)}.flac`), timed = voiced && existsSync(`${file(k)}.json`);
+    if (timed) parts[k] = { pcm: await decode(`${file(k)}.flac`), words: JSON.parse(readFileSync(`${file(k)}.json`, 'utf8')) };
+    else if (voiced) { toAlign.push({ k, pcm: await decode(`${file(k)}.flac`) }); retimed++; }
     else todo.push(k);
   }
   if (todo.length) {
     const reqs: SynthRequest[] = todo.map((k) => ({ text: plateText(plates[k]!), previous: plates[k - 1] && plateText(plates[k - 1]!), next: plates[k + 1] && plateText(plates[k + 1]!), speed: s.speed, model: s.model }));
-    const speech = await voice.synth(reqs, work);
-    const toAlign: { k: number; pcm: Float32Array }[] = [];
-    for (const [i, k] of todo.entries()) {
-      const sp = speech[i]!;
+    await voice.synth(reqs, work, async (i, sp) => {
+      const k = todo[i]!;
       const trimmed = trimSilence(await normalize(await decode(sp.file), LOUDNESS, path.join(work, `n${k}`)));
       if (!trimmed.pcm.length) throw new Error(`plate '${plates[k]!.name}': the voice returned silence`);
-      if (sp.words?.length) parts[k] = { pcm: trimmed.pcm, words: refine(plateWords(plates[k]!), sp.words.map((w) => ({ w: w.w, start: w.start - trimmed.offset, end: w.end - trimmed.offset })), trimmed.pcm) };
-      else toAlign.push({ k, pcm: trimmed.pcm });
-    }
-    if (toAlign.length) {
-      const timed = await forcedAlign(toAlign.map((x) => ({ pcm: x.pcm, words: plateWords(plates[x.k]!) })), path.join(work, 'align'), s.language);
-      toAlign.forEach((x, i) => (parts[x.k] = { pcm: x.pcm, words: timed[i]! }));
-    }
-    for (const k of todo) {
-      await writeAudio(parts[k]!.pcm, `${file(k)}.flac`);
-      writeFileSync(`${file(k)}.json`, JSON.stringify(parts[k]!.words));
+      if (sp.words?.length) {
+        parts[k] = { pcm: trimmed.pcm, words: refine(plateWords(plates[k]!), sp.words.map((w) => ({ w: w.w, start: w.start - trimmed.offset, end: w.end - trimmed.offset })), trimmed.pcm) };
+        await keep(k, trimmed.pcm, parts[k]!.words);
+      } else {
+        await keep(k, trimmed.pcm);
+        toAlign.push({ k, pcm: trimmed.pcm });
+      }
+    });
+  }
+  if (toAlign.length) {
+    const timed = await forcedAlign(toAlign.map((x) => ({ pcm: x.pcm, words: plateWords(plates[x.k]!) })), path.join(work, 'align'), s.language);
+    for (const [i, x] of toAlign.entries()) {
+      parts[x.k] = { pcm: x.pcm, words: timed[i]! };
+      writeWords(x.k, timed[i]!);
     }
   }
   // (cached plates no longer in the script, or voiced differently, are removed)
-  const keep = new Set(plates.flatMap((_, k) => [`${path.basename(file(k))}.flac`, `${path.basename(file(k))}.json`]));
-  for (const f of readdirSync(cache)) if (f !== 'work' && !keep.has(f)) rmSync(path.join(cache, f), { force: true });
+  const current = new Set(plates.flatMap((_, k) => [`${path.basename(file(k))}.flac`, `${path.basename(file(k))}.json`]));
+  for (const f of readdirSync(cache)) if (f !== 'work' && !current.has(f)) rmSync(path.join(cache, f), { force: true });
   rmSync(work, { recursive: true, force: true });
 
   const timed = voice.id.startsWith('kokoro') || voice.id.startsWith('elevenlabs') ? 'the voice\'s timestamps' : 'Qwen3-ForcedAligner';
   const r = await writeNarration(root, plates, parts as PlateAudio[], s, `voice ${voice.id}, speed ${s.speed}; word times from ${timed}, snapped to pauses`);
-  return `${report(r)}\n${todo.length} of ${plates.length} plate${plates.length === 1 ? '' : 's'} voiced (${voice.id}), ${plates.length - todo.length} from the cache`;
+  return `${report(r)}\n${todo.length} of ${plates.length} plate${plates.length === 1 ? '' : 's'} voiced (${voice.id}), ${retimed ? `${retimed} voiced before and timed now, ` : ''}${plates.length - todo.length - retimed} from the cache`;
 }
 

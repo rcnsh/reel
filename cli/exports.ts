@@ -14,6 +14,7 @@ export const exportsDir = () => path.join(process.env.REEL_EXPORTS_DIR ?? tmpdir
 
 export interface Claim { pid: number; project: string; out: string; started: number; pstart?: string }
 
+/** The process `pid` exists (EPERM: it does, another user's). */
 export const alive = (pid: number) => { try { process.kill(pid, 0); return true; } catch (e) { return (e as NodeJS.ErrnoException).code === 'EPERM'; } };
 
 /** When the process `pid` started, as `ps` prints it (to the second; macOS and Linux), or null when that cannot be read. */
