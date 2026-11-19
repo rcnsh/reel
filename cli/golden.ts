@@ -7,6 +7,7 @@
 import { copyFileSync, mkdirSync, readFileSync, renameSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
+import { existsSync, readdirSync, rmdirSync } from 'node:fs';
 import { pageOf, samplesOf, type Values } from './args';
 import { run, type Result } from './ops';
 import { Renderer } from './renderer';
@@ -64,4 +65,28 @@ export async function renderGoldens(dir: string): Promise<{ files: Map<string, s
     }
   } finally { rmSync(work, { recursive: true, force: true }); }
   return { files, errors };
+}
+
+/**
+ * The PNGs in a golden set that no golden in the list maps to (a golden dropped from goldens.json, or renamed),
+ * as paths relative to the set, sorted. Only .png files count: anything else in the folder is not the set's.
+ */
+export function staleGoldens(dir: string, list: GoldenList = goldenList()): string[] {
+  if (!existsSync(dir)) return [];
+  const listed = new Set(list.frames.flatMap((g) => g.times.map((t) => path.join(g.example, goldenName(g, t)))));
+  return readdirSync(dir, { recursive: true, withFileTypes: true })
+    .filter((e) => e.isFile() && e.name.endsWith('.png'))
+    .map((e) => path.relative(dir, path.join(e.parentPath, e.name)))
+    .filter((f) => !listed.has(f)).sort();
+}
+
+/** Remove a set's stale goldens (and the example folders they leave empty); returns what it removed, relative to dir. */
+export function pruneGoldens(dir: string, list: GoldenList = goldenList()): string[] {
+  const stale = staleGoldens(dir, list);
+  for (const f of stale) rmSync(path.join(dir, f));
+  for (const sub of new Set(stale.map((f) => path.dirname(f)).filter((d) => d !== '.'))) {
+    const abs = path.join(dir, sub);
+    if (existsSync(abs) && !readdirSync(abs).length) rmdirSync(abs);
+  }
+  return stale;
 }

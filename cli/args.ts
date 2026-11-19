@@ -102,7 +102,7 @@ Working on a project
   daemon stop                stop the project's warm renderer          [--all: every project's, and sweep
                                                                        dead exports' spools and Vite's
                                                                        stale optimizer folders]
-  golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
+  golden update              re-render the golden frames of this operating system (tests/golden/<platform>/), removing PNGs goldens.json no longer lists
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients); its video jobs run detached and
                              outlive it (state in $REEL_EXPORTS_DIR or the temp folder, reel-exports/jobs)

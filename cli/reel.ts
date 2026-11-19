@@ -99,9 +99,12 @@ if (mode === 'mcp') {
 
 if (mode === 'golden') {
   if (P.positionals[0] !== 'update') fail(`golden ${P.positionals[0]}: expected update`);
-  const { goldenDir, renderGoldens } = await import('./golden');
+  const { goldenDir, pruneGoldens, renderGoldens } = await import('./golden');
   const { files, errors } = await renderGoldens(goldenDir());
-  finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()] }, () => console.log([...files.values()].join('\n')));
+  const removed = pruneGoldens(goldenDir()).map((f) => path.join(goldenDir(), f));
+  // Pruning does not wait on the renders (a listed golden is never pruned), so the removals print even when one failed.
+  if (!json) for (const f of removed) console.error(`removed ${f} (no longer in goldens.json)`);
+  finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()], removed }, () => console.log([...files.values()].join('\n')));
 }
 
 if (mode === 'chrome') {
