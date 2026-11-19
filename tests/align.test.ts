@@ -1,5 +1,10 @@
 import { expect, test } from 'bun:test';
+import { $ } from 'bun';
+import path from 'node:path';
+import { splitPlates } from '../tools/align';
 import { alignWords, normWord, unheardLines, type ScriptWord } from '../tools/align-words';
+import { SR } from '../tools/audio-io';
+import { parseScript } from '../tools/script';
 
 const script = (text: string): ScriptWord[] => text.split(' ').map((w) => ({ w, line: 0 }));
 
@@ -41,3 +46,50 @@ test('unheardLines finds a line the aligner placed on other speech (a skipped li
   expect(bad.map((b) => b.line)).toEqual([1]);
   expect(bad[0]!.share).toBe(0);
 });
+
+test('splitPlates cuts a take at the quietest point between plates and re-times each part from its start', () => {
+  const plates = parseScript('# a\nOne two.\n# b\nThree.');
+  // 3 s: speech 0.2-0.8 and 1.8-2.4, quiet noise between, true silence only at 1.25-1.35
+  const pcm = new Float32Array(3 * SR).map((_, n) => {
+    const t = n / SR;
+    if ((t >= 0.2 && t < 0.8) || (t >= 1.8 && t < 2.4)) return 0.5 * Math.sin(n / 10);
+    return t >= 1.25 && t < 1.35 ? 0 : 0.003 * Math.sin(n / 3);
+  });
+  const words = [{ w: 'One', start: 0.2, end: 0.4 }, { w: 'two.', start: 0.5, end: 0.8 }, { w: 'Three.', start: 1.8, end: 2.4 }];
+  const [a, b] = splitPlates(plates, pcm, words);
+  const cut = a!.pcm.length / SR;
+  expect(cut).toBeGreaterThan(1.25);
+  expect(cut).toBeLessThan(1.35);
+  expect(a!.pcm.length + b!.pcm.length).toBe(pcm.length);
+  expect(a!.words).toEqual(words.slice(0, 2));
+  expect(b!.words[0]!.w).toBe('Three.');
+  expect(b!.words[0]!.start).toBeCloseTo(1.8 - cut, 9);
+  expect(b!.words[0]!.end).toBeCloseTo(2.4 - cut, 9);
+});
+
+// forced_align.py's long-audio windows, against a fake aligner that knows where every word truly is (the samples
+// hold their own time, so it can tell which part of the take it was given): each word comes back once, in order, at
+// its true time. Needs uv (numpy, no model); skipped without it.
+const uv = Bun.which('uv');
+test.skipIf(!uv)('forced_align windows a long take: every word once, in order, at its time', async () => {
+  const py = `
+import sys, numpy as np
+sys.path.insert(0, sys.argv[1])
+import forced_align as fa
+SR, N, STEP = fa.SR, 400, 0.6  # 400 words, one every 0.6 s: a 240 s take, four 60 s windows and then some
+class Item:
+    def __init__(s, text, a, b): s.text, s.start_time, s.end_time = text, a, b
+class Fake:
+    def align(s, audio, text, language):
+        t0 = float(audio[0])
+        return [Item(w, int(w[1:]) * STEP - t0, int(w[1:]) * STEP + 0.4 - t0) for w in text.split()]
+audio = (np.arange(int(N * STEP * SR)) / SR).astype(np.float64)
+out = fa.align(Fake(), audio, " ".join(f"w{i}" for i in range(N)))
+assert [o["w"] for o in out] == [f"w{i}" for i in range(N)], [o["w"] for o in out][:50]
+assert all(abs(o["start"] - i * STEP) <= 1 / SR for i, o in enumerate(out))  # (a window starts on a whole sample)
+print("ok", len(out))
+`;
+  const r = await $`uv run -q --no-project --with numpy python -B -c ${py} ${path.join(import.meta.dir, '../tools')}`.nothrow().quiet();
+  expect(r.stderr.toString()).toBe('');
+  expect(r.stdout.toString().trim()).toBe('ok 400');
+}, 120_000);

@@ -5,7 +5,7 @@
 // are the theme's own.
 import { resolveTheme, type ResolvedTheme } from '../themes';
 export { glslName } from '../themes';
-import { hexToLinear } from './util';
+import { clamp, hexToLinear, linearToHex } from './util';
 
 declare const __REEL_THEME__: ResolvedTheme | undefined;
 
@@ -48,6 +48,38 @@ export function rgba(key: PaletteKey, a = 1): string {
   if (!hex) throw missing(key);
   const n = parseInt(hex.replace('#', ''), 16);
   return `rgba(${(n >> 16) & 255},${(n >> 8) & 255},${n & 255},${a})`;
+}
+
+/** A colour to mix: a palette key, a '#rrggbb' colour, or a linear RGB triplet. */
+export type MixInput = PaletteKey | readonly [number, number, number];
+/** A mixed colour in each form its consumers take. */
+export type Mixed = {
+  /** Linear RGB, for GL uniforms and LineBatch colours. */
+  lin: [number, number, number];
+  /** '#rrggbb' (sRGB, 8 bits), for HTML and CSS. */
+  hex: string;
+  /** CSS rgba() with an alpha, for Canvas2D and HTML. */
+  rgba: (a?: number) => string;
+};
+
+const toLin = (c: MixInput): [number, number, number] => {
+  if (typeof c !== 'string') return [c[0], c[1], c[2]];
+  if (Object.prototype.hasOwnProperty.call(HEX, c)) return LIN[c]!;
+  if (/^#[0-9a-f]{6}$/i.test(c)) return hexToLinear(c);
+  if (c.startsWith('#')) throw new Error(`mixColor: '${c}' is not a #rrggbb colour`);
+  throw missing(c);
+};
+
+/**
+ * Mix two colours in linear light (`t` 0 gives a, 1 gives b, clamped), the way the GPU blends, so a fade between two
+ * colours does not dip dark in the middle as a mix of sRGB values does.
+ */
+export function mixColor(a: MixInput, b: MixInput, t: number): Mixed {
+  const A = toLin(a), B = toLin(b), u = clamp(t);
+  const lin = A.map((x, i) => x * (1 - u) + B[i]! * u) as [number, number, number];
+  if (lin.some(Number.isNaN)) throw new Error(`mixColor: NaN in the mix (t = ${t})`);
+  const hex = linearToHex(lin);
+  return { lin, hex, rgba: (al = 1) => rgba(hex, al) };
 }
 
 const luma = (c: [number, number, number]) => 0.2126 * c[0] + 0.7152 * c[1] + 0.0722 * c[2];

@@ -14,7 +14,8 @@ import { loadFonts } from './type';
 import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
-import { TransitionPass, transitionOf, transitionWeights } from './transitions';
+import { idleTransitions, TransitionPass, transitionDisplaces, transitionOf, transitionWeights, type Transition } from './transitions';
+import { maskSubFrames } from './tilemask';
 import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
 import { BlendPass, TrackFx, blendOf, gradeOf, isIdentityGrade, isShaderBlend, lerpGrade, matteOf, matteSource, opacityOf, resolveGrade, trackSettingsOf, type Grade, type GradeValues, type MatteMode, type TrackBlend, type TrackSettings } from './tracks';
 
@@ -30,15 +31,18 @@ interface TrackRTs { rts: THREE.WebGLRenderTarget[]; mix: THREE.WebGLRenderTarge
 /** A scene module as imported, or why it did not import. */
 type Imported = { m?: { default: SceneClass }; err?: unknown };
 
-interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number }
+interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number; cap?: number }
 
 /**
  * Per-frame adaptive motion-blur sampling (see Engine.render): the sub-frame count steps through
  * 4, 12, 36, 108, 324 … from `min` up to at most `max` (both rounded to that series) until the
  * estimated remaining sampling error is below `tol` 8-bit levels (worst 2x2-logical-px block).
  * `refine: 'tiles'` (the default) decides that per 32x32-logical-px tile, `'frame'` for the whole frame.
+ * `mask` (tiles only): where stopped tiles are masked, `'subs'` in every later sub-frame or `'merge'` only where
+ * the sub-frames are added to the sums; both give the same frame. Default: maskSubFrames(the GL renderer).
  */
-export interface AdaptiveSampling { min: number; max: number; tol: number; refine?: 'tiles' | 'frame' }
+export interface AdaptiveSampling { min: number; max: number; tol: number; refine?: 'tiles' | 'frame'; mask?: 'subs' | 'merge' }
+
 
 /**
  * Shutter offsets (-0.5..0.5) of an adaptive run's sub-frames in rendering order: 4 evenly spread, then
@@ -66,9 +70,19 @@ function yieldTask() {
   });
 }
 
+/** Wait for a fence to signal. A sync object's status only changes between tasks: yield to the event loop between polls. */
+async function waitFence(gl: WebGL2RenderingContext, sync: WebGLSync, label: string) {
+  for (;;) {
+    const s = gl.clientWaitSync(sync, 0, 0);
+    if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) return;
+    if (s === gl.WAIT_FAILED) throw new Error(`${label}: fence wait failed`);
+    await yieldTask();
+  }
+}
+
 export class Engine {
   renderer: THREE.WebGLRenderer;
-  ctx!: SceneCtx;
+  ctx!: Omit<SceneCtx, 'capSamples'>;
   audio!: AudioData;
   words!: Words;
   post!: Post;
@@ -114,6 +128,8 @@ export class Engine {
   lastErrors: number[] = [];
   /** Share of the last frame's extra sub-frames (beyond the first set) actually shaded (1 = every tile). */
   lastShaded = 1;
+  /** maskSubFrames for this page's GL renderer. */
+  private maskSubsDefault: boolean;
   // (a float target when the output keeps more than 8 bits: the final pass's dither is then at that depth)
   private finalRT = new THREE.WebGLRenderTarget(PW, PH, { type: BITS > 8 ? THREE.FloatType : THREE.UnsignedByteType, depthBuffer: false });
   /** The last frame before post: linear HDR, premultiplied (what the 'linear' readback reads). */
@@ -136,6 +152,13 @@ export class Engine {
   private stackRT2: THREE.WebGLRenderTarget | null = null;
   /** The matte of a track whose matte track has nothing on screen: transparent, black. */
   private emptyMatte = (() => { const t = new THREE.DataTexture(new Uint8Array(4), 1, 1); t.needsUpdate = true; return t; })();
+  /** Each clip's transition, checked once when the timeline loads (drawing looks it up every sub-frame). */
+  private transitions = new WeakMap<TimelineEntry, Transition>();
+  private transitionAt(e: TimelineEntry) {
+    let t = this.transitions.get(e);
+    if (!t) this.transitions.set(e, (t = transitionOf(e.transition, e.id)));
+    return t;
+  }
   private accum: FSPass;
   private lastT = -1;
   lastPost: PostParams = { ...DEFAULT_POST };
@@ -147,6 +170,8 @@ export class Engine {
   loadErrors: string[] = [];
   renderErrors: string[] = [];
   get errors() { return [...this.loadErrors, ...this.renderErrors]; }
+  /** Problems with the timeline that are not errors (a transition that never plays), by clip. */
+  warnings: { clip: string; message: string }[] = [];
   clearRenderErrors() {
     this.renderErrors = [];
     for (const rec of this.loaded.values()) rec.renderError = undefined;
@@ -169,6 +194,10 @@ export class Engine {
   lastBoxes: ReportedBox[] = [];
   /** The Canvas2D text draws (fillText, strokeText) of the same render, per clip: text a clip may not have reported. */
   lastTextDraws: Record<string, number> = {};
+  /** For `reel check`: Math.random, Date.now and performance.now calls per clip in the frame lastBoxes are from. */
+  lastClocks: Record<string, Record<string, number>> = {};
+  /** For `reel check`: stateful clips the last collected frame stepped on from the frame before instead of reaching by a seek. */
+  lastStepped = new Set<string>();
   /** The clip whose scene is being initialised or drawn (names errors that surface inside three.js). */
   private drawing = '';
 
@@ -278,6 +307,10 @@ export class Engine {
     nm.colorWrite = false; nm.depthTest = true; nm.depthWrite = true; nm.depthFunc = THREE.AlwaysDepth;
     for (const rt of [this.stackRT, this.newRT, this.sumRT]) this.maskedRTs.set(rt, { margin: 0 });
     this.hookDepthState();
+    {
+      const gl = this.renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+      this.maskSubsDefault = maskSubFrames(String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)));
+    }
     // errPass with the error of tiles no longer refining forced to 0 (their sums hold nothing new)
     this.errTilePass = new FSPass(/* glsl */ `
       uniform sampler2D a; uniform sampler2D b; uniform float invA, invB; uniform sampler2D tiles;
@@ -347,19 +380,19 @@ export class Engine {
   private setMasking: (on: boolean) => void = () => {};
 
   /**
-   * Scene targets read away from the pixel they land on this frame: during a slide or a zoom transition the
-   * transition samples its clips' targets at a moved position, so their tiles cannot be masked in place.
+   * Scene targets read away from the pixel they land on this frame: during a slide, whip, zoom or custom
+   * transition the transition samples its clips' targets at a moved position, so their tiles cannot be masked in place.
    */
   private displaced = new Set<THREE.WebGLRenderTarget>();
   private displacedAt(t: number, w: number) {
     this.displaced.clear();
     const moving = this.timeline.some((e) => {
-      const kind = transitionOf(e.transition, e.id).kind;
-      if (kind !== 'slide' && kind !== 'zoom') return false;
+      if (!transitionDisplaces(this.transitionAt(e))) return false;
       // (the transition runs from the clip's start to the end of the clip before it on its track)
       return this.timeline.some((o) => o !== e && (o.track ?? 0) === (e.track ?? 0) && o.start < e.start && o.end > e.start && o.end > t - w / 2 && e.start < t + w / 2);
     });
-    if (moving) for (const tr of this.trackRTs) for (const rt of tr.rts) this.displaced.add(rt);
+    // (with the mixes: a third clip's transition reads the mix of the two before it)
+    if (moving) for (const tr of this.trackRTs) for (const rt of [...tr.rts, ...tr.mix]) this.displaced.add(rt);
   }
 
   /** Write tileOn into the depth buffer of the masked targets (1 = still refining, 0 = converged). */
@@ -381,6 +414,12 @@ export class Engine {
     if (was) this.setMasking(true);
   }
 
+  /** Write tileOn into sumRT's depth buffer only: the merge is masked, the sub-frames are drawn whole. */
+  private writeSumMask() {
+    this.tileTex.needsUpdate = true;
+    this.drawMask(this.sumRT, 0, new THREE.Vector4(PW / this.sumRT.width, PH / this.sumRT.height, 0, 0));
+  }
+
   /** Write the tile mask into rt's depth buffer, through `map` (rt px -> output px); null: all of rt on. */
   private drawMask(rt: THREE.WebGLRenderTarget, margin: number, map: THREE.Vector4 | null) {
     const r = this.renderer, d = r.state.buffers.depth;
@@ -392,6 +431,8 @@ export class Engine {
     this.maskPass.u.tiles!.value = margin ? this.tileTexWide : this.tileTex;
     (this.maskPass.u.map!.value as THREE.Vector4).copy(map);
     this.maskPass.render(r, rt);
+    // (three's clear() does not set the colour mask: left off, the next colour clear of rt would do nothing)
+    r.state.buffers.color.setMask(true);
   }
 
   private nearPass: FSPass;
@@ -405,6 +446,8 @@ export class Engine {
     if (!this.masking || this.displaced.size) return;
     (this.nearPass.u.map!.value as THREE.Vector4).set(PW / rt.width, PH / rt.height, 0, 0);
     this.nearPass.render(r, rt);
+    // (left off, the colour mask would turn the scene's next colour clear into nothing, see drawMask)
+    r.state.buffers.color.setMask(true);
     r.setRenderTarget(rt);
   }
 
@@ -434,12 +477,14 @@ export class Engine {
       if (ex !== undefined && ex !== true && !(Array.isArray(ex) && ex.every((r) => CHECK_RULES.includes(r))))
         throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
       const where = `timeline: clip '${e.id}'`;
-      transitionOf(e.transition, where);
+      this.transitions.set(e, transitionOf(e.transition, where));
       if (e.blend !== undefined) blendOf(e.blend, where);
       if (e.opacity !== undefined) opacityOf(e.opacity, where);
       if (e.grade !== undefined && typeof e.grade !== 'function') gradeOf(e.grade, where);
     }
     this.checkTracks();
+    this.warnings = idleTransitions(this.timeline, 1 / FPS);
+    for (const w of this.warnings) console.warn(`timeline: ${w.message}`);
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
     if (!(this._duration > 0)) throw new Error('the video has no length: give the config a duration, audio analysis or clips');
     // the theme's overlay: the HUD scene over the whole video, on a track above every clip
@@ -467,7 +512,15 @@ export class Engine {
     // makes know their clip
     const mods = await Promise.all(entries.map((e): Promise<Imported> => e.scene().then((m) => ({ m }), (err: unknown) => ({ err }))));
     for (const [i, e] of entries.entries()) await this.loadEntry(e, mods[i]!);
+    // custom transitions' GLSL compiles now, so a source with a mistake fails the load, named after its clip
+    for (const e of entries) {
+      this.drawing = `${e.id}: its transition's glsl`;
+      try { this.transition.compile(this.renderer, this.transitionAt(e)); }
+      catch (err) { this.loadErrors.push(`[${e.id}] its transition: ${String((err as Error)?.message ?? err)}`); }
+      finally { this.drawing = ''; }
+    }
     for (const [id, msg] of await htmlLayers.settle()) this.fail(id, msg);
+    htmlLayers.loading(false);
     await this.checkSounds();
   }
 
@@ -513,16 +566,24 @@ export class Engine {
     console.error(`scene ${id} failed`, msg);
   }
 
-  private async loadEntry(e: TimelineEntry, mod?: Imported) {
+  private async loadEntry(e: TimelineEntry, mod: Imported) {
     const rec: Loaded = { entry: e, scene: null, lastT: -1 };
     this.loaded.set(e.id, rec);
     htmlLayers.owner(e.id);
     LOADING.clip = { id: e.id, start: e.start, end: e.end };
     try {
-      const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
+      const m = mod;
       if (!m.m) throw m.err;
-      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      // (only while the scene is made, so every frame of an export has the same cap whichever worker renders it;
+      // a later call, such as a Stage3D made on first use, is ignored)
+      let made = false;
+      const capSamples = (n: number) => {
+        if (!(n >= 1)) throw new Error(`ctx.capSamples: expected a count of at least 1, got ${n}`);
+        if (!made) rec.cap = Math.min(rec.cap ?? Infinity, n);
+      };
+      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end, capSamples });
       await s.init();
+      made = true;
       rec.scene = s;
       for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
     } catch (err) {
@@ -531,16 +592,35 @@ export class Engine {
   }
 
   /** Hot-swap a scene module (used by Vite HMR in preview). */
-  async reload(id: string) {
+  reload(id: string): Promise<void> {
+    // (one at a time: a scene is made with the clip it belongs to set globally, so two reloads must not overlap)
+    const next = this.reloads.then(() => this.reloadOne(id));
+    this.reloads = next.catch(() => {});
+    return next;
+  }
+  private reloads: Promise<void> = Promise.resolve();
+  private async reloadOne(id: string) {
     const e = this.timeline.find((x) => x.id === id);
     if (!e) return;
     const old = this.loaded.get(id)?.scene;
     for (const m of old?.tileMasked ?? []) this.maskedRTs.delete(m.rt);
     old?.dispose();
+    const rec = this.loaded.get(id);
+    if (rec) rec.scene = null; // (drawn as nothing, not as the disposed scene, while the module imports)
     htmlLayers.drop(id);
-    await this.loadEntry(e);
-    for (const [cid, msg] of await htmlLayers.settle()) this.fail(cid, msg);
+    htmlLayers.loading(true);
+    try {
+      // (imported before the clip owns new layers: an HTML layer made at the module's top level must throw here too)
+      await this.loadEntry(e, await e.scene().then((m): Imported => ({ m }), (err: unknown) => ({ err })));
+      for (const [cid, msg] of await htmlLayers.settle()) this.fail(cid, msg);
+    } finally { htmlLayers.loading(false); }
     this.lastT = -1;
+  }
+
+  /** Forget what was rendered last: the next frame is a seek for every clip (stateful scenes reset and pre-roll). */
+  forgetTime() {
+    this.lastT = -1;
+    for (const rec of this.loaded.values()) rec.lastT = -1;
   }
 
   get duration() { return this._duration; }
@@ -570,7 +650,10 @@ export class Engine {
     }
   }
 
+  /** Render and prepare failures so far, each counted (errors keeps only a clip's first). */
+  failures = 0;
   private renderFailed(rec: Loaded, msg: string) {
+    this.failures++;
     if (rec.renderError) return;
     rec.renderError = msg;
     this.renderErrors.push(msg);
@@ -616,13 +699,13 @@ export class Engine {
     let n = 1;
     const collect = this.collectBoxes;
     let nearestBoxes = Infinity;
-    if (collect) { this.lastBoxes = []; this.lastTextDraws = {}; }
+    if (collect) { this.lastBoxes = []; this.lastTextDraws = {}; this.lastClocks = {}; this.lastStepped.clear(); }
     if (samples === 1) {
       SS_TAP.value = -1;
       SUB_FRAME.index = -1;
       if (collect) boxes.begin();
       ({ outTex, post } = this.composite(t, dt, seeked));
-      if (collect) { this.lastBoxes = boxes.end(); this.lastTextDraws = boxes.textDraws(); }
+      if (collect) { this.lastBoxes = boxes.end(); this.lastTextDraws = boxes.textDraws(); this.lastClocks = boxes.clocks(); }
     } else {
       const adaptive = typeof samples !== 'number';
       let maxAdaptive = adaptive ? samples.max : 0;
@@ -632,7 +715,8 @@ export class Engine {
         const on = this.timeline.filter((e) => t + w / 2 >= e.start && t - w / 2 < e.end);
         const st = on.find((e) => this.loaded.get(e.id)?.scene?.stateful);
         if (st) throw new Error(`adaptive sampling needs stateless scenes; '${st.id}' is stateful (use a fixed --samples)`);
-        for (const e of on) if (e.maxSamples) maxAdaptive = Math.min(maxAdaptive, e.maxSamples);
+        // (a clip's maxSamples, else the cap its scene asked for: ctx.capSamples)
+        for (const e of on) { const cap = e.maxSamples || this.loaded.get(e.id)?.cap; if (cap) maxAdaptive = Math.min(maxAdaptive, cap); }
       }
       // shaders that supersample share their 4 taps across the sub-frames when every set holds a multiple
       // of 4 (rotated by k/4 so a tap doesn't always land in the same part of the shutter)
@@ -669,7 +753,7 @@ export class Engine {
             this.setMasking(true);
           }
         }
-        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; this.lastTextDraws = boxes.textDraws(); } }
+        if (collect) { const b = boxes.end(); if (Math.abs(u) < nearestBoxes) { nearestBoxes = Math.abs(u); this.lastBoxes = b; this.lastTextDraws = boxes.textDraws(); this.lastClocks = boxes.clocks(); } }
         this.accum.u.src!.value = res!.outTex;
         this.accum.render(r, into);
         const d = Math.abs(u - POST_U);
@@ -701,27 +785,29 @@ export class Engine {
           }
         } else {
           // Per-tile refinement: after each set, a tile goes on to the next only while it or one of its 8
-          // neighbours is still at or over `tol`; a tile that stopped never restarts. Later sub-frames are
-          // drawn with converged tiles masked out by the depth test (rejected before shading), only the tiles
-          // still refining are added to the sums, and each tile is averaged over its own count. So every
+          // neighbours is still at or over `tol`; a tile that stopped never restarts. Only the tiles still
+          // refining are added to the sums (and, where it pays, see maskSubFrames, later sub-frames are drawn
+          // with converged tiles masked out by the depth test, rejected before shading), and each tile is
+          // averaged over its own count. So every
           // tile is exactly the whole-frame sampler's frame had it stopped at that tile's count.
           const on = this.tileOn, tw = this.maxRT.width, th = this.maxRT.height, T = on.length;
           on.fill(255); // (an R8 texture: 255 reads as 1.0)
           const tileN = this.gainBuf; // count per tile, turned into the gain at the end
           tileN.fill(0);
           let live = T, shaded = 0, full = 0;
+          const maskSubs = samples.mask ? samples.mask === 'subs' : this.maskSubsDefault;
           for (let l = lo; l < hi && live > 0; l++) {
             const masked = live < T;
             clearRT(r, this.newRT, [0, 0, 0], 0);
-            if (masked) { this.writeTileMask(); this.setMasking(true); }
+            if (masked) { if (maskSubs) { this.writeTileMask(); this.setMasking(true); } else this.writeSumMask(); }
             for (let k = n; k < 3 * n; k++) sub(k, u[k]!, this.newRT, dt / (3 * n));
-            if (masked) this.setMasking(false);
+            if (masked && maskSubs) this.setMasking(false);
             const err = this.sampleError(n, masked) / 2;
             this.lastErrors.push(err);
             if (masked) this.setMasking(true);
             this.addSum();
             if (masked) this.setMasking(false);
-            shaded += 2 * n * live; full += 2 * n * T;
+            shaded += 2 * n * (maskSubs ? live : T); full += 2 * n * T;
             n *= 3;
             // tiles whose neighbourhood is converged stop at this count
             const e = this.errBuf, next = new Uint8Array(T);
@@ -909,6 +995,7 @@ export class Engine {
       const s = rec.scene;
       // (sub-frames of one frame may step back within its shutter: not a seek)
       const sceneSeeked = seeked || rec.lastT < 0 || Math.abs(t - rec.lastT) > 0.25;
+      if (this.collectBoxes && s.stateful && !sceneSeeked && SUB_FRAME.index <= 0) this.lastStepped.add(e.id);
       boxes.clip(e.id, e.track ?? 0);
       if (s.stateful && sceneSeeked) {
         boxes.pause(true);
@@ -939,10 +1026,12 @@ export class Engine {
       post = { ...post, ...(e.post ?? {}), ...po };
       if (idx > 0 && !s.handlesTransition && under) {
         // the clip's transition from the previous clip over the overlap (a crossfade unless it says otherwise)
-        const tr = transitionOf(e.transition, e.id);
+        const tr = this.transitionAt(e);
         const mix = rt3.mix[under === rt3.mix[0]!.texture ? 1 : 0]!;
         // (in a transparent render the lowest track is like the others: a dip goes through transparent)
-        this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0 || ALPHA);
+        this.drawing = e.id;
+        try { this.transition.draw(r, tr, under, rt.texture, tin, mix, (e.track ?? 0) > 0 || ALPHA); }
+        finally { this.drawing = ''; }
         outTex = mix.texture;
         const [wo, wi] = transitionWeights(tr, tin);
         for (let j = 0; j < idx; j++) weights[j]! *= wo;
@@ -1079,17 +1168,19 @@ export class Engine {
     gl.flush();
   }
 
+  /** Resolve once the GPU has done everything queued so far. For `reel perf`. */
+  async gpuIdle() {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext, s = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!s) throw new Error('gpuIdle: no fence (the WebGL context was lost)');
+    gl.flush();
+    try { await waitFence(gl, s, 'gpuIdle'); } finally { gl.deleteSync(s); }
+  }
+
   /** Wait for readStart(slot)'s copy and copy it into `out` (Engine.bytes of its mode). */
   async readFinish(slot: number, out: Uint8Array) {
     const gl = this.renderer.getContext() as WebGL2RenderingContext, p = this.packs[slot];
     if (!p) throw new Error(`readFinish: nothing queued in slot ${slot}`);
-    // (a sync object's status only changes between tasks: yield to the event loop between polls)
-    for (;;) {
-      const s = gl.clientWaitSync(p.sync, 0, 0);
-      if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) break;
-      if (s === gl.WAIT_FAILED) throw new Error('readFinish: fence wait failed');
-      await yieldTask();
-    }
+    await waitFence(gl, p.sync, 'readFinish');
     this.packs[slot] = undefined;
     gl.deleteSync(p.sync);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, p.buf);

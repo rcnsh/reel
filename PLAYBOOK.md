@@ -61,7 +61,7 @@ What the agent cannot find out by itself: the machine's memory and what else it 
 
 What must be true before the agent stops:
 
-- `check_video` reports no errors at every size delivered, and no warnings it did not choose.
+- `check_video` reports no errors at every size delivered, and no warnings it did not choose. (It also renders some frames twice: a frame that comes out different is a `nondeterministic` error, and a `transition` on a clip that overlaps nothing a `timeline` warning.)
 - It has looked at a full draft as frames (a contact sheet every half second or so, strips of each transition and each fast move) before any final render.
 - It has pulled frames out of each final file and looked at them, measured the loudness, and confirmed the streams.
 

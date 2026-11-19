@@ -5,7 +5,7 @@ import { BOTTOM, TOP } from './_script';
 
 export default class Title extends Scene {
   card = new TitleCard({
-    kicker: 'An explainer in five clips',
+    kicker: 'An explainer built from the kit',
     title: 'How a frame is made',
     subtitle: 'Time in, pixels out: the same picture in the preview and the export.',
     box: { x: W * 0.1, y: H * TOP, w: W * 0.8, h: H * (BOTTOM - TOP) },
