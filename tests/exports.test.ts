@@ -6,9 +6,10 @@ import { tmpdir } from 'node:os';
 import path from 'node:path';
 
 const dir = mkdtempSync(path.join(tmpdir(), 'reel-exports-test-'));
+const before = process.env.REEL_EXPORTS_DIR;
 process.env.REEL_EXPORTS_DIR = dir;
 const { claimExport, processStart, queueExport, queuedExports, runningExports } = await import('../cli/exports');
-afterAll(() => { delete process.env.REEL_EXPORTS_DIR; rmSync(dir, { recursive: true, force: true }); });
+afterAll(() => { if (before === undefined) delete process.env.REEL_EXPORTS_DIR; else process.env.REEL_EXPORTS_DIR = before; rmSync(dir, { recursive: true, force: true }); });
 
 test('a live export refuses another unless forced; a dead one is cleared', () => {
   mkdirSync(path.join(dir, 'reel-exports'), { recursive: true });

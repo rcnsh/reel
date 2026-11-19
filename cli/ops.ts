@@ -125,8 +125,10 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     const { req } = ctx, a = req.args as { from?: number; to?: number; step?: number; safe?: number; minText?: number; frozen?: number; out?: string; preview?: boolean; maxImages?: number };
     const m = await meta(h);
     const palette: Record<string, string> = await h.page.evaluate(() => (window as any).__reel.palette);
-    const times = checkTimes(m.timeline, m.duration, m.fps, a.from ?? 0, a.to ?? m.duration, a.step ?? 0.5);
-    if (!times.length) throw new UsageError(`check: no frames between ${a.from ?? 0} and ${a.to ?? m.duration} s`);
+    // --only: the clips not loaded draw nothing, so only the loaded clips' frames are checked
+    const only = req.page.only?.split(',');
+    const times = checkTimes(m.timeline, m.duration, m.fps, a.from ?? 0, a.to ?? m.duration, a.step ?? 0.5, only);
+    if (!times.length) throw new UsageError(`check: no frames between ${a.from ?? 0} and ${a.to ?? m.duration} s${only ? ` in --only ${only.join(',')}` : ''}`);
     // one session: every time rendered and measured in this page, errors attributed to the frame that raised them
     const samples: Sample[] = [], seen = new Set<string>();
     for (const t of times) {
@@ -137,7 +139,7 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     }
     const minSide = Math.min(m.W, m.H);
     const findings: Finding[] = findingsOf(samples, {
-      W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette,
+      W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette, only,
     });
     // a crop of the worst frame of each finding (the whole frame, small, for frame-wide ones)
     const dir = a.out ?? path.join(req.project, 'out/check');
