@@ -4,9 +4,13 @@
 import { afterAll, describe, expect, test } from 'bun:test';
 import { arcPath, captionPages, clock, columnAlign, donutSlices, formatCell, growth, percents, polar, stackBars, textWidth, cssColor, esc, formatNumber, kineticPieces, motionAt, splitHighlighted, windowOf } from '../src/kit';
 import { LOADING } from '../src/engine/scene';
+import { clipTime } from '../src/engine/cliptime';
 import { ease, stagger, staggerStart } from '../src/engine/util';
 import { Words } from '../src/engine/words';
 import { fixture, hasChrome, reel } from './helpers';
+
+// (the clip being loaded, without time remapping)
+const loading = (start: number, end: number) => ({ id: 'c', start, end, time: clipTime({ id: 'c', start, end }, 30) });
 
 describe('helpers', () => {
   test('splitHighlighted closes spans at line ends and reopens them on the next line', () => {
@@ -115,7 +119,7 @@ describe('helpers', () => {
     expect(() => windowOf([-Infinity, 2], 'x')).toThrow('expected seconds');
     expect(() => windowOf([5, 4], 'x')).toThrow('ends before it starts');
     expect(() => windowOf([words.get('tide'), 5], 'text block')).toThrow('text block: at [{ start: 12, end: 14 }, 5]: a span of the words is in video time');
-    LOADING.clip = { id: 'c', start: 10, end: 20 };
+    LOADING.clip = loading(10, 20);
     try {
       expect(windowOf([words.get('tide'), 9], 'x')).toEqual([2, 9]);
       expect(windowOf([1, words.get('goes out')], 'x')).toEqual([1, 7]);
@@ -126,9 +130,9 @@ describe('helpers', () => {
       expect(() => windowOf([1, NaN], 'x')).toThrow('expected seconds');
       expect(() => windowOf([words.get('tide'), 1.5], 'x')).toThrow('its window [2, 1.5] in clip seconds ends before it starts');
       expect(windowOf([words.get('goes out'), Infinity], 'x')).toEqual([5, Infinity]);
-      LOADING.clip = { id: 'c', start: 0, end: 10 };
+      LOADING.clip = loading(0, 10);
       expect(() => windowOf(words.get('goes out'), 'x')).toThrow("is outside the clip 'c' (0 to 10)");
-      LOADING.clip = { id: 'c', start: 17, end: 20 };
+      LOADING.clip = loading(17, 20);
       expect(() => windowOf(words.get('tide'), 'x')).toThrow("its window [-5, -3] in clip seconds is outside the clip 'c'");
       expect(windowOf([words.get('tide'), 2], 'x')).toEqual([-5, 2]); // (from before the clip into it: shown from its start)
     } finally { LOADING.clip = null; }
