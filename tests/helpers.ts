@@ -11,6 +11,9 @@ export const REEL = path.join(ENGINE, 'cli/reel.ts');
 /** A Chrome the renders can use: $CHROME_PATH, else the pinned build (`reel chrome install`). Tests that render skip without one. */
 export const hasChrome = findChrome();
 
+/** Whether uv is there to run the Python tools (a narrated `reel init` voices its script with Kokoro). Tests that need it skip without it, as CI does. */
+export const hasUv = !!Bun.which('uv');
+
 /** A copy of an example in a fresh temp folder (its renders and warm renderer stay out of the repo). */
 export function scratchCopy(example: string) {
   const dir = mkdtempSync(path.join(tmpdir(), `reel-test-${example}-`));

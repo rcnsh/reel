@@ -4,7 +4,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, readFileSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
-import { ENGINE, fixture, hasChrome, middleColor, PROPS, reel, REEL, scratchCopy } from './helpers';
+import { ENGINE, fixture, hasChrome, hasUv, middleColor, PROPS, reel, REEL, scratchCopy } from './helpers';
 
 const demo = scratchCopy('demo'), layers = scratchCopy('layers'), props = fixture('props', PROPS);
 const fresh = realpathSync(mkdtempSync(path.join(tmpdir(), 'reel-test-init-')));
@@ -329,15 +329,20 @@ test.skipIf(!hasChrome)('the warm renderer shows in daemon status and stops', as
   expect(await projects()).not.toContain(realpathSync(layers.dir));
 }, 120_000);
 
-test('init writes a project that typechecks without an install', async () => {
-  const dir = path.join(fresh, 'first');
-  const init = await reel(['init', dir, '--narrated']);
-  expect(init.code).toBe(0);
-  for (const f of ['reel.config.ts', 'narration.txt', 'CLAUDE.md', '.claude/skills/reel-authoring/SKILL.md', '.claude/skills/reel-review-loop/SKILL.md', '.claude/skills/reel-audio/SKILL.md']) expect(existsSync(path.join(dir, f))).toBe(true);
+async function initTypechecks(name: string, flags: string[], files: string[]) {
+  const dir = path.join(fresh, name);
+  const init = await reel(['init', dir, ...flags]);
+  expect(init.code, init.err).toBe(0);
+  for (const f of ['reel.config.ts', 'CLAUDE.md', '.claude/skills/reel-authoring/SKILL.md', '.claude/skills/reel-review-loop/SKILL.md', '.claude/skills/reel-audio/SKILL.md', ...files]) expect(existsSync(path.join(dir, f))).toBe(true);
   const tc = Bun.spawn(['bun', 'run', 'typecheck'], { cwd: dir, stdout: 'pipe', stderr: 'pipe' });
   const out = await new Response(tc.stdout).text();
   expect(await tc.exited, out).toBe(0);
   const again = await reel(['init', dir]);
   expect(again.code).toBe(2);
   expect(again.err).toContain('not empty');
-}, 240_000);
+}
+
+test('init writes a silent project that typechecks without an install', () => initTypechecks('silent', [], ['scenes/intro.ts']), 240_000);
+
+// (a narrated project is voiced with Kokoro, a Python tool run by uv)
+test.skipIf(!hasUv)('init writes a narrated project that typechecks without an install', () => initTypechecks('narrated', ['--narrated'], ['narration.txt']), 240_000);
