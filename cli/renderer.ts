@@ -1,7 +1,9 @@
 // A project's renderer: its dev server, a headless Chrome and pages opened on the project, one per format and
 // clip selection. A command run with --no-daemon makes one, uses it once and closes it; the warm renderer
 // (cli/daemon.ts) keeps one for a project and reuses its pages, reloading them when the project's files change.
-import { chromium, type Browser, type Page } from 'playwright-core';
+// Two requests may run at once (the warm renderer's two lanes): each leases a page of its own for the request
+// (page() to release()), so a second request for the same format gets a second page, never one in use.
+import { chromium, type Browser, type Page, type Request } from 'playwright-core';
 import { formatOf } from '../src/config';
 import { resolveTheme } from '../src/themes';
 import { existsSync, readdirSync, statSync } from 'node:fs';
@@ -44,7 +46,7 @@ export async function launchChrome(headed = false) {
 export interface Format { w: number; h: number; fps: number; scale: number }
 export interface ClipInfo { id: string; start: number; end: number; track: number }
 
-/** The page URL for a format, clip selection and theme. */
+/** The page URL for a format, clip selection and theme (props go in by openPage: a URL holds a few kilobytes). */
 export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'theme' | 'alpha'> & { bits?: number }) {
   const q = new URLSearchParams({ export: '1', w: String(f.w), h: String(f.h), fps: String(f.fps), scale: String(f.scale) });
   if (o.only) q.set('only', o.only);
@@ -54,36 +56,64 @@ export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'the
   return `${base}/?${q}`;
 }
 
+/** How many times openPage loads a page again whose modules did not arrive. */
+const RELOADS = 5;
+
 /**
  * Open the project's page and wait for it to be ready: checks that it renders the size asked for and that
- * every --only clip exists. `log` gets the page's console errors and warnings.
+ * every --only clip exists. The props (JSON text) are set as window.__REEL_PROPS__ before any of its modules runs,
+ * on every load. `log` gets the page's console errors and warnings.
  */
-export async function openPage(browser: Browser, url: string, f: Format, o: Pick<PageOpts, 'only'>, log: (line: string) => void) {
+export async function openPage(browser: Browser, url: string, f: Format, o: Pick<PageOpts, 'only' | 'props'>, log: (line: string) => void) {
   const page = await browser.newPage({ viewport: { width: f.w, height: f.h }, deviceScaleFactor: 1 });
+  if (o.props) await page.addInitScript((p) => { (window as any).__REEL_PROPS__ = p; }, o.props);
+  // (what the page says goes to `log` once a load is kept: a load thrown away for a module that did not arrive
+  // takes its errors with it)
   const logs: string[] = [];
-  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { logs.push(`[${m.type()}] ${m.text()}`); log(logs.at(-1)!); } });
-  page.on('pageerror', (e) => { logs.push(`[pageerror] ${e.message}`); log(logs.at(-1)!); });
+  let kept = false;
+  const say = (line: string) => { if (kept) log(line); else logs.push(line); };
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') say(`[${m.type()}] ${m.text()}`); });
+  page.on('pageerror', (e) => say(`[pageerror] ${e.message}`));
   // (modules the server refused: Renderer.explain puts Vite's reason in place of each)
   const refused: string[] = [];
-  // (504: Vite bundled a dependency again while the page was loading, and answers the old URLs with this until
-  // the page is loaded again, which its live reload would do and a render server has none)
-  let outdated = false;
+  // (a module that never arrived: a 504, which Vite answers the old URLs with after it bundled a dependency again
+  // while the page was loading, or a request that failed with no answer or with its body cut short. Either way the
+  // page is loaded again, which Vite's live reload would do and a render server has none. A 404 or a 500 is the
+  // project's own mistake and is reported instead. ERR_ABORTED is a request the page itself gave up, as a reload
+  // does to the old document's: never a reason to load again)
+  const origin = new URL(url).origin;
+  let lost: string[] = [];
+  // (Chrome also reports a script it refused to run, a 404 among them, as failed: that one is not lost, only one
+  // with no answer or whose body was cut short)
+  const refusedReq = new WeakSet<Request>();
+  // (a pre-bundled package that is not there, 404 under /node_modules/.vite/, went away as Vite bundled again)
   page.on('response', (r) => {
-    if (r.status() === 504) outdated = true;
-    else if (r.status() >= 400 && r.request().resourceType() === 'script') refused.push(`module did not load: ${r.url()}`);
+    if (r.status() < 400) return;
+    refusedReq.add(r.request());
+    const ours = r.url().startsWith(origin);
+    if (ours && (r.status() === 504 || (r.status() === 404 && new URL(r.url()).pathname.startsWith('/node_modules/.vite/')))) lost.push(`${r.url()} (${r.status()} ${r.statusText()})`);
+    else if (r.request().resourceType() === 'script') refused.push(`module did not load: ${r.url()}`);
+  });
+  page.on('requestfailed', (r) => {
+    const why = r.failure()?.errorText ?? 'failed';
+    if (r.resourceType() === 'script' && r.url().startsWith(origin) && !refusedReq.has(r) && !why.includes('ERR_ABORTED')) lost.push(`${r.url()} (${why})`);
   });
   const started = () => page.waitForFunction(() => (window as any).__reel?.ready || (window as any).__reel?.error, null, { timeout: 120000 })
     .catch(() => { throw new Error(`the page did not start:\n${[...refused, ...logs].join('\n')}`); });
   try {
-    await page.goto(url);
+    await page.goto(url, { waitUntil: 'commit' });
     await started();
-    for (let i = 0; outdated && i < 3; i++) {
-      outdated = false; logs.length = 0; refused.length = 0;
-      await page.reload();
+    for (let i = 1; lost.length && i <= RELOADS; i++) {
+      await new Promise((r) => setTimeout(r, 100 * i));
+      lost = []; logs.length = 0; refused.length = 0;
+      await page.reload({ waitUntil: 'commit' });
       await started();
     }
+    kept = true;
+    logs.forEach(log);
+    if (lost.length) log(`[warning] modules did not arrive after ${RELOADS} reloads: ${lost.join(', ')}`);
     const err = await page.evaluate(() => (window as any).__reel.error);
-    if (err) throw new Error(`the project failed to load:\n${refused.length ? refused.join('\n') : err}`);
+    if (err) throw new Error(`the project failed to load:\n${refused.length ? refused.join('\n') : lost.length ? `modules did not arrive after ${RELOADS} reloads:\n${lost.join('\n')}` : err}`);
     const size: [number, number] = await page.evaluate(() => [(window as any).__reel.width, (window as any).__reel.height]);
     if (size[0] !== f.w * f.scale || size[1] !== f.h * f.scale) throw new Error(`the page renders ${size[0]}x${size[1]}, expected ${f.w * f.scale}x${f.h * f.scale}`);
     if (o.only) {
@@ -91,6 +121,7 @@ export async function openPage(browser: Browser, url: string, f: Format, o: Pick
       for (const id of o.only.split(',')) if (!ids.includes(id)) throw new Error(`--only ${id}: no such clip (the project has ${ids.join(', ')})`);
     }
   } catch (e) {
+    if (!kept) logs.forEach(log);
     await page.close().catch(() => {});
     throw e;
   }
@@ -101,6 +132,10 @@ export async function openPage(browser: Browser, url: string, f: Format, o: Pick
 export class PageHandle {
   logs: string[] = [];
   dead = false;
+  /** Leased to a request (page() until release()): no other request uses it, and it is not closed under it. */
+  busy = false;
+  /** Its dev server was replaced while it was leased: closed (and that server stopped) once released. */
+  retired = false;
   constructor(public page: Page, public key: string, public gen: number, public fmt: Format, public used: number) {}
   /** Whether the page's GL context was lost (the GPU process went away): it cannot render any more. */
   async lost(): Promise<boolean> {
@@ -124,6 +159,10 @@ export class Renderer {
   private configDirty = false;
   private restart = false;
   private uses = 0;
+  /** page() one at a time (it may start the server or Chrome, or close pages); the requests themselves overlap. */
+  private opening: Promise<unknown> = Promise.resolve();
+  /** Dev servers replaced while pages of theirs were leased: each stops when its last such page is released. */
+  private retiring: { srv: Awaited<ReturnType<typeof startServer>>; pages: Set<PageHandle> }[] = [];
 
   /** What the project's files looked like at the last request (path -> mtime and size). */
   private seen = new Map<string, string>();
@@ -214,8 +253,13 @@ export class Renderer {
       const c = await loadConfig(this.project);
       const same = JSON.stringify([formatOf(c), resolveTheme(c.theme ?? 'neutral')]) === JSON.stringify([this.srv.format, this.srv.theme]);
       if (!same || this.restart) {
+        // (a request in the other lane finishes on the old server, which stops after it; the next starts beside it)
+        const busy = [...this.pages.values()].filter((h) => h.busy);
+        for (const h of busy) { h.retired = true; this.pages.delete(h.key); }
+        // (registered before any await: the other request may end meanwhile)
+        if (busy.length) this.retiring.push({ srv: this.srv, pages: new Set(busy) });
         await this.closePages();
-        await this.srv.stop().catch(() => {});
+        if (!busy.length) await this.srv.stop().catch(() => {});
         this.srv = undefined;
       }
     }
@@ -233,45 +277,88 @@ export class Renderer {
     return this.browser;
   }
 
-  /** The page for these options, ready for a request: reused while the project is unchanged, else (re)opened. */
+  /**
+   * The page for these options, leased to the caller until release() (or drop()): reused while the project is
+   * unchanged and no other request holds it, else (re)opened.
+   */
   async page(o: PageOpts): Promise<PageHandle> {
-    this.rescan();
-    const srv = await this.server();
-    const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
-    const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', !!o.alpha, o.bits ?? 8]);
-    let h = this.pages.get(key);
-    if (h && (h.dead || h.page.isClosed() || h.gen !== this.gen)) {
-      this.pages.delete(key);
-      await h.page.close().catch(() => {});
-      h = undefined;
-    }
-    if (!h) {
-      if (o.theme) resolveTheme(o.theme); // (a name that is not a theme fails here, not in the page)
-      const browser = await this.chrome();
-      // (the oldest page goes when there are too many: each holds a GL context and its targets)
-      while (this.pages.size >= (this.opts.maxPages ?? 4)) {
-        const [k, old] = [...this.pages].sort((a, b) => a[1].used - b[1].used)[0]!;
-        this.pages.delete(k);
-        await old.page.close().catch(() => {});
-      }
-      const early: string[] = [], gen = this.gen;
-      let handle: PageHandle | undefined;
-      const page = await openPage(browser, pageUrl(srv.url, fmt, o), fmt, o, (l) => (handle ? handle.logs : early).push(l));
-      handle = h = new PageHandle(page, key, gen, fmt, 0);
-      handle.logs = early;
-      page.on('crash', () => { handle!.dead = true; });
-      page.on('close', () => { handle!.dead = true; });
-      this.pages.set(key, h);
-    } else {
-      h.logs = [];
-    }
-    h.used = ++this.uses;
-    if (!(await h.page.evaluate(() => (window as any).__reel.beginRequest()))) {
+    const turn = this.opening.then(() => this.lease(o));
+    this.opening = turn.catch(() => {});
+    const h = await turn;
+    let fresh: boolean;
+    try { fresh = await h.page.evaluate(() => (window as any).__reel.beginRequest()); } catch (e) { this.release(h); throw e; }
+    if (!fresh) {
       // (a warm page whose GL context was lost renders nothing: open a fresh one)
       await this.drop(h);
       return this.page(o);
     }
     return h;
+  }
+
+  private async lease(o: PageOpts): Promise<PageHandle> {
+    this.rescan();
+    const srv = await this.server();
+    const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
+    const base = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', o.props ?? '', !!o.alpha, o.bits ?? 8]);
+    // (a page per format and lane: '#0' unless that one is in use)
+    let h: PageHandle | undefined;
+    for (let slot = 0; ; slot++) {
+      const key = `${base}#${slot}`;
+      const c = this.pages.get(key);
+      if (c?.busy) continue;
+      if (c && (c.dead || c.page.isClosed() || c.gen !== this.gen)) {
+        this.pages.delete(key);
+        await c.page.close().catch(() => {});
+      } else h = c;
+      if (!h) h = await this.open(key, fmt, o, srv.url);
+      break;
+    }
+    if (h.used) h.logs = []; // (a fresh page keeps what it said while loading)
+    h.used = ++this.uses;
+    h.busy = true;
+    return h;
+  }
+
+  private async open(key: string, fmt: Format, o: PageOpts, url: string): Promise<PageHandle> {
+    if (o.theme) resolveTheme(o.theme); // (a name that is not a theme fails here, not in the page)
+    const browser = await this.chrome();
+    // (the oldest idle page goes when there are too many: each holds a GL context and its targets)
+    for (;;) {
+      const idle = [...this.pages].filter(([, p]) => !p.busy);
+      if (this.pages.size < (this.opts.maxPages ?? 4) || !idle.length) break;
+      const [k, old] = idle.sort((a, b) => a[1].used - b[1].used)[0]!;
+      this.pages.delete(k);
+      await old.page.close().catch(() => {});
+    }
+    const early: string[] = [], gen = this.gen;
+    let handle: PageHandle | undefined;
+    const page = await openPage(browser, pageUrl(url, fmt, o), fmt, o, (l) => (handle ? handle.logs : early).push(l));
+    const h = handle = new PageHandle(page, key, gen, fmt, 0);
+    h.logs = early;
+    page.on('crash', () => { h.dead = true; });
+    page.on('close', () => { h.dead = true; });
+    this.pages.set(key, h);
+    return h;
+  }
+
+  /** Give a page back after its request: the next request may use it. */
+  release(h: PageHandle) {
+    if (!h.busy) return;
+    h.busy = false;
+    if (!h.retired) {
+      // (a format's extra pages, opened while its first was in use, close once none of them is: one GL context each)
+      const base = h.key.slice(0, h.key.lastIndexOf('#'));
+      const same = [...this.pages.values()].filter((p) => p.key.startsWith(`${base}#`));
+      if (same.length > 1 && same.every((p) => !p.busy)) {
+        for (const p of same) if (!p.key.endsWith('#0')) { this.pages.delete(p.key); void p.page.close().catch(() => {}); }
+      }
+      return;
+    }
+    void h.page.close().catch(() => {});
+    const r = this.retiring.find((x) => x.pages.has(h));
+    if (!r) return;
+    r.pages.delete(h);
+    if (!r.pages.size) { this.retiring.splice(this.retiring.indexOf(r), 1); void r.srv.stop().catch(() => {}); }
   }
 
   /** The dev server's URL and the config's format and theme (starting the server if needed). */
@@ -282,7 +369,8 @@ export class Renderer {
 
   /** Drop a page (after a crash or a failed request), so the next request opens a fresh one. */
   async drop(h: PageHandle) {
-    this.pages.delete(h.key);
+    this.release(h);
+    if (this.pages.get(h.key) === h) this.pages.delete(h.key);
     await h.page.close().catch(() => {});
   }
 
@@ -293,6 +381,7 @@ export class Renderer {
 
   async close() {
     await this.closePages();
+    for (const r of this.retiring.splice(0)) { for (const h of r.pages) await h.page.close().catch(() => {}); await r.srv.stop().catch(() => {}); }
     await this.browser?.close().catch(() => {});
     this.browser = undefined;
     await this.srv?.stop().catch(() => {});

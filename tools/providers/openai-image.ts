@@ -3,7 +3,7 @@
 // Only the prompt is sent.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { httpError } from '../voices/voice';
+import { fetchRetry } from '../http';
 import type { AssetProvider } from './provider';
 
 export const API = 'https://api.openai.com/v1/images/generations';
@@ -23,10 +23,9 @@ export const openaiImage: AssetProvider = {
   kinds: ['image'],
   keyVar: 'OPENAI_API_KEY',
   model: (env) => env.REEL_IMAGE_MODEL || 'gpt-image-1',
-  async generate(a, work, { env, fetch }) {
-    const r = await fetch(API, { method: 'POST', headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify(request(this.model(env), a.prompt, a.size!)) });
-    if (!r.ok) throw await httpError('openai', r);
-    const j = await r.json() as { data?: { b64_json?: string }[] };
+  async generate(a, work, ctx) {
+    const { env } = ctx;
+    const j = await fetchRetry('openai', ctx, API, { method: 'POST', headers: { authorization: `Bearer ${env.OPENAI_API_KEY}`, 'content-type': 'application/json' }, body: JSON.stringify(request(this.model(env), a.prompt, a.size!)) }, (r) => r.json() as Promise<{ data?: { b64_json?: string }[] }>);
     const b64 = j.data?.[0]?.b64_json;
     if (!b64) throw new Error('openai: the response had no image');
     const f = path.join(work, `${a.id}.png`);

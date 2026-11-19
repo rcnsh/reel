@@ -1,8 +1,8 @@
 // Audio in and out of the tools: decoding anything ffmpeg reads to mono float samples, writing lossless files,
 // and the pure measurements on samples (levels, silence) that narration and alignment share.
-import { run } from '../cli/children';
+import { run, spawnChild } from '../cli/children';
 import { rmSync } from 'node:fs';
-import { loudnormFilter, parseLoudnorm, type Loudness } from './loudness';
+import { EBUR128, loudnormFilter, parseEbur128, parseLoudnorm, type Loudness, type R128 } from './loudness';
 
 /** The sample rate of the tools' working audio and of the narration track. */
 export const SR = 48000;
@@ -30,6 +30,25 @@ export async function durationOf(file: string) {
 export async function measure(file: string, filter = 'anull'): Promise<Loudness> {
   const r = await run(['ffmpeg', '-nostdin', '-hide_banner', '-i', file, '-af', `${filter},loudnorm=print_format=json`, '-f', 'null', '-'], { quiet: true, nothrow: true });
   return parseLoudnorm(r.stderr);
+}
+
+/**
+ * Run ffmpeg with `args`, whose filters end in EBUR128, and read the measurement from the end of what it prints (only
+ * the last few KB are kept: it prints every 100 ms of sound). `what` names the step in an error.
+ */
+export async function ffmpegR128(args: string[], what: string): Promise<R128> {
+  const p = spawnChild(['ffmpeg', ...args], { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' });
+  const dec = new TextDecoder();
+  let tail = '';
+  const read = (async () => { for await (const b of p.stdout) tail = (tail + dec.decode(b, { stream: true })).slice(-8192); })();
+  const [code, , err] = await Promise.all([p.exited, read, new Response(p.stderr).text()]);
+  if (code !== 0) throw new Error(`ffmpeg (${what}): ${err.slice(-1200)}`);
+  return parseEbur128(tail);
+}
+
+/** A file's integrated loudness, true peak and loudness range (ffmpeg's ebur128, on its first sound stream). */
+export function loudnessOf(file: string) {
+  return ffmpegR128(['-nostdin', '-hide_banner', '-loglevel', 'error', '-i', file, '-map', '0:a:0', '-af', EBUR128, '-f', 'null', '-'], `measuring ${file}`);
 }
 
 /** Samples brought to an integrated loudness with a true-peak ceiling (two-pass, linear where it can be). */

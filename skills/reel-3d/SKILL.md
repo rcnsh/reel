@@ -67,7 +67,7 @@ Materials are physically based: `MeshStandardMaterial` (`color`, `roughness`, `m
 - `stage.studio({ target, radius, intensity, softness, rim })`: three-point light. A key high front left casting soft shadows, a cool fill from the right, a rim behind tinted towards the theme's accent (or `rim`, a palette key), and the studio environment.
 - `stage.overhead({ … })`: one broad, very soft light from above, a hemisphere of white over the theme's background, the studio environment. Calm, catalogue light.
 - `stage.outdoor({ elevation, azimuth, sky, softness, … })`: a warm sun with crisper shadows and a sky (hemisphere light and reflections) over the theme's background as ground.
-- Your own lights work as in three.js; `stage.soft(light, softness)` makes one cast soft shadows (it moves over a disk `softness` world units across per sub-frame; set `castShadow` and its shadow camera yourself).
+- Your own lights work as in three.js; `stage.soft(light, softness)` makes one cast soft shadows (it moves over a disk `softness` world units across per sub-frame, and its `shadow.radius` blur drops to a texel there, since the moving light makes the penumbra; renders of one sample keep your `shadow.radius`. Set `castShadow` and its shadow camera yourself).
 - `stage.ground({ y, opacity, color })`: shadows only over the background (default: no horizon line), or with `color` a matte floor.
 - Shadows in one-sample renders are shadow maps blurred by PCF; in exports with `--samples` they become true penumbras that widen with distance from the caster. Values over ~0.85 bloom under themes with bloom; specular highlights on metal will.
 - No ambient-occlusion pass: ground contact comes from the shadow catcher and the environment light.
@@ -92,7 +92,7 @@ Give the pose `fstop` (f-number) or `aperture` (lens radius in world units), and
 ## Animation
 
 - `new Animation(gltf.scene, gltf.animations, { play: ['Walk'], loop })` then `anim.at(t, speed)` in render(). It sets the clips' time from scratch each call (skeletons, morph targets and transforms), so any t in any order gives the same pose. `anim.duration` is the longest clip.
-- Your own motion: set `position`, `rotation`, `scale` from `f.lt` (`keys()`, `ease`, `springStep` from reel).
+- Your own motion: set `position`, `rotation`, `scale` from `f.lt` (`keys()`, `interpolate`, `ease`, `spring` from reel).
 - `new Instances(geometry, material, count, (i, t, p) => { p.position.set(…); p.rotation.set(…); p.scale.setScalar(…); p.color = … })`, added to the scene, and `instances.update(f.lt)` in render(): thousands of objects in one draw, each placed by a function of its index and time (seed with `hash(i)`, never `Math.random()`).
 - Physics or simulation that integrates state is a `stateful` scene: fixed `--samples N`, never `auto`.
 
@@ -112,7 +112,7 @@ export const rig = orbit({ target: [0, 0, 0], radius: 6, height: 2, from: -30, t
 export const MOON: [number, number, number] = [1.2, 0.5, 0];
 
 // scenes/labels.ts (track 1), in render():
-const p = screenPoint(rig(f.t - this.ctx.clip('orbit').start), MOON, { fov: 35 });   // the stage's fov
+const p = screenPoint(rig(f.vt - this.ctx.clip('orbit').start), MOON, { fov: 35 });   // the stage's fov
 if (!p.behind) this.tag.draw(this.ctx.renderer, out, { x: p.x + 40, y: p.y - 22 });
 ```
 
@@ -128,7 +128,7 @@ if (!p.behind) this.tag.draw(this.ctx.renderer, out, { x: p.x + 40, y: p.y - 22 
 ## Performance and memory
 
 - A stage with a few hundred thousand triangles renders in a few ms at 1080p (`reel perf`): `examples/product3d` runs at 8 ms a frame at 1x and 21 ms at `--scale 2` with one sample.
-- Export with `--samples auto` pays per sub-frame for the shadow maps and the geometry; only fragment shading is skipped in converged tiles (the stage puts them at the near plane of its own depth test). Depth of field and soft shadows converge slowly on glossy highlights, so such a stage usually runs to 324 sub-frames: about 0.19 s a frame at 1080p and 0.65 s at 4K for the product example. A stage with neither does too when its surfaces carry fine detail (a bump or normal map, a noisy texture, a starfield): the anti-aliasing jitter alone keeps those tiles changing. `reel still --t <s> --samples auto --json` prints `subFrames` for a frame; when it says 324 for a slow shot, put `maxSamples: 108` on the clip (at 4K, 108 cannot be told from 324), or 36 for a locked-off camera.
+- Export with `--samples auto` pays per sub-frame for the shadow maps and the geometry; only fragment shading is skipped in converged tiles (the stage puts them at the near plane of its own depth test). Depth of field, soft shadows and the anti-aliasing jitter keep glossy highlights and fine detail (a bump or normal map, a noisy texture, a starfield) changing from step to step, so a clip with a stage stops at 108 sub-frames: at 1:1 in 4K, 108 cannot be told from 324. `maxSamples` on the clip overrides it: 324 for a whip pan whose streaks still step, 36 for a locked-off camera. `reel still --t <s> --samples auto --json` prints `subFrames` for a frame. A fixed `--samples N` below about 36 shows a soft shadow's penumbra as N stepped copies (the light is in N places and its shadow map is barely blurred); `--samples auto` adds sub-frames where that happens.
 - Memory: the stage's target is 8 bytes a pixel plus depth (100 MB at 4K) and its MSAA target four times that (400 MB at 4K, only in one-sample renders). Shadow maps are 16 MB each at 2048. Free them in `dispose()`.
 - Keep geometry modest (under ~1M triangles) and textures 2K; one shadow-casting light (the rigs cast from the key only).
 - A texture map is as sharp as its texels: a 4K map wrapped round a planet is fine from orbit and a flat blur from a metre above the ground. There is no terrain or detail-texture helper: for a close-up, give the surface a `ShaderMaterial` of its own (prepend `GLSL_COMMON` for the noise functions) or a tiling detail map.

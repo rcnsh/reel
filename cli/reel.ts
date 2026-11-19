@@ -3,9 +3,10 @@
 // commands and flags (cli/args.ts). Every rendering command takes --project <folder> (default: the current
 // folder) and --json (one JSON object on stdout: { ok, errors, logs, warnings, ... }). Exit codes: 0 done,
 // 1 something failed (scene errors included), 2 a bad command line or no project.
+import { readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { checkScale, HELP, int, list, num, pageOf, parseCommand, samplesOf, UsageError, type PageOpts, type Values } from './args';
+import { checkScale, HELP, int, list, num, pageOf, parseCommand, readProps, samplesOf, UsageError, type PageOpts, type Values } from './args';
 import { run, spawnChild } from './children';
 import { ENGINE, projectDir } from './server';
 import type { Req, Result } from './ops';
@@ -58,6 +59,11 @@ if (typeof A.gl === 'string') {
   process.env.REEL_GL = A.gl;
   try { (await import('./chrome')).glBackend(); } catch (e) { fail(`--gl ${A.gl}: ${(e as Error).message.replace(/^REEL_GL=\S+: /, '')}`); }
 }
+// (--props names a file or holds the JSON: read here, so a request carries the JSON itself)
+if (typeof A.props === 'string') {
+  const raw = A.props;
+  try { A.props = readProps(raw, (f) => readFileSync(path.resolve(f), 'utf8')); } catch (e) { fail((e as Error).message); }
+}
 const json = !!A.json;
 const say = (s: string) => { if (!json) console.log(s); };
 /** A path given on the command line, absolute (requests travel to the warm renderer, whose folder differs). */
@@ -104,9 +110,12 @@ if (mode === 'mcp') {
 
 if (mode === 'golden') {
   if (P.positionals[0] !== 'update') fail(`golden ${P.positionals[0]}: expected update`);
-  const { goldenDir, renderGoldens } = await import('./golden');
+  const { goldenDir, pruneGoldens, renderGoldens } = await import('./golden');
   const { files, errors } = await renderGoldens(goldenDir());
-  finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()] }, () => console.log([...files.values()].join('\n')));
+  const removed = pruneGoldens(goldenDir()).map((f) => path.join(goldenDir(), f));
+  // Pruning does not wait on the renders (a listed golden is never pruned), so the removals print even when one failed.
+  if (!json) for (const f of removed) console.error(`removed ${f} (no longer in goldens.json)`);
+  finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()], removed }, () => console.log([...files.values()].join('\n')));
 }
 
 if (mode === 'chrome') {
@@ -172,14 +181,19 @@ if (mode === 'daemon') {
     res.daemons = list;
     finish(res, () => {
       if (!list.length) console.log('no warm renderer is running');
-      for (const x of list) console.log(`${x.project}\n  pid ${x.pid}, up ${Math.round(x.uptime / 1000)} s, ${x.busy ? 'busy' : `idle ${Math.round(x.idle / 1000)} s`}, ${x.requests} requests, ${x.pages} page${x.pages === 1 ? '' : 's'}${x.stale ? ', stale (the engine changed: the next command restarts it)' : ''}\n  log ${x.log}`);
+      for (const x of list) console.log(`${x.project}\n  pid ${x.pid}, up ${Math.round(x.uptime / 1000)} s, ${x.busy ? `busy${x.running > 1 ? ` (${x.running} requests)` : ''}` : `idle ${Math.round(x.idle / 1000)} s`}, ${x.requests} requests, ${x.pages} page${x.pages === 1 ? '' : 's'}${x.stale ? ', stale (the engine changed: the next command restarts it)' : ''}\n  log ${x.log}`);
     });
   }
   if (sub === 'stop') {
     let project: string | null = null;
     if (!A.all) try { project = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail(`${(e as Error).message}, or --all`); }
     res.stopped = await d.stop(project);
-    finish(res, () => console.log((res.stopped as string[]).length ? `stopped ${(res.stopped as string[]).join(', ')}` : 'no warm renderer was running'));
+    // (--all also sweeps what dead exports and servers left: spool and frame folders, Vite's stale optimizer folders)
+    if (A.all) res.swept = (await import('./scratch')).sweep([(await import('node:os')).tmpdir()], path.join(ENGINE, 'node_modules/.vite'));
+    finish(res, () => {
+      console.log((res.stopped as string[]).length ? `stopped ${(res.stopped as string[]).join(', ')}` : 'no warm renderer was running');
+      if (A.all) console.log(`removed ${(res.swept as string[]).length} stale scratch folder${(res.swept as string[]).length === 1 ? '' : 's'}`);
+    });
   }
   fail(`daemon ${sub}: expected status or stop`);
 }
@@ -259,8 +273,10 @@ if (mode === 'dev') {
   let srv;
   // (5173 when it is free, else the next free port: the URL printed is this project's)
   const port = num(A, 'port', 5173);
-  try { srv = await startServer(PROJECT, { port, strictPort: A.port !== undefined, hmr: true, theme: A.theme as string | undefined }); } catch (e) { fail((e as Error).message); }
-  console.log(`${srv!.url}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
+  // (read and checked with the other flags, above)
+  const props = A.props as string | undefined;
+  try { srv = await startServer(PROJECT, { port, strictPort: A.port !== undefined, hmr: true, theme: A.theme as string | undefined, props }); } catch (e) { fail((e as Error).message); }
+  console.log(`${srv!.url}${props ? `  (with --props; ?props=<JSON> in the URL overrides them)` : ''}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
   await new Promise(() => {});
 }
 
@@ -318,13 +334,14 @@ try {
     if (mixed && !format.audio) throw new UsageError(`--${A.mix ? 'mix' : 'subtitles'}: ${format.id} carries no sound${A.subtitles ? ' or subtitles' : ''} (h264, hevc, prores, prores4444 and webm do)`);
     const r = new Renderer(PROJECT, { headed: !!A.headed });
     const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
-    let release = () => {};
+    let release = () => {}, offPic = () => {}, pic: string | null = null;
     try {
       const m = await r.meta();
       const sc = page.scale, plan = F.planOf(format, enc, page.fps ?? m.format.fps, [(page.w ?? m.format.w) * sc, (page.h ?? m.format.h) * sc]);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
-      // (with --mix the picture is rendered beside the output and the mix writes the output)
-      const pic = mixed ? out.replace(/(\.\w+)?$/, `.picture${format.ext}`) : out;
+      // (with --mix the picture is rendered to a scratch file beside the output and the mix writes the output)
+      const { partialOf, onAbort } = await import('./scratch');
+      if (mixed) { const p = pic = partialOf(out); offPic = onAbort(() => rmSync(p, { force: true })); }
       const X = await import('./exports');
       release = A.wait
         ? await X.queueExport(PROJECT, out, (running, ahead) => {
@@ -336,34 +353,36 @@ try {
       // (the subtitles first: a project without timed words fails before it renders, not after)
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
-        url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme,
-        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic, plan, enc, noaudio: !!A.noaudio || mixed,
+        url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme, props: page.props,
+        samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic ?? out, direct: !!pic, plan, enc, noaudio: !!A.noaudio || mixed,
         workers: int(A, 'workers', 2), chunk: int(A, 'chunk', 8), memGb: num(A, 'mem-gb', 1), spoolGb: num(A, 'spool-gb', 20), headed: !!A.headed,
         onProgress: (p) => {
           if (A.progress) console.error(JSON.stringify(p));
           else if (!json) process.stdout.write(`\r${p.frames}/${p.total} frames  ${p.fps.toFixed(1)} fps  eta ${p.eta.toFixed(0)}s   `);
         },
       });
-      const file = format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file;
+      // (null: scene errors, and the previous output left as it was)
+      const file = v.file && !mixed ? (format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file) : undefined;
       if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: page.scale, samples: 1 };
       Object.assign(res, { gl: (await import('./chrome')).glBackend(), file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
       res.errors.push(...r.explain(v.errors));
       res.logs.push(...r.explain(v.logs));
-      say(`\nwrote ${file} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
+      say(`\n${file ? `wrote ${file}` : v.file ? 'rendered the picture' : `rendered with scene errors, ${out} left as it was`} (${format.id}${plan.alpha ? ', alpha' : ''}, ${v.frames} frames in ${v.seconds}s, ${v.workers} worker${v.workers > 1 ? 's' : ''}${v.spoolPeak ? `, up to ${v.spoolPeak} frames spooled to disk` : ''})`);
       say(A.draft ? `a draft (${(res.draft as { encoder: string }).encoder}, ${page.scale === 0.5 ? 'half size' : 'full size: half would not pack'}, one sample): not for delivery` : `sub-frames per frame (count:frames): ${hist(v.subFrames)}`);
-      if (mixed && !res.errors.length) {
-        const { mixVideo } = await import('../tools/mix');
-        try {
-          const mres = await mixVideo({ root: PROJECT, input: pic, output: out, from: num(A, 'from', 0), events: v.events, subtitles: subs });
-          res.warnings.push(...mres.warnings);
-          Object.assign(res, { file: out, loudness: mres.loudness, ...(subs ? { subtitles: subs } : {}) });
-          say(mres.summary);
-        } finally { (await import('node:fs')).rmSync(pic, { force: true }); }
+      if (pic && v.file) {
+        const mres = await (await import('../tools/mix')).mixVideo({ root: PROJECT, input: pic, output: out, from: num(A, 'from', 0), events: v.events, subtitles: subs });
+        res.warnings.push(...mres.warnings);
+        Object.assign(res, { file: out, loudness: mres.loudness, ...(subs ? { subtitles: subs } : {}) });
+        say(mres.summary);
       }
     } catch (e) {
       if (e instanceof UsageError) throw e;
       res.errors.push(...r.explain([String((e as Error)?.message ?? e)]));
-    } finally { await r.close(); release(); }
+    } finally {
+      // (the picture a mix is made from is scratch, whatever happened)
+      if (pic) rmSync(pic, { force: true });
+      await r.close(); release(); offPic();
+    }
     res.ok = !res.errors.length;
     finish(res, () => {});
   }
@@ -443,12 +462,13 @@ finish(res, (x) => {
     const tl = x.timeline as { id: string; start: number; end: number; track: number }[], [w, h] = x.size as number[];
     say(`${PROJECT}\n${w}x${h} at ${x.fps} fps, ${(x.duration as number).toFixed(3)} s, ${x.track ?? 'no audio track'}, theme ${x.theme}`);
     for (const e of tl) say(`  ${e.id.padEnd(16)} ${e.start.toFixed(3).padStart(9)} to ${e.end.toFixed(3).padStart(9)}  track ${e.track}`);
+    if (Object.keys(x.props as object).length) say(`props ${JSON.stringify(x.props)}`);
     say(`${(x.cues as unknown[]).length} sound cues, ${(x.sounds as unknown[]).length} sounds on the timeline`);
   } else if (mode === 'still') {
     for (const f of x.frames as { t: number; file: string; subFrames: number }[]) say(typeof req.samples === 'number' ? f.file : `${f.file}  (${f.subFrames} sub-frames)`);
   } else if (mode === 'sheet' || mode === 'strip') say(String(x.file));
   else if (mode === 'check') printCheck(x);
   else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues, ${x.sounds} sounds on the timeline`);
-  else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms (render ${(x.render as number).toFixed(1)}, readback ${(x.readback as number).toFixed(1)})  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
+  else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms (render ${(x.render as number).toFixed(1)}${x.adaptive ? ' with the GPU waits of --samples auto' : ''}, gpu ${(x.gpu as number).toFixed(1)}, readback ${(x.readback as number).toFixed(1)})  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
   else if (mode === 'gpu') say(`${x.gpu}\nGL backend: ${x.gl}${x.software ? ' (software rendering: no GPU)' : ''}`);
 });
