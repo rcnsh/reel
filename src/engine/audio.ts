@@ -203,10 +203,16 @@ export class AudioData {
     };
   }
 
-  /** Continuous beat index: 0 at first beat, fractional in between (extrapolated outside). */
+  /** The beat helpers' fallback grid with fewer than two beats: `bpm`, or 100 when the analysis has none. */
+  private get gridBpm() { return this.bpm > 0 ? this.bpm : 100; }
+
+  /**
+   * Continuous beat index: 0 at first beat, fractional in between (extrapolated outside). With fewer than two
+   * beats, the `bpm` grid from the one beat, or from 0.
+   */
   beatAt(t: number): number {
     const b = this.beats;
-    if (b.length < 2) return t * (this.bpm / 60);
+    if (b.length < 2) return (t - (b[0] ?? 0)) * (this.gridBpm / 60);
     if (t <= b[0]!) return (t - b[0]!) / (b[1]! - b[0]!);
     if (t >= b[b.length - 1]!) {
       const p = b[b.length - 1]! - b[b.length - 2]!;
@@ -221,8 +227,8 @@ export class AudioData {
   timeOfBeat(i: number): number {
     const b = this.beats;
     const n = b.length;
-    const period = n > 1 ? (b[n - 1]! - b[0]!) / (n - 1) : 60 / this.bpm;
-    if (i <= 0) return (b[0] ?? 0) + i * period;
+    const period = n > 1 ? (b[n - 1]! - b[0]!) / (n - 1) : 60 / this.gridBpm;
+    if (n < 2 || i <= 0) return (b[0] ?? 0) + i * period;
     if (i >= n - 1) return b[n - 1]! + (i - (n - 1)) * period;
     const k = Math.floor(i);
     return b[k]! + (b[k + 1]! - b[k]!) * (i - k);
@@ -255,9 +261,17 @@ export class AudioData {
     return Math.max(0, this.timeOfBeat(Math.floor(this.beatAt(t + tol))));
   }
 
-  /** Nearest downbeat to t (t itself when there are none). */
+  /**
+   * Nearest downbeat to t. Without downbeats, every 4th beat of the beat grid from beat 0; with only one, every 4th
+   * beat from it.
+   */
   nearestDownbeat(t: number): number {
-    return this.downbeats.reduce((b, d) => (Math.abs(d - t) < Math.abs(b - t) ? d : b), this.downbeats[0] ?? t);
+    const d = this.downbeats;
+    if (d.length < 2) {
+      const b0 = d.length ? this.beatAt(d[0]!) : 0;
+      return this.timeOfBeat(b0 + 4 * Math.round((this.beatAt(t) - b0) / 4));
+    }
+    return d.reduce((b, x) => (Math.abs(x - t) < Math.abs(b - t) ? x : b), d[0]!);
   }
 
   section(t: number) {

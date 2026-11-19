@@ -11,15 +11,13 @@ export const say: VoiceSource = {
     const name = arg || 'Daniel';
     return {
       id: `say:${name}`,
-      async synth(reqs, work) {
-        const out = [];
+      async synth(reqs, work, each) {
         for (const [i, r] of reqs.entries()) {
           const file = path.join(work, `say${i}.aiff`);
           const res = await $`say -v ${name} -r ${Math.round(175 * r.speed)} -o ${file} ${r.text}`.quiet().nothrow();
           if (res.exitCode !== 0) throw new Error(`say -v ${name}: ${res.stderr.toString().trim() || 'failed'} (\`say -v '?'\` lists the voices)`);
-          out.push({ file });
+          await each(i, { file });
         }
-        return out;
       },
     };
   },

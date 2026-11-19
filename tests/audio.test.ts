@@ -39,7 +39,7 @@ test('no analysis: a silent grid, no track', () => {
   const E = AudioData.empty();
   expect(E.track).toBeNull();
   expect(E.beatAt(0.6)).toBeCloseTo(1, 9); // 100 BPM
-  expect(E.nearestDownbeat(3)).toBe(3);
+  expect(E.nearestDownbeat(3)).toBeCloseTo(2.4, 9); // every 4th beat of the grid: 0, 2.4, 4.8
   expect(new AudioData({ duration: 5, bpm: 100, fps: 100, beats: [], downbeats: [], sections: [], features: {}, onsets: {} }).track).toBe('audio/narration.flac');
 });
 
@@ -90,4 +90,30 @@ test('an analysis without a waveform or spectrum still loads, silent', () => {
   expect(A.wave(1)).toEqual({ peak: 0, rms: 0 });
   expect(A.bands(1).length).toBe(0);
   expect([...A.bands(1, 3)]).toEqual([0, 0, 0]);
+});
+
+test('no beats: every helper answers on the bpm grid from 0, never NaN', () => {
+  const E = AudioData.empty(), p = 0.6; // 100 BPM
+  expect(E.timeOfBeat(0)).toBe(0);
+  expect(E.timeOfBeat(5)).toBeCloseTo(5 * p, 9);
+  expect(E.timeOfBeat(-1)).toBeCloseTo(-p, 9);
+  expect(E.nearestBeat(3.1)).toBeCloseTo(3, 9);
+  expect(E.beatBefore(3)).toBeCloseTo(3, 9);
+  expect(E.beatBefore(2.9)).toBeCloseTo(2.4, 9);
+  expect(E.barAt(4.8)).toBeCloseTo(2, 9);
+  expect(E.nearestDownbeat(5.5)).toBeCloseTo(4.8, 9);
+  for (const t of [0, 0.3, 3, 7.77]) expect(E.timeOfBeat(E.beatAt(t))).toBeCloseTo(t, 9);
+  // one beat: the grid runs through it
+  const one = new AudioData({ duration: 5, bpm: 60, fps: 100, beats: [0.5], downbeats: [], sections: [], features: {}, onsets: {} });
+  expect(one.beatAt(2.5)).toBeCloseTo(2, 9);
+  expect(one.timeOfBeat(2)).toBeCloseTo(2.5, 9);
+  expect(one.beatBefore(2.2)).toBeCloseTo(1.5, 9);
+  // one downbeat: every 4th beat from it
+  const oneDown = new AudioData({ duration: 5, bpm: 60, fps: 100, beats: [], downbeats: [1], sections: [], features: {}, onsets: {} });
+  expect(oneDown.nearestDownbeat(1.3)).toBeCloseTo(1, 9);
+  expect(oneDown.nearestDownbeat(4.5)).toBeCloseTo(5, 9);
+  // a bpm of 0 is no grid: the helpers fall back on 100 BPM rather than NaN
+  const zero = new AudioData({ duration: 5, bpm: 0, fps: 100, beats: [], downbeats: [], sections: [], features: {}, onsets: {} });
+  expect(zero.nearestDownbeat(3)).toBeCloseTo(2.4, 9);
+  expect(zero.bpm).toBe(0);
 });
