@@ -122,12 +122,12 @@ export interface ProgressOptions extends ComponentOptions {
 }
 
 /**
- * A component's progress at f: its own, or by default 0 to 1 over 1.4 s from 0.2 s into its window (which starts at
- * w0, in clip seconds: the component's `window(f)[0]`), eased out.
+ * A component's progress at f: its own, or by default 0 to 1 over `seconds` (default 1.4 s) from 0.2 s into its
+ * window (which starts at w0, in clip seconds: the component's `window(f)[0]`), eased out.
  */
-export function progressOf(o: ProgressOptions, f: Frame, w0: number) {
+export function progressOf(o: ProgressOptions, f: Frame, w0: number, seconds = 1.4) {
   if (o.progress !== undefined) return clamp(val(o.progress, f));
-  return prog(f.lt, w0 + 0.2, w0 + 1.6, ease.outCubic);
+  return prog(f.lt, w0 + 0.2, w0 + 0.2 + seconds, ease.outCubic);
 }
 
 /** HTML-escaped text. */
