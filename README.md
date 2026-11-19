@@ -1,17 +1,41 @@
 # reel
 
-A deterministic WebGL video engine. Every frame is computed from the time `t` alone, by scenes written in TypeScript and three.js, so the same code drives a live preview in the browser and an offline export (headless Chrome piped into ffmpeg) at any frame size and frame rate, up to 4K, with adaptive motion blur. A video can follow a narration (voiced by a local model or force-aligned to a recording, every word timed, each plate shown by its own scene), be cut to an analysed song, or be silent.
+[![ci](https://github.com/rcnsh/reel/actions/workflows/ci.yml/badge.svg)](https://github.com/rcnsh/reel/actions/workflows/ci.yml)
+[![MIT licence](https://img.shields.io/badge/licence-MIT-blue.svg)](LICENSE)
 
-## Licence
+A deterministic WebGL video engine, made for AI agents to drive. Every frame is computed from the time `t` alone, by scenes written in TypeScript and three.js, so the same code drives a live preview in the browser and an offline export (headless Chrome piped into ffmpeg) at any frame size and frame rate, up to 4K, with adaptive motion blur. A video can follow a narration (voiced by a local model or force-aligned to a recording, every word timed, each plate shown by its own scene), be cut to an analysed song, or be silent.
 
-The engine is adapted from [mexicat/pdoom-video](https://github.com/mexicat/pdoom-video), MIT licence, copyright 2026 Giacomo Magnanini: see `LICENSE`, which applies to the engine code and must stay with it.
+<p align="center"><img src="docs/media/explainer.webp" width="720" alt="The explainer example: a title card, then text beside a picture, made from the component kit"></p>
 
-Fonts in `public/fonts/`:
+- **Code, not a timeline editor.** A video is a folder: a config with clips on stacked tracks, and a scene per clip. Scenes lay out text with HTML and CSS, and draw with shaders, three.js and Canvas2D.
+- **Deterministic.** The same project gives the same frames on every run, so an agent can render a still, look at it, change a line and compare.
+- **Agent tooling.** A strict CLI with `--json` on every command, `reel check` for layout problems measured on the rendered pixels, a stdio MCP server, and skills that teach an agent the engine.
+- **Sound.** Narration from a script (Kokoro on-device, macOS `say`, ElevenLabs, Fish Audio), forced alignment of a real recording, beat and stem analysis of a song, and a loudness-normalised mix.
+- **Outputs.** H.264, HEVC 10-bit, ProRes 422 and 4444, VP9 with alpha, GIF, WebP, and PNG, JPEG and linear EXR sequences.
 
-- Archivo, Cormorant Garamond and IBM Plex Mono are under the SIL Open Font License; the licence text for each is in `OFL-*.txt`.
-- The single-stroke SVG fonts in `stroke/` (EMS under the OFL, plus the Hershey fonts) carry their own licence and attribution in each file's header.
+| | | |
+|:-:|:-:|:-:|
+| <img src="docs/media/product3d.webp" width="320" alt="A 3D perfume bottle on a studio set, its cap lifting off"> | <img src="docs/media/music.webp" width="240" alt="Rings pulsing to the beat of a song"> | <img src="docs/media/media.webp" width="135" alt="A vertical short of a video clip, a Lottie badge and captions"> |
+| [`product3d`](examples/product3d): glTF, depth of field, soft shadows | [`music`](examples/music): cut to an analysed song | [`media`](examples/media): video, SVG and Lottie |
+| <img src="docs/media/demo.webp" width="320" alt="Text written on as it is spoken, in the print theme"> | <img src="docs/media/layers.webp" width="135" alt="A title over two tracks in the film theme"> | |
+| [`demo`](examples/demo): narrated, every word timed | [`layers`](examples/layers): tracks, a wipe, the film theme | |
 
-A project's own fonts live in its `fonts/` folder with their licences: `reel font add "<family>"` downloads a Google Fonts family from the google/fonts repository with its licence file (`OFL.txt`, `LICENSE.txt` or `UFL.txt`) beside the font files.
+## Quick start
+
+You need [bun](https://bun.sh) 1.4 or later and ffmpeg, plus [uv](https://docs.astral.sh/uv/) for the narration and music tools. Renders use a pinned Chrome for Testing build (157 or later) that reel downloads for itself.
+
+```sh
+git clone https://github.com/rcnsh/reel && cd reel
+bun install
+alias reel="bun $PWD/cli/reel.ts"
+reel chrome install                              # the pinned Chrome, once
+reel init ~/videos/first && cd ~/videos/first    # a new project that renders straight away
+reel dev                                         # live preview at the URL it prints
+reel still --t 1                                 # a frame to look at, in out/stills/
+reel video --samples auto                        # the finished video, with motion blur
+```
+
+To hand it to an agent, register the MCP server (`claude mcp add --scope user reel -- bun $PWD/cli/reel.ts mcp`, run in this checkout) and read [PLAYBOOK.md](PLAYBOOK.md) on briefing it. The rest of this page is the reference.
 
 ## How a video is made
 
@@ -154,3 +178,16 @@ Commands that look at a project (`info`, `still`, `sheet`, `strip`, `check`, `di
 **Variants from props.** One project can render many videos: a config's `props` gives defaults (`props: { title: 'Quarterly review', seconds: 4 }`), and `--props '{"title":"Annual results"}'` or `--props variant.json` replaces them key by key for one command (`still`, `sheet`, `check`, `info`, `video` and the rest; the MCP tools take a `props` object). `timeline()` reads them as `src.props` (clip lengths, which clips, their params) and scenes as `ctx.props`. With defaults, a key they lack or a value of another kind is an error naming them (an optional prop's default is `undefined` or `null`), so a typo fails instead of rendering the default. `defineVideo` types `src.props` from the defaults; a scene casts `ctx.props` to the type the config exports. The CLI sets them in each page before its modules run (`reel dev --props` too; `?props=<JSON>` in a preview URL overrides them), and the warm renderer keeps a page per set of props, so it never serves one variant for another. Give each variant's export its own `--out`: the default file is the same for all of them.
 
 `--only a,b` loads only those clips, `--theme film` tries another built-in theme, `--scale 2` renders 4K, `--from/--to` render part of the video, `--max-size 800` writes smaller images to look at, `--json` prints one JSON object. Unknown flags are errors, and a command exits 1 if any scene threw. `reel --help` lists every command and flag; `bun run typecheck` checks the engine, the CLI, the examples and the tests; `bun test` runs the tests (the rendering ones need Chrome and skip without it). CI (`.github/workflows/ci.yml`) runs the typecheck and `bun test` on every push to `main` and every pull request, on Linux with SwiftShader in a Debian 13 container (the system the Linux golden frames are rendered on); when a golden frame fails there, the run keeps its renders as the `golden-actual-linux` artifact.
+
+## Licence
+
+MIT: see [LICENSE](LICENSE). The engine is adapted from [mexicat/pdoom-video](https://github.com/mexicat/pdoom-video) by Giacomo Magnanini (MIT), whose copyright notice stays in `LICENSE` beside this project's.
+
+Fonts in `public/fonts/`:
+
+- Archivo, Cormorant Garamond and IBM Plex Mono are under the SIL Open Font License; the licence text for each is in `OFL-*.txt`.
+- The single-stroke SVG fonts in `stroke/` (EMS under the OFL, plus the Hershey fonts) carry their own licence and attribution in each file's header.
+
+A project's own fonts live in its `fonts/` folder with their licences: `reel font add "<family>"` downloads a Google Fonts family from the google/fonts repository with its licence file (`OFL.txt`, `LICENSE.txt` or `UFL.txt`) beside the font files.
+
+The examples' media were made for this repo, procedurally (the explainer's ridge) or by code in it (`make_assets.ts` in the `media` and `product3d` folders, `tools/synth_song.py` for the song, `tools/make_sounds.ts` for the cue sounds; the demo's narration is Kokoro's), so the MIT licence covers them too.
