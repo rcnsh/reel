@@ -6,7 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { pageOf, samplesOf, UsageError, type Values } from './args';
-import { run, spawnChild } from './children';
+import { run } from './children';
 import { call } from './daemon';
 import { runDiff } from './diff';
 import { cancelJob, jobView, listJobs, MAX_WAIT_S, startJob, waitJob, type JobView } from './jobs';
