@@ -70,7 +70,7 @@ test('sequence: a start, a track and a default transition; bad lengths throw', (
 
 test('clipsFromSections: transitions overlap the clips across each boundary, centred on it', () => {
   const audio = new AudioData({ duration: 9, bpm: 100, fps: 100, beats: [], downbeats: [], sections: [{ name: 'a', start: 0.6, end: 3 }, { name: 'b', start: 3, end: 5 }, { name: 'c', start: 5, end: 9 }], features: {}, onsets: {} });
-  const src = { audio, words: new Words({ lines: [] }) }, mods = { './scenes/a.ts': load, './scenes/b.ts': load, './scenes/c.ts': load };
+  const src = { audio, words: new Words({ lines: [] }), props: {} }, mods = { './scenes/a.ts': load, './scenes/b.ts': load, './scenes/c.ts': load };
   expect(windows(clipsFromSections(src, mods, { transition: 'wipe' }))).toEqual([
     { id: 'a', start: 0, end: 3.25, transition: undefined, track: undefined },
     { id: 'b', start: 2.75, end: 5.25, transition: 'wipe', track: undefined },
