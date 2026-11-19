@@ -67,7 +67,7 @@ reel video --mix (or reel events ─▶ data/cues.json ─▶ reel mix) + mix.js
 
 **Music video.** `reel analyze <song> --sections sections.json` with sections named after the scenes (`[{"name": "intro", "bar": 0}, …]`). Scenes react with `f.a` (envelopes and decaying kick/snare/hat/vocal pulses), `f.beat`, `f.bar`, `audio.hit`, `audio.env`. For cuts on the beat, snap clip starts in the config's `timeline()` with `src.audio.beatBefore(t)` or `src.audio.nearestDownbeat(t)`. Sung lyrics come from `reel align <vocal> --method whisper` (Whisper word times matched to the lyrics). `examples/music` is the reference.
 
-**Narrated video with a music bed.** Time the narration first, then `reel analyze <bed> --keep-sections --offset <s>` to add the bed's beats from where it enters, and list the bed under `music` in `mix.json` with the same start.
+**Narrated video with a music bed.** Time the narration first, then `reel analyze <bed> --keep-sections --offset <s>` to add the bed's beats from where it enters, and list the bed under `music` in `mix.json` with the same start (`"at": <s>`).
 
 **Engine change.** Change `src/engine/` only for something any video could use. In the same change, update the `reel-authoring` skill for anything a scene author sees and `docs/ENGINE.md` for how it works inside; a fact lives in one of them, not both. After touching `engine.ts`, `gl.ts`, `post.ts` or `main.ts`, render a short `--samples auto` video as well as stills: the sampler, tile masking and readback paths only run on export.
 

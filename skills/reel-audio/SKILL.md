@@ -65,7 +65,8 @@ Writes `data/audio.json` and copies the song to `audio/` as the track:
 - Sections: `--sections sections.json` (`[{ "name": "intro", "bar": 0 }, { "name": "drop", "start": 31.2 }]`, named
   after scenes), else segmented (`part1`, `part2` …).
 - `--fast`: no models (librosa; stems are rough proxies; a moving tempo loses it). For drafts.
-- A bed under narration: time the narration first, then `reel analyze bed.flac --keep-sections --offset 12`.
+- A bed under narration: time the narration first, then `reel analyze bed.flac --keep-sections --offset 12`, and
+  lay it in `mix.json` from the same time: `{ "file": "bed.flac", "at": 12 }`.
 
 In scenes: `f.a.kick` (a decaying pulse), `f.a.drums`, `f.beat`, `f.bar`, `f.beatPhase`; `audio.hit('snare', t)`,
 `audio.env('vocal', t)`. Cut on the beat in the config: `src.audio.nearestDownbeat(t)`, `src.audio.beatBefore(t)`.
@@ -77,6 +78,7 @@ A scene asks for a sound with `cue(kind, t)` in `init()` (times from words or be
 ```json
 {
   "music": [{ "file": "bed.flac", "from": "intro", "to": "outro", "db": -17, "fadeIn": 2, "fadeOut": 4 }],
+  "duck": { "threshold": -30.5, "ratio": 4, "attack": 80, "release": 600 },
   "cues": { "tick": { "file": "tick.wav", "db": -6, "minGap": 0.15 }, "land": { "file": "impact" } },
   "entryCues": { "whoosh": ["chapter2", "chapter3"] },
   "loudness": { "integrated": -14, "truePeak": -1, "lra": 11 },
@@ -86,14 +88,19 @@ A scene asks for a sound with `cue(kind, t)` in `init()` (times from words or be
 
 - Files are the project's (`audio/`), or the bundled cue sounds by name: `tick`, `click`, `pop`, `whoosh`,
   `swell`, `impact`. A cue kind named after a bundled sound needs no entry (it plays at -6 dB).
-- Music runs from the start of clip `from` (without it, the start of the video) to the start of clip `to` (without
-  it, the end of the video), looped, ducked under the track. `entryCues` add a cue of that kind at the start of each
+- Music runs from the start of clip `from`, or from `at` seconds (without either, the start of the video), to the
+  start of clip `to` (without it, the end of the video), looped (`"loop": false`: once, ending with its file), ducked
+  under the track. A partial render hears the bed from where it has got to. `duck` sets the ducking (ffmpeg's
+  `sidechaincompress`: `threshold` in dB, `ratio`, `attack` and `release` in ms; the defaults are those above, the
+  threshold exactly 0.03, about -30.5 dB),
+  `false` turns it off. `entryCues` add a cue of that kind at the start of each
   listed clip; they are added by the mix, so `reel events` counts only the cues scenes made.
 - Sounds placed on the timeline go in the config, not `mix.json`: `sounds: [{ file: 'audio/door.wav', at: 4.2, db: -3 }]`
   (or `(src) => […]` with times from words or beats; fields `from`, `duration`, `loop`, `speed`, `fadeIn`, `fadeOut`),
   or `sound({ … })` from a scene's `init()`. They are laid as they are, not ducked.
-- `loudness` defaults to -14 LUFS integrated, -1 dBTP (two-pass EBU R128, a linear gain where the peak allows);
-  `false` turns it off.
+- `loudness` defaults to -14 LUFS integrated, -1 dBTP (two-pass EBU R128: measured, then a linear gain where the
+  true peak allows, else loudnorm's limiter); `false` turns it off. Any number of cues is cheap: each kind is summed
+  into one track before ffmpeg runs.
 - **`reel video --samples auto --mix`** renders and mixes into the finished file and prints its LUFS and true peak.
   To re-mix a render without re-rendering: `reel events` (writes `data/cues.json`), then
   `reel mix out/raw.mp4 out/final.mp4` (a partial render with the same `--from`).
