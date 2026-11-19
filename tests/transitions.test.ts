@@ -29,7 +29,7 @@ test('each kind takes only its own keys', () => {
 });
 
 test('ease: a name from the easing set, defaulting to the curve each kind always had', () => {
-  expect(() => transitionOf({ kind: 'wipe', ease: 'bouncy' }, 'x')).toThrow('ease must be one of linear, inQuad');
+  expect(() => transitionOf({ kind: 'wipe', ease: 'bouncy' }, 'x')).toThrow('ease must be one of linear, inSine');
   expect(transitionEase({ kind: 'crossfade' })).toBe(ease.linear);
   expect(transitionEase({ kind: 'dip' })).toBe(ease.linear);
   for (const kind of ['wipe', 'slide', 'zoom', 'iris', 'clock'] as const) expect(transitionEase({ kind })).toBe(ease.inOutCubic);
