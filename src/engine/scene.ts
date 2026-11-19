@@ -134,7 +134,7 @@ export abstract class Scene {
    */
   prepare(_f: Frame): void | Promise<void> {}
 
-  /** Render into `out` (HalfFloat, linear HDR). Must fully overwrite/clear it. Return post-processing overrides. */
+  /** Render into `out` (HalfFloat, linear HDR; the engine clears it to transparent first). On track 0 cover it opaque. Return post-processing overrides. */
   abstract render(f: Frame, out: THREE.WebGLRenderTarget): PostOverrides | void;
 
   dispose(): void {}

@@ -154,7 +154,7 @@ export default class Title extends Scene {
 }
 ```
 
-`render(f, out)` must fully overwrite `out`, a HalfFloat **linear HDR** target. On track 0 draw it opaque; on a higher track start with `clearRT(renderer, out, [0, 0, 0], 0)` and draw premultiplied over it.
+`render(f, out)` draws into `out`, a HalfFloat **linear HDR** target that the engine clears to transparent before every `render()` (what a scene leaves undrawn is transparent, never what an earlier frame left). On track 0 draw it opaque; on a higher track draw premultiplied over the transparent (`clearRT(renderer, out, [0, 0, 0], 0)` first is harmless).
 
 A video exported with alpha (`reel video --format prores4444`, `webm`, or `--alpha` with `png`, `png16`, `exr`, `webp`; `reel still --alpha` to look) leaves the theme's background out: `clearRT(renderer, out, LIN.bg)` clears to transparent, a `Stage3D` with the default `'bg'` background is transparent, a dip through the background goes through transparent (one through another colour shows that colour), and the frame is written with straight alpha. So paint the background with `clearRT(…, LIN.bg)`, never as a full-frame shape in `bg`, and a scene works in both. A fade (`post.fade`) fades to transparent there; glow past an object's edge becomes translucent light.
 
