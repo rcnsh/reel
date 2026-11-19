@@ -1,8 +1,9 @@
 import { afterAll, expect, test } from 'bun:test';
 import { buildMix, CUE_TRACK_INPUT as CUE_IN, cueBlock, duckFilter, FMT, type Events } from '../tools/mix-graph';
+import { $ } from 'bun';
 import { existsSync } from 'node:fs';
 import path from 'node:path';
-import { bundledSounds, soundFile } from '../tools/mix';
+import { bundledSounds, mixVideo, soundFile } from '../tools/mix';
 import { BUNDLED_SOUNDS } from '../src/config';
 import { linearGain, loudnessTarget, loudnormFilter, parseEbur128, parseLoudnorm, STREAMING } from '../tools/loudness';
 import { removeTempDirs, tempDir } from './helpers';
@@ -12,10 +13,10 @@ afterAll(removeTempDirs);
 const ev: Events = { duration: 10, timeline: [{ id: 'a', start: 0, end: 4 }, { id: 'b', start: 4, end: 10 }], cues: [{ kind: 'tick', t: 1 }, { kind: 'tick', t: 1.05 }, { kind: 'tick', t: 5 }, { kind: 'boom', t: 2 }] };
 const snd = (f: string) => `/p/audio/${f}`;
 
-test('the track alone, read from its lossless file from the render start, padded to the video', () => {
+test('the track alone, read from its lossless file from the render start, over silence of the video\'s length', () => {
   const g = buildMix({}, ev, 10, 0, '/p/audio/narration.flac', snd);
   expect(g.inputs).toEqual(['-ss', '0.000000', '-t', '10.000000', '-i', '/p/audio/narration.flac']);
-  expect(g.filter).toBe(`[1:a]${FMT},asetnsamples=n=1024:p=0[voice];[voice]apad,atrim=0:10.000000,asetpts=PTS-STARTPTS[mixed]`);
+  expect(g.filter).toBe(`[1:a]${FMT},asetnsamples=n=1024:p=0[voice];anullsrc=r=48000:cl=stereo,atrim=0:10.000000[silence];[silence][voice]amix=inputs=2:normalize=0:duration=first,atrim=0:10.000000,asetpts=PTS-STARTPTS[mixed]`);
   expect(g.warnings).toEqual(["no sound for cue kind 'tick' in mix.json: skipped", "no sound for cue kind 'boom' in mix.json: skipped"]);
   expect(g.silent).toBe(false);
 });
@@ -23,7 +24,7 @@ test('the track alone, read from its lossless file from the render start, padded
 test('a silent video with nothing to lay is silence of its length', () => {
   const g = buildMix({}, { ...ev, cues: [] }, 3, 0, null, snd);
   expect(g.silent).toBe(true);
-  expect(g.filter).toBe('anullsrc=r=48000:cl=stereo,apad,atrim=0:3.000000,asetpts=PTS-STARTPTS[mixed]');
+  expect(g.filter).toBe('anullsrc=r=48000:cl=stereo,atrim=0:3.000000[mixed]');
 });
 
 test('a music bed from a clip, ducked under the track, and cues merged within minGap', () => {
@@ -37,7 +38,7 @@ test('a music bed from a clip, ducked under the track, and cues merged within mi
   // (every tick is in one track, at whole milliseconds in samples, its gain linear)
   expect(f).toContain(`[3:a]${FMT}[c0]`);
   expect(g.cues).toEqual([{ kind: 'tick', file: '/p/audio/t.wav', gain: 10 ** (-6 / 20), offsets: [48000, 240000], track: 'cues-tick.f32' }]);
-  expect(f.at(-1)).toBe('[voice][music][c0]amix=inputs=3:normalize=0:duration=longest,apad,atrim=0:10.000000,asetpts=PTS-STARTPTS[mixed]');
+  expect(f.at(-1)).toBe('[silence][voice][music][c0]amix=inputs=4:normalize=0:duration=first,atrim=0:10.000000,asetpts=PTS-STARTPTS[mixed]');
 });
 
 test('a partial render: the track and times shift by --from, the bed plays from where it has got to, segments fade at the cut, cues outside are dropped', () => {
@@ -98,6 +99,26 @@ test('a cue track: the sound at each offset, times its gain, overlaps summed, wr
   const parts = [cueBlock(src, 0.5, [0, 2, 10], 0, 3), cueBlock(src, 0.5, [0, 2, 10], 3, 8), cueBlock(src, 0.5, [0, 2, 10], 11, 2)];
   expect([...parts.flatMap((p) => [...p])]).toEqual([...whole]);
 });
+
+test('the sum ends with silence of the video length, not with its parts', () => {
+  // (a pad waiting for the sum's end can wait forever, and a bounded one ended the sound early)
+  const g = buildMix({ cues: { tick: { file: 't.wav' } } }, { ...ev, cues: [1, 2, 3].map((t) => ({ kind: 'tick', t })) }, 4, 0, null, snd);
+  expect(g.filter).toEndWith('anullsrc=r=48000:cl=stereo,atrim=0:4.000000[silence];[silence][c0]amix=inputs=2:normalize=0:duration=first,atrim=0:4.000000,asetpts=PTS-STARTPTS[mixed]');
+  expect(g.filter).not.toContain('apad');
+});
+
+test.skipIf(!Bun.which('ffmpeg'))('a silent video with several cues of a kind mixes to the video length, under the true-peak ceiling', async () => {
+  const root = tempDir('reel-mix-cues-');
+  const raw = path.join(root, 'raw.mp4'), out = path.join(root, 'mixed.mp4');
+  await $`ffmpeg -nostdin -loglevel error -f lavfi -i color=s=64x64:r=30:d=4 -c:v libx264 -preset ultrafast ${raw}`.quiet();
+  const events: Events = { duration: 4, timeline: [{ id: 'a', start: 0, end: 4 }], cues: [1, 2, 3].map((t) => ({ kind: 'tick', t })) };
+  const r = await mixVideo({ root, input: raw, output: out, events });
+  expect(r.summary).toContain('3 tick');
+  // (three short ticks are far below -14 LUFS, and the linear gain stops at the true-peak ceiling)
+  expect(r.loudness!.truePeak).toBeLessThanOrEqual(-0.9);
+  const audioDur = Number((await $`ffprobe -v error -select_streams a -show_entries stream=duration -of csv=p=0 ${out}`.text()).trim());
+  expect(Math.abs(audioDur - 4)).toBeLessThan(0.022); // (an AAC frame)
+}, 30_000);
 
 test('an unknown clip in mix.json is an error', () => {
   expect(() => buildMix({ music: [{ file: 'x.mp3', from: 'zzz' }] }, ev, 10, 0, null, snd)).toThrow("no clip 'zzz'");

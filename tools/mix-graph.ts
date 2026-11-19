@@ -186,9 +186,10 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     f.push(c); parts.push(`[s${laid}]`); n++; laid++;
   }
   if (ev.sounds?.length) counts.push(`${laid} sound${laid === 1 ? '' : 's'} on the timeline`);
-  // everything summed, padded or cut to the video's length
-  const end = `apad,atrim=0:${dur.toFixed(6)},asetpts=PTS-STARTPTS[mixed]`;
-  if (!parts.length) f.push(`anullsrc=r=48000:cl=stereo,${end}`);
-  else f.push(`${parts.join('')}${parts.length > 1 ? `amix=inputs=${parts.length}:normalize=0:duration=longest,` : ''}${end}`);
+  // everything summed over silence of the video's length, which ends the mix: a pad waiting for the sum's end can
+  // wait forever (several cues of a kind are split copies of one sound, whose end may never reach a loudnorm)
+  const len = dur.toFixed(6), silence = `anullsrc=r=48000:cl=stereo,atrim=0:${len}`, cut = `atrim=0:${len},asetpts=PTS-STARTPTS[mixed]`;
+  if (!parts.length) f.push(`${silence}[mixed]`);
+  else f.push(`${silence}[silence]`, `[silence]${parts.join('')}amix=inputs=${parts.length + 1}:normalize=0:duration=first,${cut}`);
   return { inputs, filter: f.join(';'), silent: !parts.length, segments: segs.length, counts, warnings, cues };
 }
