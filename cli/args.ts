@@ -96,7 +96,7 @@ Working on a project
   chrome path                the Chrome binary renders would use, and its version
   daemon status              the warm renderers running, per project
   daemon stop                stop the project's warm renderer          [--all: every project's]
-  golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
+  golden update              re-render the golden frames of this operating system (tests/golden/<platform>/), removing PNGs goldens.json no longer lists
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
