@@ -42,6 +42,11 @@ export interface StageOptions {
 /** Options of a light made by the stage's rigs or added with stage.soft(). */
 export interface SoftLight { light: THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight; softness: number }
 
+/** The adaptive sub-frames a clip with a stage stops at unless the clip sets its own `maxSamples`. */
+export const STAGE_MAX_SAMPLES = 108;
+/** A soft light's shadow-map blur (texels) in a sub-frame, where the moving light makes the penumbra. */
+const SUB_FRAME_SHADOW_RADIUS = 1;
+
 const colour = (c: string) => {
   if (Object.prototype.hasOwnProperty.call(LIN, c)) { const [r, g, b] = LIN[c]!; return new THREE.Color().setRGB(r, g, b, THREE.LinearSRGBColorSpace); }
   return new THREE.Color(c);
@@ -69,6 +74,9 @@ export class Stage3D {
 
   constructor(private ctx: SceneCtx, o: StageOptions = {}) {
     this.o = o;
+    // depth of field, soft shadows and anti-aliasing jitter keep glossy highlights changing from step to step, so
+    // adaptive sampling would run every frame to 324; at 1:1 in 4K, 108 cannot be told from it
+    ctx.capSamples(STAGE_MAX_SAMPLES);
     this.renderer = ctx.renderer;
     this.label = o.label ?? 'stage';
     this.cam = new THREE.PerspectiveCamera(o.fov ?? 35, W / H, o.near ?? 0.05, o.far ?? 200);
@@ -105,7 +113,8 @@ export class Stage3D {
   /**
    * Make a light cast soft shadows: in a render of several sub-frames it moves over a disk `softness` world units
    * across (perpendicular to where it points), so its shadows' penumbras grow with the distance from the caster as
-   * with a real area light; in a render of one sample its shadow map is blurred instead (`shadow.radius`).
+   * with a real area light, and its shadow map's own blur (`shadow.radius`) drops to a texel; in a render of one
+   * sample the light stays put and only that blur softens it.
    */
   soft(light: THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight, softness: number) {
     this.softs = this.softs.filter((s) => s.light !== light);
@@ -253,47 +262,54 @@ export class Stage3D {
     // (what check sees is the camera without jitter)
     if (reporting()) this.report(o.opacity ?? 1);
     const pos = c.position.clone(), quat = c.quaternion.clone(), pm = c.projectionMatrix.clone();
-    const lights = this.softs.map((s) => ({ s, p: s.light.position.clone() }));
-    if (k >= 0) {
-      const e = c.projectionMatrix.elements;
-      // depth of field: the camera moves over its lens disk; the projection shifts so the focal plane stays put
-      const { focus, radius } = this.lens();
-      if (radius > 0) {
-        const [lx, ly] = lensSample(k).map((v) => v * radius) as [number, number];
-        c.translateX(lx); c.translateY(ly); c.updateMatrixWorld();
-        e[8]! -= (e[0]! * lx) / focus; e[9]! -= (e[5]! * ly) / focus;
-      }
-      // anti-aliasing: a sub-pixel shift of the projection
-      if ((this.o.antialias ?? 'auto') !== 'none') {
-        const [jx, jy] = subPixel(k), size = new THREE.Vector2();
-        r.getDrawingBufferSize(size);
-        e[8]! -= (2 * jx) / size.x; e[9]! -= (2 * jy) / size.y;
-      }
-      c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
-      // soft shadows: each soft light moves over its disk, perpendicular to where it points
-      for (const { s, p } of lights) {
-        if (!s.softness) continue;
-        const [u, v] = lightSample(k), aim = new THREE.Vector3();
-        const tp = (s.light as THREE.DirectionalLight).target?.getWorldPosition(aim) ?? aim.set(0, 0, 0);
-        const dir = tp.sub(p).normalize(), a = new THREE.Vector3(0, 1, 0).cross(dir);
-        if (a.lengthSq() < 1e-6) a.set(1, 0, 0);
-        a.normalize();
-        const b = new THREE.Vector3().crossVectors(dir, a);
-        s.light.position.copy(p).addScaledVector(a, (u * s.softness) / 2).addScaledVector(b, (v * s.softness) / 2);
-      }
-    }
-    this.scene.traverse((ob) => { if (ob.userData.htmlPlane) (ob as unknown as { sync(): void }).sync(); });
-    this.ctx.maskDepth(tgt);
-    r.setRenderTarget(tgt);
+    const lights = this.softs.map((s) => ({ s, p: s.light.position.clone(), radius: s.light.shadow.radius }));
     const prevC = r.getClearColor(new THREE.Color()), prevA = r.getClearAlpha();
-    if (this.bg) r.setClearColor(this.bg, 1); else r.setClearColor(0x000000, 0);
-    r.clear(true, false, false);
-    r.render(this.scene, c);
-    r.setClearColor(prevC, prevA);
-    // back to the pose as placed
-    c.position.copy(pos); c.quaternion.copy(quat); c.updateMatrixWorld();
-    c.projectionMatrix.copy(pm); c.projectionMatrixInverse.copy(pm).invert();
-    for (const { s, p } of lights) s.light.position.copy(p);
+    // (restored whatever happens: a light left at radius 1 would be taken as its own radius on the next render)
+    try {
+      if (k >= 0) {
+        const e = c.projectionMatrix.elements;
+        // depth of field: the camera moves over its lens disk; the projection shifts so the focal plane stays put
+        const { focus, radius } = this.lens();
+        if (radius > 0) {
+          const [lx, ly] = lensSample(k).map((v) => v * radius) as [number, number];
+          c.translateX(lx); c.translateY(ly); c.updateMatrixWorld();
+          e[8]! -= (e[0]! * lx) / focus; e[9]! -= (e[5]! * ly) / focus;
+        }
+        // anti-aliasing: a sub-pixel shift of the projection
+        if ((this.o.antialias ?? 'auto') !== 'none') {
+          const [jx, jy] = subPixel(k), size = new THREE.Vector2();
+          r.getDrawingBufferSize(size);
+          e[8]! -= (2 * jx) / size.x; e[9]! -= (2 * jy) / size.y;
+        }
+        c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
+        // soft shadows: each soft light moves over its disk, perpendicular to where it points
+        for (const { s, p } of lights) {
+          if (!s.softness) continue;
+          const [u, v] = lightSample(k), aim = new THREE.Vector3();
+          const tp = (s.light as THREE.DirectionalLight).target?.getWorldPosition(aim) ?? aim.set(0, 0, 0);
+          const dir = tp.sub(p).normalize(), a = new THREE.Vector3(0, 1, 0).cross(dir);
+          if (a.lengthSq() < 1e-6) a.set(1, 0, 0);
+          a.normalize();
+          const b = new THREE.Vector3().crossVectors(dir, a);
+          s.light.position.copy(p).addScaledVector(a, (u * s.softness) / 2).addScaledVector(b, (v * s.softness) / 2);
+          // (the moving light alone makes the penumbra: three's PCF blur is dithered by screen position, the same
+          // in every sub-frame, so it would widen the penumbra and leave a fixed pattern no sampling averages out)
+          s.light.shadow.radius = Math.min(s.light.shadow.radius, SUB_FRAME_SHADOW_RADIUS);
+        }
+      }
+      this.scene.traverse((ob) => { if (ob.userData.htmlPlane) (ob as unknown as { sync(): void }).sync(); });
+      this.ctx.maskDepth(tgt);
+      r.setRenderTarget(tgt);
+      if (this.bg) r.setClearColor(this.bg, 1); else r.setClearColor(0x000000, 0);
+      r.clear(true, false, false);
+      r.render(this.scene, c);
+    } finally {
+      r.setClearColor(prevC, prevA);
+      // back to the pose as placed
+      c.position.copy(pos); c.quaternion.copy(quat); c.updateMatrixWorld();
+      c.projectionMatrix.copy(pm); c.projectionMatrixInverse.copy(pm).invert();
+      for (const { s, p, radius } of lights) { s.light.position.copy(p); s.light.shadow.radius = radius; }
+    }
     const opaque = !!this.bg && (o.opacity ?? 1) >= 1;
     this.ctx.comp.draw(r, tgt.texture, out, { mode: opaque ? 'replace' : 'normal', opacity: o.opacity ?? 1, premult: false });
   }

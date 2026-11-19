@@ -43,8 +43,34 @@ export function frameStats(p: Pixels, cols = 32): FrameStats {
   return { sig, cols, rows, spread: Math.max(...sig) - Math.min(...sig) };
 }
 
+/**
+ * How far a frame rendered again moved from the first render: the most any cell's brightness moved, and the share
+ * of cells that moved by `level` levels or more.
+ */
+export function frameChange(a: FrameStats, b: FrameStats, level = 2) {
+  let most = 0, cells = 0;
+  for (let i = 0; i < a.sig.length; i++) { const d = Math.abs(a.sig[i]! - (b.sig[i] ?? a.sig[i]!)); most = Math.max(most, d); if (d >= level) cells++; }
+  return { most, share: a.sig.length ? cells / a.sig.length : 0 };
+}
+/**
+ * A change between two renders of one time that is the scene's doing, not the browser's: Chrome rasterises an
+ * HTML layer's text a sub-pixel differently after a different history of DOM changes, which moves a few cells by a
+ * few levels; a random draw moves a cell by more, or many cells.
+ */
+export const NONDETERMINISTIC = { most: 12, share: 0.1 };
+
 /** Two frames look the same: no cell's brightness moved by `tol` levels or more (grain averages out in a cell). */
 export const sameFrame = (a: FrameStats, b: FrameStats, tol = 1) => a.sig.length === b.sig.length && a.sig.every((v, i) => Math.abs(v - b.sig[i]!) < tol);
+
+/**
+ * Whether a sample's second render can be judged for the `nondeterministic` rule: not with a clip exempt from it
+ * on screen (it varies on purpose), nor where a stateful clip stepped on from the frame before (the second render
+ * reaches the time by a seek, which such a clip may well draw differently).
+ */
+export function judgeable(s: Pick<Sample, 'clips' | 'stepped'>, clips: readonly ClipSpan[]) {
+  if (s.stepped?.length) return false;
+  return !s.clips.some((c) => { const e = clips.find((x) => x.id === c)?.exempt; return e === true || !!e?.includes('nondeterministic'); });
+}
 
 // ---- text against what is behind it ----
 export interface TextMeasure {
@@ -98,8 +124,10 @@ export interface ClipSpan { id: string; start: number; end: number; track: numbe
 /**
  * Frame times to sample in [from, to): every `step` seconds, plus frames bunched at every clip's start and end
  * (its first and last frame always), where cuts, fades and entrances go wrong. Each time is a frame's time.
+ * With `only` (the clips loaded, as `--only`), just those clips' frames: the rest of the video draws nothing.
  */
-export function checkTimes(clips: ClipSpan[], duration: number, fps: number, from = 0, to = duration, step = 0.5): number[] {
+export function checkTimes(clips: ClipSpan[], duration: number, fps: number, from = 0, to = duration, step = 0.5, only?: readonly string[]): number[] {
+  if (only) clips = clips.filter((c) => only.includes(c.id));
   const last = Math.ceil(Math.min(to, duration) * fps - 1e-6) - 1, first = Math.ceil(from * fps - 1e-6);
   const frames = new Set<number>();
   for (let t = from; t < to; t += step) frames.add(Math.round(t * fps));
@@ -109,7 +137,8 @@ export function checkTimes(clips: ClipSpan[], duration: number, fps: number, fro
     for (const k of [0, 1, 3, 8, 15]) { frames.add(Math.min(b, a + k)); frames.add(Math.max(a, b - k)); }
     for (const s of [0.25, 0.5]) { frames.add(Math.min(b, a + Math.round(s * fps))); frames.add(Math.max(a, b - Math.round(s * fps))); }
   }
-  return [...frames].filter((f) => f >= first && f <= last).sort((x, y) => x - y).map((f) => f / fps);
+  const shown = (f: number) => !only || clips.some((c) => f >= Math.ceil(c.start * fps - 1e-6) && f < Math.ceil(c.end * fps - 1e-6));
+  return [...frames].filter((f) => f >= first && f <= last && shown(f)).sort((x, y) => x - y).map((f) => f / fps);
 }
 
 // ---- findings ----
@@ -143,6 +172,32 @@ export interface Sample {
   errors: string[];
   /** Canvas2D fillText and strokeText calls per clip in this frame (text the clip may not have reported). */
   textDraws?: Record<string, number>;
+  /** Math.random, Date.now and performance.now calls per clip (and per name) in this frame. */
+  clocks?: Record<string, Record<string, number>>;
+  /** Stateful clips this frame stepped on from the frame before rather than reaching by a seek. */
+  stepped?: string[];
+  /** The same time rendered again later in the check, out of order: a pure function of t gives the same stats. */
+  again?: FrameStats;
+}
+
+/**
+ * Which samples to render a second time for the `nondeterministic` rule: up to `n` spread evenly across them, plus
+ * the middle sample of each clip the spread missed (`clips`: the clips on screen in each sample; null for a sample
+ * that cannot be judged, never picked), latest first with the very last moved to the end. (The page renders each
+ * by a seek, whatever came before: `__reel.recheck`.)
+ */
+export function recheckOrder(clips: readonly (readonly string[] | null)[], n = 12): number[] {
+  const ok = [...clips.keys()].filter((i) => clips[i]);
+  if (!ok.length) return [];
+  const k = Math.min(n, ok.length), out = new Set<number>();
+  for (let i = 0; i < k; i++) out.add(ok[k === 1 ? 0 : Math.round((i * (ok.length - 1)) / (k - 1))]!);
+  const at = new Map<string, number[]>();
+  for (const i of ok) for (const c of clips[i]!) if (c !== 'overlay') { const is = at.get(c); if (is) is.push(i); else at.set(c, [i]); }
+  // (only for clips the spread missed: a check of many short clips stays cheap)
+  for (const is of at.values()) if (!is.some((i) => out.has(i))) out.add(is[is.length >> 1]!);
+  const order = [...out].sort((a, b) => b - a);
+  if (order.length > 1 && order[0] === clips.length - 1) order.push(order.shift()!);
+  return order;
 }
 
 export interface CheckOpts {
@@ -158,6 +213,10 @@ export interface CheckOpts {
   clips: ClipSpan[];
   /** The theme's palette (#rrggbb per key), for suggesting a colour that reads. */
   palette: Record<string, string>;
+  /** Timeline problems the page found while loading, by clip (a transition with nothing to overlap). */
+  warnings?: { clip: string; message: string }[];
+  /** The clips loaded (`--only`): the others draw nothing, so they are left out of every finding. */
+  only?: readonly string[];
 }
 
 const RANK: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
@@ -166,6 +225,8 @@ const quote = (s?: string) => (s ? `'${s.length > 48 ? s.slice(0, 47) + '…' : 
 
 /** Turn sampled frames into findings, one per problem (frames showing the same problem are merged). */
 export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
+  const only = o.only;
+  if (only) samples = samples.map((s) => ({ ...s, clips: s.clips.filter((c) => c === 'overlay' || only.includes(c)) }));
   const exemptClip = new Map(o.clips.map((c) => [c.id, c.exempt]));
   const exempt = (rule: CheckRule, clip: string, box?: { exempt?: CheckRule[] | true }) => {
     const c = exemptClip.get(clip), b = box?.exempt;
@@ -287,15 +348,36 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
   }
 
   // frames that do not change for too long
+  // (with --only, a run ends at a stretch no loaded clip covers: it was not sampled)
+  const spans: [number, number][] = [];
+  if (only) for (const c of o.clips.filter((c) => only.includes(c.id)).sort((x, y) => x.start - y.start)) {
+    const last = spans.at(-1);
+    if (last && c.start <= last[1]) last[1] = Math.max(last[1], c.end); else spans.push([c.start, c.end]);
+  }
+  // (a clip's first frame can sit a hair before its start: checkTimes rounds starts to frames with 1e-6 of slack)
+  const gap = (t0: number, t1: number) => !!only && !spans.some(([a, b]) => t0 >= a - 1e-6 && t1 < b);
   for (let i = 0; i < samples.length;) {
     let j = i;
-    while (j + 1 < samples.length && sameFrame(samples[j + 1]!.stats, samples[i]!.stats)) j++;
+    while (j + 1 < samples.length && sameFrame(samples[j + 1]!.stats, samples[i]!.stats) && !gap(samples[j]!.t, samples[j + 1]!.t)) j++;
     const a = samples[i]!, b = samples[j]!, span = b.t - a.t;
     const clips = [...new Set(samples.slice(i, j + 1).flatMap((s) => s.clips))].filter((c) => c !== 'overlay');
     if (span >= o.frozen && !clips.every((c) => exempt('frozen', c))) {
       raw.push({ kind: 'frozen', severity: 'warning', t: a.t, until: b.t, frames: j - i + 1, at: a.t, clip: clips.join('+'), value: +span.toFixed(2), key: `frozen|${a.t}`, worst: span, message: `nothing moves for ${span.toFixed(1)} s (${a.t.toFixed(2)} to ${b.t.toFixed(2)} s): hold a still this long on purpose, or give it some motion` });
     }
     i = j + 1;
+  }
+
+  // the same time rendered twice gives a different frame: something other than t decides what is drawn
+  for (const s of samples) {
+    if (!s.again || !judgeable(s, o.clips)) continue;
+    const onScreen = s.clips.filter((c) => c !== 'overlay');
+    const { most: moved, share } = frameChange(s.stats, s.again);
+    if (moved < NONDETERMINISTIC.most && share < NONDETERMINISTIC.share) continue;
+    const seen = onScreen.flatMap((c) => Object.keys(s.clocks?.[c] ?? {}).map((k) => `'${c}' ${k}`));
+    add({
+      kind: 'nondeterministic', severity: 'error', t: s.t, clip: onScreen.join('+'), value: +moved.toFixed(1),
+      message: `rendering ${s.t.toFixed(3)} s a second time gave a different frame (${share >= 0.01 ? `${Math.round(share * 100)}% of it` : 'part of it'} changed, by up to ${moved.toFixed(1)} brightness levels), so the frame is not a pure function of t: the preview, stills and the export will not agree, and adaptive motion blur turns it into noise. ${seen.length ? `While drawing, ${seen.join(', ')} ${seen.length > 1 ? 'were' : 'was'} called. ` : ''}Take randomness from hash() or mulberry32() with a fixed seed and jitter from frameIdx(f.t), never Math.random(), Date.now() or performance.now(); nothing may count render() calls or change between them (a scene that simulates state sets stateful = true)`,
+    }, 'again', moved);
   }
 
   // clips that draw text with fillText or strokeText and never report any: everything above is blind to that text
@@ -314,6 +396,13 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
       kind: 'unreported', severity: 'warning', t: d.t, until: d.until, frames: d.frames, at: d.t, clip, value: d.n, key: `unreported|${clip}`, worst: d.n,
       message: `'${clip}' draws text with fillText or strokeText (${d.n} call${d.n > 1 ? 's' : ''} in ${d.frames} frame${d.frames > 1 ? 's' : ''}) but reports none, so this check cannot see it: follow each fillText with reportText(c, text, x, y), or report({ kind: 'text', ... }) for text drawn another way (text drawn only on a scratch canvas that never shows as text: exempt the clip with check: { exempt: ['unreported'] })`,
     });
+  }
+
+  // timeline problems, for the clips this check looked at, over the times it saw them
+  for (const w of o.warnings ?? []) {
+    const seen = samples.filter((s) => s.clips.includes(w.clip));
+    if (!seen.length || exempt('timeline', w.clip)) continue;
+    raw.push({ kind: 'timeline', severity: 'warning', t: seen[0]!.t, until: seen.at(-1)!.t, frames: seen.length, at: seen[0]!.t, clip: w.clip, message: w.message, key: `timeline|${w.clip}|${w.message}`, worst: 0 });
   }
 
   // merge: one finding per problem, at its worst frame, spanning every frame that showed it

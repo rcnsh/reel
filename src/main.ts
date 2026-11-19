@@ -96,14 +96,10 @@ function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
   return s;
 }
 
-/** Bytes to base64 (in slices: a spread of a whole frame's bytes overflows the call stack). */
-function b64(b: Uint8Array) {
-  let s = '';
-  for (let i = 0; i < b.length; i += 0x8000) s += String.fromCharCode(...b.subarray(i, i + 0x8000));
-  return btoa(s);
-}
+/** A canvas as a PNG, base64 (the native toBase64: Chrome 140+, and reel refuses anything before 157). */
 async function pngOf(cv: OffscreenCanvas) {
-  return b64(new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer()));
+  const b = new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer());
+  return b.toBase64();
 }
 /** Output size for a w x h image whose long side may be at most `max` px (never enlarged). */
 function fit(w: number, h: number, max?: number) {
@@ -134,6 +130,7 @@ const clipsAt = (t: number) => TIMELINE.filter((e) => t >= e.start && t < e.end)
 
 function setupExport() {
   document.body.classList.add('export');
+  const stateful = [...engine.loaded.values()].some((l) => l.scene?.stateful);
   window.__reel = {
     engine,
     duration: engine.duration,
@@ -141,6 +138,8 @@ function setupExport() {
     track: engine.audio.track,
     /** Scene and shader errors: the page's load errors and the render errors since beginRequest(). */
     get errors() { return engine.errors; },
+    /** Timeline problems that are not errors (a transition that never plays), by clip. */
+    get warnings() { return engine.warnings; },
     /**
      * Start a request on a warm page: render errors are reported again from here (once per clip). Returns false
      * when the page can no longer render (its GL context was lost: the GPU process crashed or was reset).
@@ -158,8 +157,10 @@ function setupExport() {
     alpha: ALPHA,
     bits: BITS,
     theme: THEME.name,
+    /** The render's props (the page's over the config's defaults). */
+    props: engine.props,
     /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
-    stateful: [...engine.loaded.values()].some((l) => l.scene?.stateful),
+    stateful,
     timeline: TIMELINE.map(({ id, start, end, track, check, freeze }) => {
       // (a frozen clip is still on purpose: `reel check` does not report it as frozen)
       const ex = check?.exempt;
@@ -187,7 +188,17 @@ function setupExport() {
       try { engine.render(t, 1 / FPS, true, samples, shutter); } finally { engine.collectBoxes = false; }
       const px = { data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE };
       const boxes = engine.lastBoxes.map((b) => ({ ...b, ...(b.kind === 'text' && b.color && /^#[0-9A-F]{6}$/i.test(b.color) && (b.alpha ?? 1) >= 0.05 ? { m: measureText(px, b, hexRgb(b.color)) } : {}) }));
-      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors, textDraws: engine.lastTextDraws };
+      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors, textDraws: engine.lastTextDraws, clocks: engine.lastClocks, stepped: [...engine.lastStepped] };
+    },
+    /**
+     * For `reel check`'s second renders: render t by a seek (whatever was rendered before) and return the frame's
+     * stats, the scene errors so far and whether a scene failed in this render (even one that had failed before).
+     */
+    async recheck(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
+      engine.forgetTime();
+      const failures = engine.failures;
+      await engine.renderFrame(t, 1 / FPS, true, samples, shutter);
+      return { stats: frameStats({ data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE }), errors: engine.errors, failed: engine.failures > failures };
     },
     /**
      * The last rendered frame as a PNG (base64): the export's pixels at full resolution, or `crop` (x, y, w, h in
@@ -303,7 +314,9 @@ function setupExport() {
      * `inflight` frames are unacknowledged: backpressure from the encoder, so a slow encode (4K) cannot
      * pile frames up in memory. Pipelined: frame n's readback is collected while n+1 renders, and the
      * socket is written from a worker thread. Calls with the same `ws` reuse its connection, so a
-     * renderer can be handed several ranges; a range that goes on where the last one ended skips the warm-up.
+     * renderer can be handed several ranges. In a project with a stateful scene, a range that does not go on where
+     * the last one ended starts with a warm-up frame; a stateless frame is the same however it is reached, so its
+     * ranges start straight away.
      * `pixels` picks the readback (rgb8 by default; see Pixels).
      */
     async stream(opts: { from: number; to: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number; pixels?: Pixels }) {
@@ -312,9 +325,10 @@ function setupExport() {
       const dt = 1 / FPS;
       const n0 = Math.round(opts.from * FPS), n1 = Math.round(opts.to * FPS);
       const S = opts.samples ?? 1, SH = opts.shutter ?? 0.5;
-      // warm-up: render one frame before the range so the first frame is sequential for stateful scenes
-      // (adaptive sampling only runs stateless scenes: one sample is enough for the warm-up)
-      if (n0 > 0 && lastStreamed !== n0 - 1) await engine.renderFrame((n0 - 1) * dt, dt, false, typeof S === 'number' ? S : 1, SH);
+      // warm-up: render one frame before the range so the first frame is sequential for stateful scenes (it gets
+      // the frame step as dt, not a seek's 0). Stateless scenes depend on t only: no warm-up. (Adaptive sampling
+      // only runs stateless scenes: one sample is enough for the warm-up.)
+      if (stateful && n0 > 0 && lastStreamed !== n0 - 1) await engine.renderFrame((n0 - 1) * dt, dt, false, typeof S === 'number' ? S : 1, SH);
       const used: Record<number, number> = {}; // sub-frames per frame -> frames
       let pending = -1;
       for (let n = n0; n < n1; n++) {

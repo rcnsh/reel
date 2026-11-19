@@ -7,12 +7,19 @@ import type { Words } from './words';
 import type { Compositor } from './gl';
 import type { PostParams } from './post';
 import type { ClipTime } from './cliptime';
+import type { Grade } from './tracks';
 
 export interface SceneCtx {
   renderer: THREE.WebGLRenderer;
   audio: AudioData;
   /** The project's timed words (narration, sung lyrics, captions). */
   words: Words;
+  /**
+   * The render's props (`--props` over the config's `props` defaults; `{}` without either), the same for every
+   * clip. Cast to the project's own type: `this.ctx.props as Props` (the type reel.config.ts exports).
+   */
+  // (any, not unknown: so that cast compiles for an interface as well as a type alias)
+  props: Readonly<Record<string, any>>;
   comp: Compositor;
   W: number;
   H: number;
@@ -41,6 +48,11 @@ export interface SceneCtx {
    * output (or a multiple of it) whose texels are composited back at their own screen position.
    */
   maskDepth(rt: THREE.WebGLRenderTarget): void;
+  /**
+   * A default cap on the clip's adaptive sub-frames, for a scene whose noise converges slowly (a `Stage3D` asks
+   * for 108). Only calls from the constructor or init() count. The clip's own `maxSamples` wins; called more than once, the lowest counts.
+   */
+  capSamples(n: number): void;
 }
 
 /**
@@ -58,8 +70,9 @@ export interface Frame {
   /** Time in the video (s): what the audio analysis (a, beat, bar) is read at. Equal to t on a clip without remapping. */
   vt: number;
   /**
-   * How much scene time the step from the previous rendered frame covers (1/fps on export at speed 1; 0 after a seek
-   * or while frozen or held). Never negative: on a reversed clip f.t falls by dt.
+   * How much scene time the step from the previous rendered frame covers (1/fps on export at speed 1; 0 after a seek,
+   * at the start of each chunk a worker of a multi-worker export renders unless a scene is stateful, or while frozen
+   * or held; not for drawing: a frame depends on t alone). Never negative: on a reversed clip f.t falls by dt.
    */
   dt: number;
   /** Local time since this scene's start, and 0..1 progress through its window (both in the scene's time). */
@@ -74,7 +87,7 @@ export interface Frame {
    * ready for render().
    */
   exposure: number;
-  /** True when time jumped (scrub/seek) — stateful scenes should reset. */
+  /** True when time jumped (scrub/seek, a new export chunk) — stateful scenes should reset. */
   seeked: boolean;
   /** True while the engine fast-forwards a stateful scene after a seek (skip non-essential work). */
   preroll: boolean;
@@ -97,7 +110,11 @@ export interface Frame {
   tout: number;
 }
 
-export type PostOverrides = Partial<PostParams>;
+/**
+ * What render() may return: post-processing overrides for the whole frame, and `grade`, a grade of the scene's own
+ * track (over its clip's and track's, field by field; see Grade in tracks.ts).
+ */
+export type PostOverrides = Partial<PostParams> & { grade?: Grade };
 
 export abstract class Scene {
   /** If true, the engine fast-forwards (calls render with preroll=true) after seeks. */
@@ -130,7 +147,7 @@ export abstract class Scene {
    */
   prepare(_f: Frame): void | Promise<void> {}
 
-  /** Render into `out` (HalfFloat, linear HDR). Must fully overwrite/clear it. Return post-processing overrides. */
+  /** Render into `out` (HalfFloat, linear HDR; the engine clears it to transparent first). On track 0 cover it opaque. Return post-processing overrides. */
   abstract render(f: Frame, out: THREE.WebGLRenderTarget): PostOverrides | void;
 
   dispose(): void {}
