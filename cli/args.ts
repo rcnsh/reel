@@ -95,7 +95,9 @@ Working on a project
                              folder (used whenever CHROME_PATH is unset)
   chrome path                the Chrome binary renders would use, and its version
   daemon status              the warm renderers running, per project
-  daemon stop                stop the project's warm renderer          [--all: every project's]
+  daemon stop                stop the project's warm renderer          [--all: every project's, and sweep
+                                                                       dead exports' spools and Vite's
+                                                                       stale optimizer folders]
   golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)

@@ -246,7 +246,7 @@ export async function serveMcp() {
 
   server.registerTool('video_cancel', {
     title: 'Cancel a video render',
-    description: 'Stop a running video job; the partial file is removed by the encoder being killed (it is not playable).',
+    description: 'Stop a running video job; the file at its output is left as it was before the job (an export writes to a partial beside it, removed when stopped).',
     inputSchema: { job: z.string() },
   }, (a) => guard(async () => {
     const j = jobs.get(a.job);

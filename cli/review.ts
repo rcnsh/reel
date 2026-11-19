@@ -7,6 +7,7 @@ import path from 'node:path';
 import { addNote, clipsAt, deleteNote, frameOf, NotesError, patchNote, readNotes, type Note, type NotePatch, type TimelineClip } from './notes';
 import { ENGINE } from './server';
 import type { Req, Result } from './ops';
+import { ownerOf } from './scratch';
 
 const VIDEO = new Set(['.mp4', '.webm', '.mov', '.m4v']);
 const TYPES: Record<string, string> = { '.mp4': 'video/mp4', '.m4v': 'video/mp4', '.webm': 'video/webm', '.mov': 'video/quicktime' };
@@ -20,7 +21,8 @@ export function latestRender(project: string): string | null {
     for (const e of readdirSync(d, { withFileTypes: true })) {
       const f = path.join(d, e.name);
       if (e.isDirectory()) walk(f);
-      else if (VIDEO.has(path.extname(e.name).toLowerCase()) && !/\.picture\.\w+$/.test(e.name)) {
+      // (scratch: a partial, or the picture a --mix made before partials)
+      else if (VIDEO.has(path.extname(e.name).toLowerCase()) && !ownerOf(e.name) && !/\.picture\.\w+$/.test(e.name)) {
         const m = statSync(f).mtimeMs;
         if (!best || m > best.mtime) best = { file: f, mtime: m };
       }
