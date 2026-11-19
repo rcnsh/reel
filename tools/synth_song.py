@@ -5,10 +5,10 @@
 """A synthetic song whose beats are known, to check `reel analyze` against (and a licence-free track to cut to).
 
     uv run tools/synth_song.py <out> <bpm> <lead-in s> <bars> [--break a,b] [--human ms] [--drift 0.06]
-                               [--syncopate] [--halftime] [--vocal] [--seed n]
+                               [--syncopate] [--halftime] [--even-hats] [--vocal] [--seed n]
 
 Kick on 1 and 3 (plus the 'and' of 2 with --syncopate; on 1 and the 'and' of 2 with the snare on 3 with
---halftime), snare on 2 and 4, hats on eighths, a bass line, a chord pad changing every bar, and with --vocal a
+--halftime), snare on 2 and 4, hats on eighths (the off-beat one softer, unless --even-hats), a bass line, a chord pad changing every bar, and with --vocal a
 vowel-like melody. The lead-in is the pad alone, so the first downbeat is at the lead-in time. --break lists bars
 without drums, --human jitters hits by that many ms, --drift speeds the tempo up by that share across the song.
 Writes <out>.wav (44.1 kHz stereo) and <out>.json (bpm, beats, downbeats).
@@ -18,7 +18,7 @@ import numpy as np, soundfile as sf
 ap = argparse.ArgumentParser()
 ap.add_argument('out'); ap.add_argument('bpm', type=float); ap.add_argument('lead', type=float); ap.add_argument('bars', type=int)
 ap.add_argument('--break', dest='brk', default=''); ap.add_argument('--human', type=float, default=0); ap.add_argument('--seed', type=int, default=1)
-ap.add_argument('--syncopate', action='store_true'); ap.add_argument('--halftime', action='store_true'); ap.add_argument('--drift', type=float, default=0); ap.add_argument('--vocal', action='store_true')
+ap.add_argument('--syncopate', action='store_true'); ap.add_argument('--halftime', action='store_true'); ap.add_argument('--drift', type=float, default=0); ap.add_argument('--vocal', action='store_true'); ap.add_argument('--even-hats', action='store_true')
 a = ap.parse_args()
 SR = 44100; rng = np.random.default_rng(a.seed)
 P = 60 / a.bpm
@@ -74,7 +74,7 @@ for bar in range(a.bars):
                 if b in (0, 2): add(kick(), tb + H())
                 if b in (1, 3): add(snare(), tb + H(), -0.1)
             if a.syncopate and b == 1: add(kick(), bt(bar * 4 + 1.5) + H(), 0, 0.7)
-            add(hat(), tb + H(), 0.4); add(hat(), bt(bar * 4 + b + (0.62 if a.halftime else 0.5)) + H(), 0.4, 0.6)
+            add(hat(), tb + H(), 0.4); add(hat(), bt(bar * 4 + b + (0.62 if a.halftime else 0.5)) + H(), 0.4, 1.0 if a.even_hats else 0.6)
         if drums or b == 0:
             add(tone(bassn[bar % 4], int(P * 0.9 * SR), 'saw', 0.4) * 0.18, tb + H())
     if a.vocal and drums:

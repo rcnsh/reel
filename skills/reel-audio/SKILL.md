@@ -62,7 +62,10 @@ Sung lyrics: `reel align <vocal-stem-or-song> --method whisper`.
 Writes `data/audio.json` and copies the song to `audio/` as the track:
 
 - `beats`, `downbeats`, `bpm`, `time_signature` from Beat This! (a constant grid where the song keeps one tempo,
-  phase set on the kicks; the tracked beats where the tempo moves).
+  phase set on the kicks; where the tempo moves, beats that follow it, set on the drums). A tempo read at half or
+  double (a half-time feel, drum and bass) is corrected from the drums between the beats; a slow groove with as
+  many drums between its beats can be read at double: `--keep-octave` keeps the tracker's octave, `--free-tempo`
+  the tracker's beats as they are.
 - 100 fps envelopes (0..1): `rms low mid high` of the mix, `drums bass other vocal` of Demucs stems.
 - A waveform of the song (`wave`: peak and RMS per 1/100 s, 0..1 at the loudest peak) and a spectrum (`spectrum`:
   24 log-spaced bands from 40 Hz to 11 kHz per 1/100 s, 0..1 over the 60 dB under the loudest band), stored as
