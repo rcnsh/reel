@@ -59,9 +59,30 @@ export default defineVideo({ size: [640, 360], fps: 30, timeline: () => [
 `,
   'scenes/moving.ts': MOVING,
 });
+// a scene black in one step of adaptive sampling's sub-frames (4, 12, 36 …) and grey in the next, so it never
+// converges, that asks for a cap
+const capped = fixture('capped', {
+  'reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({ size: [320, 180], fps: 30, theme: 'print', timeline: () => [
+  { id: 'asks', scene: () => import('./scenes/noise'), start: 0, end: 1 },
+  { id: 'own', scene: () => import('./scenes/noise'), start: 1, end: 2, maxSamples: 108 },
+] });
+`,
+  'scenes/noise.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, clearRT, SUB_FRAME } from 'reel';
+export default class Noise extends Scene {
+  async init() { this.ctx.capSamples(36); this.ctx.capSamples(12); }
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    this.ctx.capSamples(4); // (too late: ignored)
+    const k = Math.max(0, SUB_FRAME.index), v = [4, 12, 36, 108].filter((n) => k >= n).length % 2 ? 0.8 : 0;
+    clearRT(this.ctx.renderer, out, [v, v, v]);
+  }
+}
+`,
+});
 afterAll(async () => {
-  for (const p of [demo.dir, layers.dir, wsProject, two.dir]) await reel(['daemon', 'stop', '--project', p]);
-  demo.cleanup(); layers.cleanup(); ws.cleanup(); two.cleanup(); rmSync(fresh, { recursive: true, force: true });
+  for (const p of [demo.dir, layers.dir, wsProject, two.dir, capped.dir]) await reel(['daemon', 'stop', '--project', p]);
+  demo.cleanup(); layers.cleanup(); ws.cleanup(); two.cleanup(); capped.cleanup(); rmSync(fresh, { recursive: true, force: true });
 });
 
 test('--help exits 0 and lists the commands; a bad command line exits 2', async () => {
@@ -105,6 +126,16 @@ test.skipIf(!hasChrome)('diff: identical renders exit 0, a different frame exits
   expect(other.json().changed).toBeGreaterThan(0);
   expect(other.json().box).not.toBeNull();
   expect(existsSync(other.json().file)).toBe(true);
+}, 120_000);
+
+test.skipIf(!hasChrome)("adaptive sampling stops at the lowest cap a clip's scene asks for while it is made, unless the clip sets its own", async () => {
+  const sub = async (t: number) => {
+    const r = await reel(['still', '--t', String(t), '--samples', 'auto', '--json', '--project', capped.dir]);
+    expect(r.code).toBe(0);
+    return r.json().frames[0].subFrames;
+  };
+  expect(await sub(0.5)).toBe(12);
+  expect(await sub(1.5)).toBe(108);
 }, 120_000);
 
 test.skipIf(!hasChrome)('check passes the demo at 16:9 and vertical (its text wraps to the frame)', async () => {

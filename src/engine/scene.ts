@@ -39,6 +39,11 @@ export interface SceneCtx {
    * output (or a multiple of it) whose texels are composited back at their own screen position.
    */
   maskDepth(rt: THREE.WebGLRenderTarget): void;
+  /**
+   * A default cap on the clip's adaptive sub-frames, for a scene whose noise converges slowly (a `Stage3D` asks
+   * for 108). Only calls from the constructor or init() count. The clip's own `maxSamples` wins; called more than once, the lowest counts.
+   */
+  capSamples(n: number): void;
 }
 
 /**
