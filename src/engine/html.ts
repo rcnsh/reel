@@ -44,7 +44,8 @@ export interface HtmlDraw {
   blend?: 'normal' | 'add' | 'screen';
 }
 
-const kebab = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+/** A camelCase CSS property as CSS writes it (`fontSize` → `font-size`). */
+export const kebab = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 /** The theme as CSS custom properties: `--bg`, `--fg`, `--accent-hi` … for every palette key. */
 export const THEME_CSS_VARS = Object.entries(HEX).map(([k, v]) => `--${kebab(k)}: ${v};`).join(' ');
 
@@ -488,9 +489,12 @@ function exemptOf(e: Element): CheckRule[] | true | undefined {
  */
 const flowIds = new WeakMap<Element, string>();
 let flowCount = 0;
-/** The run of text an element's text belongs to: its nearest ancestor (or itself) that is not `display: inline`. */
+/**
+ * The run of text an element's text belongs to: its nearest ancestor (or itself) marked `data-flow` (pieces of
+ * text laid out as inline blocks and moved one by one), else its nearest ancestor (or itself) that is not `display: inline`.
+ */
 function flowOf(e: Element) {
-  let n: Element = e;
+  let n: Element = e.closest('[data-flow]') ?? e;
   while (n.parentElement && /^(inline|contents)$/.test(getComputedStyle(n).display)) n = n.parentElement;
   let id = flowIds.get(n);
   if (!id) flowIds.set(n, (id = `html${++flowCount}`));

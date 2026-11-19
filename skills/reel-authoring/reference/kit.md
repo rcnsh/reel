@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, and drawn-on paths and arrows; and layout helpers that cut boxes from a box. Each component is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, kinetic text, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, and drawn-on paths and arrows; and layout helpers that cut boxes from a box. Each component is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -43,6 +43,32 @@ body = new TextBlock({
 ```
 
 `text` or `html` (*Anim*), `size` (largest, default 7% of the short side), `minSize` (default 2.6%), `fit` (default true), `maxLines`, `align`, `valign`, `font` (a CSS family, default Archivo), `weight` (700), `lineHeight` (1.15), `color` (fg). Text that cannot fit even at `minSize` runs out of the box and `reel check` reports it. To reveal text as it is spoken without it reflowing, keep the unsaid part laid out but hidden: `html: (f) => esc(said) + '<span style="visibility: hidden">' + esc(rest) + '</span>'`. Class: `.tb`.
+
+### KineticText
+
+Text that enters a piece at a time: its words or letters fade, rise, scale, unblur or slide up from behind their baseline, one after another, or each word as it is said.
+
+```ts
+title = new KineticText({ text: 'Every frame is a function of time', by: 'word', enter: 'rise', each: 0.08, at: [0.3, 5] });
+letters = new KineticText({ text: 'LOUD', by: 'letter', enter: 'scale', order: 'center', size: 160 });
+line = new KineticText({ words: this.ctx.words.get('the tide turns'), enter: 'blur', highlight: true });   // each word as it is said
+```
+
+- `text` (*Anim*: the pieces are made again when it changes), `by`: `'word'` (default) or `'letter'` (graphemes; a word's letters stay together, so lines wrap between words only). Words break at ASCII white space only (a no-break space joins two), and a word never wraps inside, so text without spaces (CJK) needs spaces or shorter lines.
+- `enter`: `'rise'` (default), `'drop'`, `'fade'`, `'scale'`, `'blur'`, `'clip'` (up from behind its word's baseline, at full opacity), or a function of the piece's progress giving its inline style: ``(k) => ({ opacity: k, transform: `rotate(${(1 - k) * 12}deg)` })``. `distance` (em) is how far `rise` and `drop` travel (0.6); `room` (em) is the room around the box pieces may move through on their way in (default what the entrance needs; 1 for a function).
+- Timing, from the start of its window plus `delay`: `each` (seconds between pieces: 0.08 a word, 0.03 a letter) or `total` (the spread from first to last), `dur` (0.5 a word, 0.35 a letter), `ease` (`ease.outCubic`), `order` (`'start'`, `'end'`, `'center'`, `'edges'`, `'random'` with `seed`). This is `stagger()` (below) per piece. `kt.progress(f, i)` is piece i's progress, `kt.endAt(f)` the clip second the last is in (any frame of the clip will do, even one not yet drawn).
+- `words`: a line of timed words (`this.ctx.words.get('…')`) or its `words`: each word enters at its start, its letters spread over its time, and the stagger options other than `dur` and `ease` are ignored. `text` defaults to the words and must have as many. `highlight`: the word being said in the accent (`true`) or a colour.
+- Lays out as a TextBlock: `size`, `minSize`, `fit`, `maxLines`, `align` (`center`), `valign`, `font`, `weight`, `lineHeight`, `color`. It fits with every piece at rest; text that does not fit even so is cut off at the box, and `reel check` says so.
+- The pieces move in the HTML layer, so their motion changes once per output frame and is not motion blurred; `motion` (default: no entrance of its own, a 0.4 s fade out) is drawn in GL as for any component.
+- `reel check` sees each piece as part of one run of text (no overlaps between pieces) and measures a piece's contrast and margins once it is in. Classes: `.kt`, `.w` (a word), `.p` (a piece), `.now`, `.said` (with `highlight`).
+
+### Staggering anything
+
+`stagger(t, i, n, { at, each, total, dur, ease, order, seed })` is item i of n's eased progress at t, for any group: tiles of a grid, points of a chart, your own spans. `staggerStart(i, n, o)` is when item i starts.
+
+```ts
+tiles.forEach((tile, i) => { const k = stagger(f.lt, i, tiles.length, { at: 0.4, each: 0.05, order: 'center' }); /* draw tile at k */ });
+```
 
 ### TitleCard
 

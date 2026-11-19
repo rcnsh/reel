@@ -1,8 +1,9 @@
-// The component kit: text, captions, titles, images, video, Lottie, charts, timers, code, drawn-on lines and arrows, and layout helpers, coloured by the theme, reported to
+// The component kit: text, kinetic text, captions, titles, images, video, Lottie, charts, timers, code, drawn-on lines and arrows, and layout helpers, coloured by the theme, reported to
 // `reel check`, and pure functions of time.
 export { HtmlComponent, motionAt, progressOf, lineWidth, safeBox, SAFE, UNIT, val, cssColor, esc, type Anim, type Box, type ComponentOptions, type Motion, type ProgressOptions } from './common';
 export { inset, split, grid, align, center, type Inset, type Align } from './layout';
 export { TextBlock, TitleCard, LowerThird, fitText, type TextBlockOptions, type TitleCardOptions, type LowerThirdOptions } from './text';
+export { KineticText, kineticPieces, type KineticTextOptions, type KineticEntrance } from './kinetic';
 export { Captions, captionPages, textWidth, type CaptionsOptions, type CaptionPage } from './captions';
 export { ImageBox, svgSize, drawPicture, kenBurnsAt, type ImageBoxOptions, type Framing, type Picture } from './image';
 export { VideoClip, type VideoClipOptions } from './video';

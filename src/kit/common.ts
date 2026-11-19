@@ -70,6 +70,9 @@ export interface ComponentOptions {
   label?: string;
 }
 
+/** A text's graphemes: what a reader counts as one character (an emoji, a letter and its accent). */
+export const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
+
 /** Options of a component that grows, draws or counts as a progress value runs from 0 to 1. */
 export interface ProgressOptions extends ComponentOptions {
   /** 0 to 1: how far it has grown (default: over the first 1.4 s of its window, eased out). */
