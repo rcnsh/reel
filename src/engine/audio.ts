@@ -12,6 +12,18 @@ export interface AudioJSON {
   onsets: Record<string, [number, number][]>;
   /** The sound the preview plays and the export muxes, relative to the project root (default audio/narration.flac). */
   track?: string;
+  /** `reel analyze`'s waveform of the song (a bed's, placed at its offset, with --keep-sections): peak and RMS per 1/fps s, base64 bytes (0..255 for 0..1, one scale). */
+  wave?: { fps: number; peak: string; rms: string };
+  /** `reel analyze`'s spectrum: band centres in Hz, and per 1/fps s a row of their levels (base64 bytes, 0..255 for 0..1). */
+  spectrum?: { fps: number; bands: number[]; data: string };
+}
+
+/** Base64 to bytes (atob: the same in the page and in bun). */
+function bytes(b64: string | undefined): Uint8Array {
+  if (!b64) return new Uint8Array(0);
+  const s = atob(b64), o = new Uint8Array(s.length);
+  for (let i = 0; i < s.length; i++) o[i] = s.charCodeAt(i);
+  return o;
 }
 
 export interface AudioSample {
@@ -40,6 +52,13 @@ export class AudioData {
   onsets: Record<string, [number, number][]>;
   /** The sound the preview plays and the export muxes, or null: a video with no audio analysis is silent. */
   track: string | null;
+  /** The spectrum's band centres in Hz, lowest first (empty without a spectrum: analysed before it was stored). */
+  bandFreqs: number[];
+  private waveFps: number;
+  private peak: Uint8Array;
+  private rmsWave: Uint8Array;
+  private specFps: number;
+  private spec: Uint8Array;
 
   constructor(j: AudioJSON) {
     this.duration = j.duration;
@@ -52,6 +71,73 @@ export class AudioData {
     for (const k of FEATURES) this.feat[k] = Float32Array.from(j.features?.[k] ?? ((j as any)[k] as number[] | undefined) ?? []);
     this.onsets = j.onsets ?? {};
     this.track = j.track ?? (j.duration > 0 ? 'audio/narration.flac' : null);
+    this.waveFps = j.wave?.fps || 100;
+    this.peak = bytes(j.wave?.peak);
+    this.rmsWave = bytes(j.wave?.rms);
+    this.specFps = j.spectrum?.fps || 100;
+    this.bandFreqs = j.spectrum?.bands ?? [];
+    this.spec = bytes(j.spectrum?.data);
+  }
+
+  /** Whether the analysis has a waveform and a spectrum (`reel analyze` stores both; narration has neither). */
+  get hasWave() { return this.peak.length > 0; }
+  get hasSpectrum() { return this.spec.length > 0 && this.bandFreqs.length > 0; }
+
+  /**
+   * The mix's waveform at t, 0..1 on one scale (1: the loudest peak): `peak` (the largest sample) and `rms`.
+   * `span` 0 (the default) interpolates between the 1/100 s frames; a longer span gives the peak and RMS over
+   * [t - span/2, t + span/2], what a bar standing for that much time shows. 0 outside the song and without a
+   * waveform.
+   */
+  wave(t: number, span = 0): { peak: number; rms: number } {
+    const P = this.peak, R = this.rmsWave, n = P.length, fps = this.waveFps;
+    if (n === 0) return { peak: 0, rms: 0 };
+    if (span * fps < 1) {
+      // (frame i is the samples of [i/fps, (i+1)/fps): its value stands at its middle)
+      const x = t * fps - 0.5, i = Math.floor(x), u = x - i;
+      const at = (a: Uint8Array, k: number) => (k >= 0 && k < n ? a[k]! : 0);
+      if (i < -1 || i >= n) return { peak: 0, rms: 0 };
+      return { peak: (at(P, i) * (1 - u) + at(P, i + 1) * u) / 255, rms: (at(R, i) * (1 - u) + at(R, i + 1) * u) / 255 };
+    }
+    // frames [a, b): those past the song's ends count as silence in the RMS
+    const a = Math.round((t - span / 2) * fps), b = Math.round((t + span / 2) * fps);
+    const i0 = Math.max(0, a), i1 = Math.min(n, b);
+    if (i1 <= i0) return { peak: 0, rms: 0 };
+    let pk = 0, ss = 0;
+    for (let i = i0; i < i1; i++) { pk = Math.max(pk, P[i]!); ss += R[i]! * R[i]!; }
+    return { peak: pk / 255, rms: Math.sqrt(ss / (b - a)) / 255 };
+  }
+
+  /**
+   * The spectrum at t: each band's level 0..1 (lowest band first), interpolated between the 1/100 s frames. With
+   * `n` other than the band count, `n` levels across the same log-frequency range: fewer take the loudest of the
+   * bands each covers, more interpolate between bands. Zeros outside the song and without a spectrum.
+   */
+  bands(t: number, n = this.bandFreqs.length, out = new Float32Array(n)): Float32Array {
+    if (out.length !== n) throw new Error(`bands: out holds ${out.length} levels, not ${n}`);
+    out.fill(0);
+    const B = this.bandFreqs.length, S = this.spec, frames = B ? Math.floor(S.length / B) : 0;
+    if (frames === 0 || n === 0) return out;
+    // (frame i is the spectrum at i/fps: the STFT's windows are centred on their frames)
+    const x = t * this.specFps, i = Math.floor(x), u = x - i;
+    if (i < -1 || i >= frames) return out;
+    const lvl = (b: number) => {
+      const a = i >= 0 ? S[i * B + b]! : 0, c = i + 1 < frames ? S[(i + 1) * B + b]! : 0;
+      return (a * (1 - u) + c * u) / 255;
+    };
+    for (let k = 0; k < n; k++) {
+      if (n < B) {
+        // level k covers stored bands [k B / n, (k + 1) B / n)
+        let m = 0;
+        for (let b = Math.floor((k * B) / n); b < Math.floor(((k + 1) * B) / n); b++) m = Math.max(m, lvl(b));
+        out[k] = m;
+        continue;
+      }
+      // level k of n at the same place across the range as in the stored bands
+      const y = n === B ? k : (k * (B - 1)) / (n - 1), b = Math.floor(y), v = y - b;
+      out[k] = v > 0 && b + 1 < B ? lvl(b) * (1 - v) + lvl(b + 1) * v : lvl(Math.min(b, B - 1));
+    }
+    return out;
   }
 
   /** No analysis: a silent 100 BPM grid, no sections (the length then comes from the config or its clips). */

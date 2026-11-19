@@ -17,6 +17,9 @@ Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit,
   * 100 fps envelopes, each normalised to 0..1 at its 99th percentile, with a fast-attack, slower-release
     follower: rms, low (<200 Hz), mid (200 Hz-2 kHz) and high (>2 kHz) of the mix, and drums, bass, other and
     vocal from stems separated by Demucs (htdemucs through demucs-mlx);
+  * a waveform (peak and RMS of the mix per 1/100 s, on one scale, 0..1 at the loudest peak) and a spectrum (24
+    log-spaced bands, 40 Hz-11 kHz, per 1/100 s, 0..1 over a 60 dB range below the song's loudest band, with the
+    same follower), each stored as base64 bytes so they add about as much to the file as the envelopes do;
   * kick / snare / hat onsets from the drum stem (low, mid and high bands) and vocal onsets from the vocal stem,
     strengths 0..1, each placed on its attack in the waveform; raise a band's --onset-delta (peak-picking
     threshold) if it fires on other sounds;
@@ -35,6 +38,7 @@ names it as the `track` the preview plays and the export muxes. With --keep-sect
 sections stay as they were and --offset places the song's start on the video's timeline (where the mix lays it).
 """
 import argparse
+import base64
 import json
 import math
 import os
@@ -89,6 +93,17 @@ def follow(x, attack=0.010, release=0.090):
     return y
 
 
+def follow_rows(x, attack=0.010, release=0.090):
+    """follow() down each column of a (frames, bands) array at once."""
+    aa, ar = math.exp(-1 / (attack * FPS)), math.exp(-1 / (release * FPS))
+    y, s = np.empty_like(x), np.zeros(x.shape[1])
+    for i in range(len(x)):
+        a = np.where(x[i] > s, aa, ar)
+        s = a * s + (1 - a) * x[i]
+        y[i] = s
+    return y
+
+
 def norm01(x, pct=99.0):
     top = np.percentile(x, pct)
     return np.clip(x / top, 0, 1) if top > 1e-9 else np.zeros_like(x)
@@ -135,6 +150,64 @@ def attack(x, times, before=0.04, after=0.02, smooth=0.005):
         j = i0 + int(np.argmax(slope[i0:i1])) if i1 > i0 else -1
         out.append(j / SR if j >= 0 and slope[j] > 0 else t)  # (no rise in reach: left where it was found)
     return np.array(out)
+
+
+def b64bytes(x):
+    """0..1 values as base64 bytes (0-255): about a third of the size of rounded JSON numbers."""
+    return base64.b64encode(np.round(np.clip(x, 0, 1) * 255).astype(np.uint8).tobytes()).decode("ascii")
+
+
+def waveform(x, n):
+    """Peak and RMS per frame of 1/FPS s (each frame's own samples), both divided by the loudest peak."""
+    if n == 0:
+        return {"fps": FPS, "peak": "", "rms": ""}
+    idx = (np.arange(n + 1) * (SR / FPS)).astype(int)
+    x = np.pad(np.abs(x.astype(np.float64)), (0, max(0, idx[-1] - len(x))))[: idx[-1]]
+    peak = np.maximum.reduceat(x, idx[:-1])
+    c = np.concatenate([[0.0], np.cumsum(x ** 2)])
+    rms = np.sqrt(np.maximum((c[idx[1:]] - c[idx[:-1]]) / np.diff(idx), 0))
+    top = peak.max()
+    if top > 1e-9:
+        peak, rms = peak / top, rms / top
+    return {"fps": FPS, "peak": b64bytes(peak), "rms": b64bytes(rms)}
+
+
+SPECTRUM_BANDS, SPECTRUM_LO, SPECTRUM_HI = 24, 40.0, 11000.0
+
+
+def spectrum(x, n):
+    """Log-spaced band levels per frame of 1/FPS s: band power from a 2048-point STFT, in dB, 0..1 over the 60 dB
+    below the song's loudest band (its 99.5th percentile), through the envelopes' follower. Frames are byte rows
+    of SPECTRUM_BANDS, lowest band first."""
+    if n == 0:
+        return {"fps": FPS, "bands": [], "data": ""}
+    nfft, hop = 2048, 220
+    S = np.abs(librosa.stft(x, n_fft=nfft, hop_length=hop, center=True)) ** 2
+    freqs = librosa.fft_frequencies(sr=SR, n_fft=nfft)
+    edges = np.geomspace(SPECTRUM_LO, SPECTRUM_HI, SPECTRUM_BANDS + 1)
+    centres = np.sqrt(edges[:-1] * edges[1:])
+    P = np.empty((SPECTRUM_BANDS, S.shape[1]))
+    for b in range(SPECTRUM_BANDS):
+        m = (freqs >= edges[b]) & (freqs < edges[b + 1])
+        if m.any():
+            P[b] = S[m].mean(axis=0)
+        else:
+            # a band narrower than a bin: the power at its centre, between the bins around it
+            j = int(np.clip(np.searchsorted(freqs, centres[b]), 1, len(freqs) - 1))
+            w = (centres[b] - freqs[j - 1]) / (freqs[j] - freqs[j - 1])
+            P[b] = S[j - 1] * (1 - w) + S[j] * w
+    db = 10 * np.log10(P + 1e-12)
+    # (at least the loudest moment less 30 dB: a short sound in a long silence, a bed placed with --offset, must not
+    # put the silence at the top of the range; a silent track stays at 0)
+    top = max(np.percentile(db, 99.5), db.max() - 30)
+    if db.max() < -100:
+        top = np.inf
+    lvl = np.clip((db - (top - 60)) / 60, 0, 1)
+    # onto the envelopes' frames
+    tf = np.arange(S.shape[1]) * hop / SR
+    t = np.arange(n) / FPS
+    out = follow_rows(np.stack([np.interp(t, tf, lvl[b]) for b in range(SPECTRUM_BANDS)], axis=1))
+    return {"fps": FPS, "bands": [round(float(c), 1) for c in centres], "data": b64bytes(out.reshape(-1))}
 
 
 def onsets(x, delta, min_gap):
@@ -404,6 +477,8 @@ def main():
             "bass": envelope(stems["bass"], n),
             "vocal": envelope(stems["vocal"], n),
         },
+        "wave": waveform(y, n),
+        "spectrum": spectrum(y, n),
         "onsets": {"kick": kick, "snare": snare, "hat": hat, "vocal": vocal},
         "notes": f"reel analyze on {song.name}: {how}" + (f", placed at {off} s" if off else ""),
     }

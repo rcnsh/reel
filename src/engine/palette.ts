@@ -42,6 +42,13 @@ export const LIN: Readonly<Record<PaletteKey, [number, number, number]>> = new P
   { get: (o, k) => (typeof k !== 'string' || Object.prototype.hasOwnProperty.call(o, k) || k === 'then' || k === 'toJSON' ? (o as any)[k] : (() => { throw missing(k); })()) },
 );
 
+/** Linear RGB for GL from a palette key or a '#rrggbb' colour (anything else throws). */
+export function linearColor(c: string): [number, number, number] {
+  if (Object.prototype.hasOwnProperty.call(HEX, c)) return LIN[c]!;
+  if (/^#[0-9a-f]{6}$/i.test(c)) return hexToLinear(c);
+  throw new Error(`colour '${c}' is not a key of the ${THEME.name} theme (${Object.keys(HEX).join(', ')}) or a #rrggbb colour`);
+}
+
 /** CSS rgba() for Canvas2D: a palette key, or a '#rrggbb' colour. */
 export function rgba(key: PaletteKey, a = 1): string {
   const hex = Object.prototype.hasOwnProperty.call(HEX, key) ? HEX[key] : key.startsWith('#') ? key : undefined;

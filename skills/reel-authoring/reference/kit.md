@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, kinetic text, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, and drawn-on paths and arrows; and layout helpers that cut boxes from a box. Each component is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, kinetic text, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, drawn-on paths and arrows, and a waveform and spectrum of the song; and layout helpers that cut boxes from a box. Each component is built on an HTML layer (the image, video, Lottie, waveform and spectrum on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -246,6 +246,21 @@ const stacked = split(area, H > W ? 'v' : 'h', 2, 40);        // side by side, o
 - `grid(box, cols, rows, gap = 0)`: equal cells, `gap` one number or `[across, down]`. Gaps wider than the box can hold shrink, so parts never leave it.
 - `inset(box, px)`: shrunk on every side, or per side `{ top, right, bottom, left }` (`x` and `y` set two at once); negative grows it.
 - `align(box, w, h, x = 'center', y = 'center')` with `'start' | 'center' | 'end'`, and `center(box, w, h)`: a box of a size placed in another.
+
+## Waveform and Spectrum
+
+The analysed song drawn as a picture: levels from `reel analyze` (`audio.wave`, `audio.bands`; see the `reel-audio` skill), computed at every sub-frame's time, so they move smoothly and blur under `--samples auto`, and drawn by a shader in logical px (sharp at every `--scale`). Both need `audio: this.ctx.audio`; an analysis without a waveform or spectrum (narration, or one made before they were stored) is an error of the clip: run `reel analyze` again. Default motion: a fade. They report a `shape` to `reel check`.
+
+```ts
+overview = new Waveform({ audio: this.ctx.audio });                                         // the clip's span, played part in the accent
+scope = new Waveform({ audio: this.ctx.audio, window: 3, style: 'line', playhead: 0.8 });    // 3 s scrolling past now
+eq = new Spectrum({ audio: this.ctx.audio, count: 32, box: { x: W * 0.1, y: H * 0.55, w: W * 0.8, h: H * 0.3 } });
+ring = new Spectrum({ audio: this.ctx.audio, style: 'radial', inner: 0.5 });
+```
+
+- `Waveform`: `window` (`'clip'`, the default: the clip's own span of video time, static, with what has played in `color` and the rest in `restColor` at `restOpacity`; `[from, to]` in video seconds, static; or a number of seconds that scrolls past the playhead, at `playhead` across the box, 0.5 by default, fading at the box's ends). `style` (`'bars'` or `'line'`, a line through the levels over a fill of opacity `fill`), `mirror` (about the middle, default true; false rises from the bottom), `count` (bars or points across the box; a static line runs edge to edge), `measure` (`'peak'` or `'rms'`), `gain`, `gap`, `round`, `lineWidth`, `color` (accent), `restColor` (fg), `restOpacity` (0.35). Default box: a band across the middle of the safe area. Scrolling bars stand for fixed spans of the song and slide, so they never flicker.
+- `Spectrum`: `style` (`'bars'`, low to high across the box, or `'radial'`, round a circle with the lows at the top, mirrored down both sides unless `symmetric: false`), `count` (bars, or bars on each side of a symmetric ring; default the analysis' 24 bands; fewer show the loudest of the bands each covers, more interpolate between them), `mirror` (bars from the middle both ways), `inner` (the ring's inner radius, a share of the box's half short side, 0.45), `gain`, `gap`, `round`, `color`. Default box: a band below the middle of the safe area for bars, a centred square for the ring.
+- Colours are palette keys or `'#rrggbb'`. Silent levels draw as a short stub (a dot for narrow round bars), so the shape stays readable in a break.
 
 ## Your own component
 

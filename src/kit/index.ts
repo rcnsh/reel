@@ -1,4 +1,4 @@
-// The component kit: text, kinetic text, captions, titles, images, video, Lottie, charts, timers, code, drawn-on lines and arrows, and layout helpers, coloured by the theme, reported to
+// The component kit: text, kinetic text, captions, titles, images, video, Lottie, charts, timers, code, drawn-on lines and arrows, audio visualisers, and layout helpers, coloured by the theme, reported to
 // `reel check`, and pure functions of time.
 export { HtmlComponent, motionAt, progressOf, lineWidth, safeBox, windowOf, SAFE, UNIT, val, cssColor, esc, type Anim, type At, type Box, type ComponentOptions, type Motion, type ProgressOptions, type Span } from './common';
 export { inset, split, grid, align, center, type Inset, type Align } from './layout';
@@ -12,3 +12,4 @@ export { sourceTime, frameAt, framesAt, trimFrames, videoSounds, type VideoTimin
 export { BarChart, LineChart, Counter, ProgressBar, Timer, clock, formatNumber, type BarChartOptions, type LineChartOptions, type CounterOptions, type ProgressBarOptions, type TimerOptions } from './charts';
 export { SvgDraw, Arrow, anchor, arrowTrack, pointAlong, drawShares, svgLength, type SvgDrawOptions, type SvgPath, type ArrowOptions, type Point, type Side, type Track } from './draw';
 export { CodeBlock, CODE_LANGUAGES, splitHighlighted, type CodeBlockOptions } from './code';
+export { Waveform, Spectrum, type WaveformOptions, type SpectrumOptions } from './audio-vis';
