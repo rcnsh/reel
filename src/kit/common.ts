@@ -5,7 +5,7 @@ import type * as THREE from 'three';
 import { HtmlLayer, type HtmlUpdate } from '../engine/html';
 import { H, W } from '../engine/gl';
 import type { Frame } from '../engine/scene';
-import { clamp, ease } from '../engine/util';
+import { clamp, ease, prog } from '../engine/util';
 
 /** A value, or a function of the frame giving it (evaluated once per output frame for content, per sub-frame for motion). */
 export type Anim<T> = T | ((f: Frame) => T);
@@ -22,6 +22,8 @@ export function safeBox(inset = SAFE + 0.03): Box {
 }
 /** The frame's short side: sizes scale with it, so a layout holds in 16:9, vertical and square. */
 export const UNIT = Math.min(W, H);
+/** The kit's line width (a chart's line, a drawn path, an arrow): 0.5% of the short side, at least 3 px. */
+export const lineWidth = () => Math.max(3, Math.round(UNIT * 0.005));
 
 /**
  * An entrance and an exit: over `in` seconds from the start of the component's window it fades (and moves from
@@ -71,11 +73,24 @@ export interface ComponentOptions {
 /** A text's graphemes: what a reader counts as one character (an emoji, a letter and its accent). */
 export const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
 
+/** Options of a component that grows, draws or counts as a progress value runs from 0 to 1. */
+export interface ProgressOptions extends ComponentOptions {
+  /** 0 to 1: how far it has grown (default: over the first 1.4 s of its window, eased out). */
+  progress?: Anim<number>;
+}
+
+/** A component's progress at f: its own, or by default 0 to 1 over 1.4 s from 0.2 s into its window, eased out. */
+export function progressOf(o: ProgressOptions, f: Frame) {
+  if (o.progress !== undefined) return clamp(val(o.progress, f));
+  const w0 = o.at?.[0] ?? 0;
+  return prog(f.lt, w0 + 0.2, w0 + 1.6, ease.outCubic);
+}
+
 /** HTML-escaped text. */
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** A CSS colour from a palette key ('accent', 'accentHi') or any CSS colour. */
-export const cssColor = (c: string) => (/^[a-z][A-Za-z0-9]*$/.test(c) && !['transparent', 'white', 'black', 'currentcolor', 'inherit'].includes(c.toLowerCase()) ? `var(--${c.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()})` : c);
+export const cssColor = (c: string) => (/^[a-z][A-Za-z0-9]*$/.test(c) && !['transparent', 'white', 'black', 'currentcolor', 'inherit', 'none'].includes(c.toLowerCase()) ? `var(--${c.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()})` : c);
 
 /**
  * A component drawn from an HTML layer the size of its box. Subclasses give the markup, the CSS and what to
@@ -86,9 +101,10 @@ export abstract class HtmlComponent {
   readonly layer: HtmlLayer;
   protected opts: ComponentOptions;
 
-  /** Room in the layer around the box, in px, for parts that move out of it (the markup starts `pad` in). */
+  /** Px the layer reaches past the box on each side (for strokes and caps drawn on the box's edge). */
   protected readonly pad: number;
 
+  /** `pad`: the layer is that many px larger than the box on each side, the box at its origin (its markup laid out from `pad`). */
   constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string; pad?: number }) {
     this.opts = o;
     this.box = o.box ?? defaults.box;
