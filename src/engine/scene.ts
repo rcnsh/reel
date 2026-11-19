@@ -39,6 +39,11 @@ export interface SceneCtx {
    * output (or a multiple of it) whose texels are composited back at their own screen position.
    */
   maskDepth(rt: THREE.WebGLRenderTarget): void;
+  /**
+   * A default cap on the clip's adaptive sub-frames, for a scene whose noise converges slowly (a `Stage3D` asks
+   * for 108). Only calls from the constructor or init() count. The clip's own `maxSamples` wins; called more than once, the lowest counts.
+   */
+  capSamples(n: number): void;
 }
 
 /**
@@ -50,7 +55,7 @@ export const LOADING: { clip: { id: string; start: number; end: number } | null 
 export interface Frame {
   /** Time in the video (s). */
   t: number;
-  /** Time since the previous rendered frame (1/fps on export; 0 after a seek). */
+  /** Time since the previous rendered frame: 1/fps on export, 0 after a seek (and at the start of each chunk a worker of a multi-worker export renders, unless a scene is stateful). Not for drawing: a frame depends on t alone. */
   dt: number;
   /** Local time since this scene's start, and 0..1 progress through its window. */
   lt: number;
@@ -62,7 +67,7 @@ export interface Frame {
    * stills, check), dt x shutter in an export with --samples. What prepare() must have ready for render().
    */
   exposure: number;
-  /** True when time jumped (scrub/seek) — stateful scenes should reset. */
+  /** True when time jumped (scrub/seek, a new export chunk) — stateful scenes should reset. */
   seeked: boolean;
   /** True while the engine fast-forwards a stateful scene after a seek (skip non-essential work). */
   preroll: boolean;

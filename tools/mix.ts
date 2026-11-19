@@ -32,6 +32,7 @@ import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } 
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { commit, destOf, onAbort, partialOf } from '../cli/scratch';
 import { durationOf, ffmpegR128, loudnessOf } from './audio-io';
 import { EBUR128, linearGain, loudnessTarget, loudnormFilter, parseLoudnorm } from './loudness';
 import { buildMix, cueBlock, FMT, type CueLay, type Events, type MixConfig } from './mix-graph';
@@ -184,8 +185,16 @@ async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: Ret
   const subs = o.subtitles ? ['-i', o.subtitles] : [];
   const box = containerOf(output);
   const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', box.subtitles, '-metadata:s:s:0', 'language=eng'] : [];
-  const r = await $`ffmpeg ${det} -loglevel error -y ${ins} ${subs} -filter_complex ${`${g.filter};${tail}`} -map 0:v -c:v copy -map [a] ${box.audio} -ar 48000 ${subMap} -fflags +bitexact -flags:a +bitexact ${box.flags} ${output}`.quiet().nothrow();
-  if (r.exitCode !== 0) throw new Error(`ffmpeg (the mix): ${r.stderr.toString().slice(-1200)}`);
+  // (written beside the output and put in place once finished: a failed or stopped mix leaves the previous file)
+  // (spawned rather than through the shell: a stopped mix kills its ffmpeg before removing the partial)
+  const dest = destOf(output), partial = partialOf(dest);
+  const ff = Bun.spawn(['ffmpeg', ...det, '-loglevel', 'error', '-y', ...ins, ...subs, '-filter_complex', `${g.filter};${tail}`, '-map', '0:v', '-c:v', 'copy', '-map', '[a]', ...box.audio, '-ar', '48000', ...subMap, '-fflags', '+bitexact', '-flags:a', '+bitexact', ...box.flags, partial], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
+  const offAbort = onAbort(() => { ff.kill(9); rmSync(partial, { force: true }); });
+  try {
+    const [err, code] = await Promise.all([new Response(ff.stderr).text(), ff.exited]);
+    if (code !== 0) throw new Error(`ffmpeg (the mix): ${err.slice(-1200)}`);
+    commit(partial, dest);
+  } finally { rmSync(partial, { force: true }); offAbort(); }
   // (measured from the file, so what is reported includes the encoder's overshoot)
   const loud = g.silent ? null : await loudnessOf(output);
   const what = [track ? `the track (${path.basename(track)})` : 'no track', `${g.segments} music segment${g.segments === 1 ? '' : 's'}`, ...g.counts].join(', ');

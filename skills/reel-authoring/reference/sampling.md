@@ -11,7 +11,7 @@ What that asks of a scene:
 - Noise seeded by continuous `t` is resampled in every sub-frame: it averages out, slowly, and makes the sampler work harder (and the export slower). Seed it with `frameIdx(t)` unless it is meant to smooth out.
 - A particle emitter whose rate changes over time takes the rate as a function of each particle's birth time; a rate read at the current `t` re-times every particle between sub-frames.
 - Post parameters a scene returns (shake, flash, zoom, fades) are read at one point of the shutter, 1/8 of it after the frame's time; grain and dither are drawn once per frame.
-- A clip with slowly converging noise can cap its sub-frames: `maxSamples` on the clip.
+- A clip with slowly converging noise can cap its sub-frames: `maxSamples` on the clip. A scene can ask for a default cap itself with `this.ctx.capSamples(n)` from its constructor or `init()` (later calls are ignored; a `Stage3D` made there asks for 108); the clip's `maxSamples` wins.
 
 ## Stateful scenes
 

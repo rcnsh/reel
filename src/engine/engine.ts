@@ -29,7 +29,7 @@ interface TrackRTs { rts: THREE.WebGLRenderTarget[]; mix: THREE.WebGLRenderTarge
 /** A scene module as imported, or why it did not import. */
 type Imported = { m?: { default: SceneClass }; err?: unknown };
 
-interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number }
+interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; renderError?: string; lastT: number; cap?: number }
 
 /**
  * Per-frame adaptive motion-blur sampling (see Engine.render): the sub-frame count steps through
@@ -65,9 +65,19 @@ function yieldTask() {
   });
 }
 
+/** Wait for a fence to signal. A sync object's status only changes between tasks: yield to the event loop between polls. */
+async function waitFence(gl: WebGL2RenderingContext, sync: WebGLSync, label: string) {
+  for (;;) {
+    const s = gl.clientWaitSync(sync, 0, 0);
+    if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) return;
+    if (s === gl.WAIT_FAILED) throw new Error(`${label}: fence wait failed`);
+    await yieldTask();
+  }
+}
+
 export class Engine {
   renderer: THREE.WebGLRenderer;
-  ctx!: SceneCtx;
+  ctx!: Omit<SceneCtx, 'capSamples'>;
   audio!: AudioData;
   words!: Words;
   post!: Post;
@@ -475,8 +485,16 @@ export class Engine {
     try {
       const m: Imported = mod ?? await e.scene().then((x) => ({ m: x }), (err: unknown) => ({ err }));
       if (!m.m) throw m.err;
-      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end });
+      // (only while the scene is made, so every frame of an export has the same cap whichever worker renders it;
+      // a later call, such as a Stage3D made on first use, is ignored)
+      let made = false;
+      const capSamples = (n: number) => {
+        if (!(n >= 1)) throw new Error(`ctx.capSamples: expected a count of at least 1, got ${n}`);
+        if (!made) rec.cap = Math.min(rec.cap ?? Infinity, n);
+      };
+      const s = new m.m.default({ ...this.ctx, id: e.id, params: e.params ?? {}, start: e.start, end: e.end, capSamples });
       await s.init();
+      made = true;
       rec.scene = s;
       for (const t of s.tileMasked) this.maskedRTs.set(t.rt, { margin: t.margin, moving: t.moving });
     } catch (err) {
@@ -586,7 +604,8 @@ export class Engine {
         const on = this.timeline.filter((e) => t + w / 2 >= e.start && t - w / 2 < e.end);
         const st = on.find((e) => this.loaded.get(e.id)?.scene?.stateful);
         if (st) throw new Error(`adaptive sampling needs stateless scenes; '${st.id}' is stateful (use a fixed --samples)`);
-        for (const e of on) if (e.maxSamples) maxAdaptive = Math.min(maxAdaptive, e.maxSamples);
+        // (a clip's maxSamples, else the cap its scene asked for: ctx.capSamples)
+        for (const e of on) { const cap = e.maxSamples || this.loaded.get(e.id)?.cap; if (cap) maxAdaptive = Math.min(maxAdaptive, cap); }
       }
       // shaders that supersample share their 4 taps across the sub-frames when every set holds a multiple
       // of 4 (rotated by k/4 so a tap doesn't always land in the same part of the shutter)
@@ -956,17 +975,19 @@ export class Engine {
     gl.flush();
   }
 
+  /** Resolve once the GPU has done everything queued so far. For `reel perf`. */
+  async gpuIdle() {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext, s = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!s) throw new Error('gpuIdle: no fence (the WebGL context was lost)');
+    gl.flush();
+    try { await waitFence(gl, s, 'gpuIdle'); } finally { gl.deleteSync(s); }
+  }
+
   /** Wait for readStart(slot)'s copy and copy it into `out` (Engine.bytes of its mode). */
   async readFinish(slot: number, out: Uint8Array) {
     const gl = this.renderer.getContext() as WebGL2RenderingContext, p = this.packs[slot];
     if (!p) throw new Error(`readFinish: nothing queued in slot ${slot}`);
-    // (a sync object's status only changes between tasks: yield to the event loop between polls)
-    for (;;) {
-      const s = gl.clientWaitSync(p.sync, 0, 0);
-      if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) break;
-      if (s === gl.WAIT_FAILED) throw new Error('readFinish: fence wait failed');
-      await yieldTask();
-    }
+    await waitFence(gl, p.sync, 'readFinish');
     this.packs[slot] = undefined;
     gl.deleteSync(p.sync);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, p.buf);
