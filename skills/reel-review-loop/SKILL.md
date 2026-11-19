@@ -46,7 +46,7 @@ Each finding has a `kind`, a `severity`, the time span it was seen (`t` to `unti
 - Check sees text in HTML layers by itself, and text scenes draw themselves only when they report it: after every `fillText`, `reportText(c, text, x, y)`; after `drawStrokeText`, `reportStrokeText(c, st, len, text)`; for other drawn text, `report({ … })`. Report the box of what is drawn at that moment: a `contrast` error saying text "cannot be seen" while it plainly can means the reported box is far larger than the ink (a whole line's box while it is half written). A scene that draws text with `fillText` or `strokeText` and reports none gets an `unreported` warning; text drawn as paths or glyph textures it cannot see at all. If check is silent about text you can see, add the reports.
 - When a rule is broken on purpose, mark it in the scene (`exempt: ['offFrame']` on the box, `data-exempt="offFrame"` on an HTML element) or on the clip (`check: { exempt: ['blank'] }`) rather than ignoring the finding, so the next check is clean.
 
-`--step 0.25` samples more densely; `--from/--to` checks a range; `--safe`, `--min-text`, `--frozen` change the thresholds.
+`--step 0.25` samples more densely; `--from/--to` checks a range; `--only title` checks just that clip's frames (the clips not loaded draw nothing, so they are not judged); `--safe`, `--min-text`, `--frozen` change the thresholds.
 
 ## Comparing
 
