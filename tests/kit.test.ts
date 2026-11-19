@@ -153,3 +153,32 @@ test.skipIf(!hasChrome)('a frame of components renders the same after a seek bac
   expect(again.json().changed).toBe(0);
   expect(again.code).toBe(0);
 }, 180_000);
+
+// captions whose second word sits a fraction of a pixel off the pixel grid (the media example's): Chrome keeps the
+// paint state of an element that once had an opacity below 1, so without the engine repainting a layer from
+// scratch the word came out a fraction of a pixel off once it had been dimmed, and a frame depended on the seeks
+// before it
+const caps = fixture('kit-caps', {
+  'reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({ size: [1080, 1920], fps: 30, theme: 'neutral', timeline: () => [{ id: 'caps', scene: () => import('./scenes/caps'), start: 0, end: 3 }] });
+`,
+  'scenes/caps.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, Captions, Words, clearRT, LIN } from 'reel';
+const words = Words.timed([{ text: 'A clip decoded frame by frame', start: 0.3, end: 2.5 }]);
+export default class Caps extends Scene {
+  captions = new Captions({ words, size: 52 });
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); this.captions.draw(this.ctx.renderer, out, f); }
+}
+`,
+});
+afterAll(async () => { await reel(['daemon', 'stop', '--project', caps.dir]); caps.cleanup(); });
+
+test.skipIf(!hasChrome)('a caption frame is the same whether its words were dimmed before or not', async () => {
+  // the page shown first at 0.6 s ('clip' already said), then the same frame after 0.35 s, when 'clip' was dimmed
+  await reel(['still', '--t', '0.1', '--json', '--project', caps.dir]);
+  const fresh = (await reel(['still', '--t', '0.6', '--json', '--project', caps.dir])).json().files[0];
+  await reel(['still', '--t', '0.35', '--json', '--project', caps.dir]);
+  const again = await reel(['diff', '--t', '0.6', fresh, '--json', '--project', caps.dir]);
+  expect(again.json().changed).toBe(0);
+  expect(again.code).toBe(0);
+}, 180_000);
