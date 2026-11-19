@@ -27,6 +27,7 @@ const page = {
   fps: z.number().positive().max(240).optional().describe('Render at another frame rate.'),
   scale: z.number().int().min(1).max(4).optional().describe('Physical px per logical px (2 renders 3840x2160 from a 1920x1080 project). Default 1.'),
   theme: z.enum(['print', 'film', 'neutral']).optional().describe("Render with a built-in theme instead of the project's."),
+  props: z.record(z.string(), z.unknown()).optional().describe("The render's props, a JSON object over the config's `props` defaults (timeline() reads them as src.props, scenes as ctx.props): one project rendered as variants, e.g. { title: 'Q3', accent: '#e33' }. With defaults, only their keys, each of the same kind."),
   samples: z.union([z.number().int().min(1), z.string().regex(/^(auto|[1-9]\d*)$/, "expected a whole number such as 1, or 'auto'")]).optional().describe("Motion-blur sub-frames per frame: a whole number, 1 by default (fast), or 'auto' (adaptive, what a final export of moving pictures uses)."),
   shutter: z.number().positive().max(1).optional().describe('Share of the frame time the sub-frames span (default 0.5).'),
 };
@@ -39,7 +40,7 @@ const imageOpts = {
 function reqOf(op: Op, a: Record<string, any>, args: Record<string, unknown>): Req {
   const v: Values = {
     size: a.size, fps: a.fps === undefined ? undefined : String(a.fps), scale: a.scale === undefined ? undefined : String(a.scale),
-    only: a.only?.length ? a.only.join(',') : undefined, theme: a.theme, samples: a.samples === undefined ? undefined : String(a.samples),
+    only: a.only?.length ? a.only.join(',') : undefined, theme: a.theme, props: a.props === undefined ? undefined : JSON.stringify(a.props), samples: a.samples === undefined ? undefined : String(a.samples),
   };
   return { op, project: projectDir(a.project), page: pageOf(v), samples: samplesOf(v), shutter: a.shutter ?? 0.5, args };
 }
@@ -76,7 +77,7 @@ export function videoArgs(a: Record<string, any>, proj: string): string[] {
   const args = ['video', '--project', proj, '--json', '--progress'];
   if (a.out) args.push('--out', path.resolve(a.out));
   const flag = (k: string, v: unknown) => { if (v !== undefined && v !== false) args.push(`--${k}`, ...(v === true ? [] : [Array.isArray(v) ? v.join(',') : String(v)])); };
-  flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme);
+  flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme); flag('props', a.props === undefined ? undefined : JSON.stringify(a.props));
   flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); if (a.noaudio === false) args.push('--audio'); flag('mix', a.mix); flag('subtitles', a.subtitles);
   flag('format', a.format); flag('chroma', a.chroma); flag('depth', a.depth); flag('alpha', a.alpha); flag('opaque', a.opaque); flag('quality', a.quality); flag('max-fps', a.max_fps); flag('max-size', a.max_size); flag('draft', a.draft); flag('wait', a.wait);
   return args;
@@ -136,8 +137,8 @@ export async function serveMcp() {
 
   server.registerTool('project_info', {
     title: 'Project info',
-    description: "A project's format (size, fps), duration, audio track, theme, tracks, every clip (id, start, end, track) and the sound cues scenes recorded. Call it first: clip ids and times for the other tools come from here.",
-    inputSchema: { project },
+    description: "A project's format (size, fps), duration, audio track, theme, props (the render's, over the config's defaults), tracks, every clip (id, start, end, track) and the sound cues scenes recorded. Call it first: clip ids and times for the other tools come from here. Pass the same `props` as the renders when the timeline depends on them.",
+    inputSchema: { project, props: page.props },
     annotations: { readOnlyHint: true },
   }, (a) => guard(async () => {
     const r = await call(reqOf('info', a, {}));
@@ -201,7 +202,7 @@ export async function serveMcp() {
     description: 'Compare two PNGs (a and b), or a fresh render of time t against b (a still or golden saved earlier; rendered at b\'s size): changed pixel count and share, max and mean difference, the bounding box of the change, and a diff image (b in grey, changes in red). isError when more than `threshold` of the pixels changed. Grain differs per frame, so compare the same time, and use tol (e.g. 8) to ignore it.',
     inputSchema: {
       b: z.string().describe('The reference PNG.'), a: z.string().optional().describe('The other PNG (or give project and t).'), project: project.optional(), t: z.number().min(0).optional().describe('Render this time and compare it to b.'),
-      only: page.only, size: page.size, theme: page.theme, samples: page.samples,
+      only: page.only, size: page.size, theme: page.theme, props: page.props, samples: page.samples,
       tol: z.number().int().min(0).max(255).optional().describe('Channel difference (0-255) a pixel may have and still count as unchanged (default 0).'),
       threshold: z.number().min(0).max(1).optional().describe('Share of pixels that may change (default 0).'), ...imageOpts,
     },
@@ -281,8 +282,8 @@ export async function serveMcp() {
 
   server.registerTool('mix_audio', {
     title: 'Mix music and cues',
-    description: "The finished sound under a rendered video, into a new file of the same container (.mp4 with AAC, .mov with PCM, .webm with Opus): the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render. (video_start with mix: true renders and mixes in one job.)",
-    inputSchema: { project, input: z.string().describe('The rendered .mp4, .mov or .webm.'), output: z.string().describe('The mixed file to write (.mp4, .mov or .webm).'), from: z.number().min(0).optional() },
+    description: "The finished sound under a rendered video, into a new file of the same container (.mp4 with AAC, .mov with PCM, .webm with Opus): the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render, and `props` the render's props. (video_start with mix: true renders and mixes in one job.)",
+    inputSchema: { project, input: z.string().describe('The rendered .mp4, .mov or .webm.'), output: z.string().describe('The mixed file to write (.mp4, .mov or .webm).'), from: z.number().min(0).optional(), props: page.props },
   }, (a) => guard(async () => {
     // (the cues the mix needs, from the project as it is now)
     const ev = await call(reqOf('events', a, {}));

@@ -157,6 +157,8 @@ function setupExport() {
     alpha: ALPHA,
     bits: BITS,
     theme: THEME.name,
+    /** The render's props (the page's over the config's defaults). */
+    props: engine.props,
     /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
     stateful,
     timeline: TIMELINE.map(({ id, start, end, track, check }) => ({ id, start, end, track: track ?? 0, ...(check?.exempt ? { exempt: check.exempt } : {}) })),

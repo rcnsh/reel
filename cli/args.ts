@@ -2,6 +2,7 @@
 // the CLI and its tests share it.
 import { parseArgs } from 'node:util';
 import type { AdaptiveSampling } from '../src/engine/engine';
+import { parseProps } from '../src/config';
 
 export const HELP = `reel <command> [flags]
 
@@ -105,6 +106,7 @@ Working on a project
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
+                             [--props <json|file>: the preview's props; ?props=<JSON> in the URL overrides]
   narrate                    voice narration.txt (Kokoro by default; say, elevenlabs, fish) and time
                              every word; caches each plate      (flags: reel narrate --help)
   align <recording|folder>   time narration.txt to a voice recording (forced alignment; --method
@@ -131,6 +133,9 @@ Flags for every command that renders
                        for a width that is a multiple of 8 and a height of 4, else refused with exit 2)
   --size WxH, --fps N  override the project's frame size and rate
   --theme <name>       render with a built-in theme (print, film, neutral) instead of the project's
+  --props <json|file>  the render's props: a JSON object, inline ('{"title":"Q3"}') or a .json file,
+                       over the config's \`props\` defaults; timeline() reads them as src.props, scenes
+                       as ctx.props (one project, many variants)
   --no-daemon          render in a browser of its own, started and stopped by this command
                        (also REEL_NO_DAEMON=1)
   --headed             show the browser (implies --no-daemon)
@@ -149,7 +154,7 @@ type Opt = typeof str | typeof bool;
 /** Flags of every command that renders through a page. */
 const RENDER: Record<string, Opt> = {
   project: str, json: bool, help: bool, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str,
-  shutter: str, scale: str, size: str, fps: str, theme: str, headed: bool, 'no-daemon': bool, gl: str,
+  shutter: str, scale: str, size: str, fps: str, theme: str, props: str, headed: bool, 'no-daemon': bool, gl: str,
 };
 const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
 
@@ -165,7 +170,7 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   perf: { render: true, opts: { from: str, to: str, pixels: str } },
   gpu: { render: true, opts: {} },
   video: { render: true, opts: { from: str, to: str, out: str, format: str, crf: str, preset: str, x264: str, x265: str, chroma: str, depth: str, alpha: bool, opaque: bool, quality: str, 'max-fps': str, 'max-size': str, draft: bool, force: bool, wait: bool, noaudio: bool, audio: bool, mix: bool, subtitles: bool, workers: str, chunk: str, 'mem-gb': str, 'spool-gb': str, progress: bool } },
-  dev: { render: false, opts: { project: str, port: str, theme: str, help: bool } },
+  dev: { render: false, opts: { project: str, port: str, theme: str, props: str, help: bool } },
   skills: { render: false, opts: { project: str, json: bool, help: bool }, positionals: [1, 1] },
   daemon: { render: false, opts: { project: str, all: bool, json: bool, help: bool }, positionals: [1, 1] },
   golden: { render: false, opts: { json: bool, help: bool }, positionals: [1, 1] },
@@ -270,8 +275,25 @@ export function samplesOf(v: Values, env: Record<string, string | undefined> = p
   return int(v, 'samples', 1);
 }
 
-/** What a page is opened with: the format overrides, the clips to load and a built-in theme. */
-export interface PageOpts { w?: number; h?: number; fps?: number; scale: number; only?: string; theme?: string; alpha?: boolean; bits?: number }
+/** What a page is opened with: the format overrides, the clips to load, a built-in theme and the props (JSON text). */
+export interface PageOpts { w?: number; h?: number; fps?: number; scale: number; only?: string; theme?: string; props?: string; alpha?: boolean; bits?: number }
+
+/** Props as JSON text, checked to be a JSON object, made compact. `what` names them in an error. */
+export function propsOf(text: string, what = '--props'): string {
+  try { return JSON.stringify(parseProps(text, what)); } catch (e) { throw new UsageError((e as Error).message); }
+}
+
+/**
+ * `--props`: inline JSON when it starts with `{`, else the path of a JSON file, which `read` reads (the CLI passes
+ * a file reader; this module does no I/O). Returns them as propsOf does.
+ */
+export function readProps(raw: string, read: (file: string) => string): string {
+  if (raw.trim().startsWith('{')) return propsOf(raw);
+  let text: string;
+  try { text = read(raw); } catch (e) { throw new UsageError(`--props ${raw}: neither a JSON object nor a file that can be read (${(e as Error).message})`); }
+  // (a byte order mark, which some editors write, is not JSON)
+  return propsOf(text.replace(/^\uFEFF/, ''), `--props ${raw}`);
+}
 
 export function pageOf(v: Values): PageOpts {
   const scale = num(v, 'scale', 1);
@@ -287,6 +309,8 @@ export function pageOf(v: Values): PageOpts {
     o.only = v.only;
   }
   if (typeof v.theme === 'string') o.theme = v.theme;
+  // (JSON text already checked: readProps for the CLI, the MCP server's own schema)
+  if (typeof v.props === 'string') o.props = v.props;
   if (v.alpha === true) o.alpha = true;
   return o;
 }

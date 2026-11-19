@@ -3,9 +3,9 @@
 // commands and flags (cli/args.ts). Every rendering command takes --project <folder> (default: the current
 // folder) and --json (one JSON object on stdout: { ok, errors, logs, warnings, ... }). Exit codes: 0 done,
 // 1 something failed (scene errors included), 2 a bad command line or no project.
-import { rmSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { checkScale, HELP, int, list, num, pageOf, parseCommand, samplesOf, UsageError, type PageOpts, type Values } from './args';
+import { checkScale, HELP, int, list, num, pageOf, parseCommand, readProps, samplesOf, UsageError, type PageOpts, type Values } from './args';
 import { ENGINE, projectDir } from './server';
 import type { Req, Result } from './ops';
 
@@ -49,6 +49,11 @@ if (A.help) { console.log(HELP); process.exit(0); }
 if (typeof A.gl === 'string') {
   process.env.REEL_GL = A.gl;
   try { (await import('./chrome')).glBackend(); } catch (e) { fail(`--gl ${A.gl}: ${(e as Error).message.replace(/^REEL_GL=\S+: /, '')}`); }
+}
+// (--props names a file or holds the JSON: read here, so a request carries the JSON itself)
+if (typeof A.props === 'string') {
+  const raw = A.props;
+  try { A.props = readProps(raw, (f) => readFileSync(path.resolve(f), 'utf8')); } catch (e) { fail((e as Error).message); }
 }
 const json = !!A.json;
 const say = (s: string) => { if (!json) console.log(s); };
@@ -254,8 +259,10 @@ if (mode === 'dev') {
   let srv;
   // (5173 when it is free, else the next free port: the URL printed is this project's)
   const port = num(A, 'port', 5173);
-  try { srv = await startServer(PROJECT, { port, strictPort: A.port !== undefined, hmr: true, theme: A.theme as string | undefined }); } catch (e) { fail((e as Error).message); }
-  console.log(`${srv!.url}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
+  // (read and checked with the other flags, above)
+  const props = A.props as string | undefined;
+  try { srv = await startServer(PROJECT, { port, strictPort: A.port !== undefined, hmr: true, theme: A.theme as string | undefined, props }); } catch (e) { fail((e as Error).message); }
+  console.log(`${srv!.url}${props ? `  (with --props; ?props=<JSON> in the URL overrides them)` : ''}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
   await new Promise(() => {});
 }
 
@@ -332,7 +339,7 @@ try {
       // (the subtitles first: a project without timed words fails before it renders, not after)
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
-        url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme,
+        url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme, props: page.props,
         samples, shutter, from: num(A, 'from'), to: num(A, 'to'), out: pic ?? out, direct: !!pic, plan, enc, noaudio: !!A.noaudio || mixed,
         workers: int(A, 'workers', 2), chunk: int(A, 'chunk', 8), memGb: num(A, 'mem-gb', 1), spoolGb: num(A, 'spool-gb', 20), headed: !!A.headed,
         onProgress: (p) => {
@@ -441,6 +448,7 @@ finish(res, (x) => {
     const tl = x.timeline as { id: string; start: number; end: number; track: number }[], [w, h] = x.size as number[];
     say(`${PROJECT}\n${w}x${h} at ${x.fps} fps, ${(x.duration as number).toFixed(3)} s, ${x.track ?? 'no audio track'}, theme ${x.theme}`);
     for (const e of tl) say(`  ${e.id.padEnd(16)} ${e.start.toFixed(3).padStart(9)} to ${e.end.toFixed(3).padStart(9)}  track ${e.track}`);
+    if (Object.keys(x.props as object).length) say(`props ${JSON.stringify(x.props)}`);
     say(`${(x.cues as unknown[]).length} sound cues, ${(x.sounds as unknown[]).length} sounds on the timeline`);
   } else if (mode === 'still') {
     for (const f of x.frames as { t: number; file: string; subFrames: number }[]) say(typeof req.samples === 'number' ? f.file : `${f.file}  (${f.subFrames} sub-frames)`);

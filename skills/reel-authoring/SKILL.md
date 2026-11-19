@@ -33,7 +33,8 @@ export default defineVideo({
   theme: 'print',              // 'print' | 'film' | 'neutral' (default) | a theme object
   // duration: 12,             // default: the audio's length, else the last clip's end
   // export: { crf: 22, noaudio: true },  // this project's reel video defaults (crf, preset, noaudio, samples); flags override
-  timeline: (src) => [         // src.words, src.audio: the project's timing (empty when it has none)
+  // props: { title: 'Hello' } as Props,  // defaults for --props (variants of one project): src.props, ctx.props
+  timeline: (src) => [         // src.words, src.audio: the project's timing (empty when it has none); src.props
     { id: 'bg', scene: () => import('./scenes/wash'), start: 0, end: 12, params: { from: 'bg', to: 'accentLo' } },
     { id: 'title', scene: () => import('./scenes/title'), start: 0.5, end: 4, track: 1, params: { text: 'Hello' } },
     { id: 'fig', scene: () => import('reel/scenes/hud'), start: 6, end: 10, track: 2, params: { caption: { fig: 'FIG. 1', text: 'Population over 65' } } },
@@ -59,6 +60,7 @@ export default defineVideo({
   ```
 - Narrated video: `timeline: (src) => clipsFromSections(src, import.meta.glob('./scenes/*.ts'))` makes one clip per plate of `narration.txt` that has a scene of the same name, cutting at each plate. `clipsFromSections(src, glob, { transition: 'crossfade', overlap: 0.6, params })` overlaps neighbouring clips by `overlap` (default 0.5 s with a transition) centred on the cut; `transition` and `params` may be functions of the plate's name (`(name) => name === 'outro' ? 'dip' : undefined`: a dip into the outro, cuts elsewhere).
 - Music: snap starts with `src.audio.beatBefore(t)` or `src.audio.nearestDownbeat(t)`.
+- **Props** make one project render as variants (a title, a colour, a list of items, a length). Give defaults in `props` and export their type (`export interface Props { title: string; seconds: number }`, `props: { … } as Props`); a render replaces them with `--props '{"title":"Q3"}'` or `--props variant.json` (MCP tools: `props: {…}`). `timeline()` reads `src.props` (typed from the defaults) to choose clips, lengths and params; a scene reads `this.ctx.props as Props` (`import type { Props } from '../reel.config'`). A key the defaults lack, or a value of another kind, fails the render; an optional prop gets a default of `undefined` or `null`, which takes anything. Props are fixed for the whole render, so scenes stay a function of `f.t`. Look at each variant: `reel still --props …`, `reel check --props …`.
 
 ## Tracks: grades, mattes, blends
 
@@ -158,7 +160,7 @@ A video exported with alpha (`reel video --format prores4444`, `webm`, or `--alp
 
 What a scene gets:
 
-- `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `id`, `start`, `end`, `W`, `H`, and `clip(id)`: another clip's `{ start, end, track }` (throws when the id is gone), for a clip that follows another's timing.
+- `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `props` (the render's, the same for every clip), `id`, `start`, `end`, `W`, `H`, and `clip(id)`: another clip's `{ start, end, track }` (throws when the id is gone), for a clip that follows another's timing.
 - `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt` (the step since the last frame rendered, for stateful scenes only: 0 after a seek, which a stateless scene's export chunks start with), `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), `exposure` (the span of time the frame's sub-frames cover: 0 in previews and stills), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
 - Lifecycle: `init()` once (async; load and precompute here), `prepare(f)` once per output frame before its sub-frames (optional, may be async; HTML layers update then), `render()` per frame and per motion-blur sub-frame (synchronous), `reset()` for stateful scenes, `dispose()`.
 - Flags: `stateful = true` for simulation state, `handlesTransition = true` to composite `f.under` with `f.tin` yourself, `tileMasked` (see reference/sampling.md).

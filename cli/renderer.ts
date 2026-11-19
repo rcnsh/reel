@@ -44,7 +44,7 @@ export async function launchChrome(headed = false) {
 export interface Format { w: number; h: number; fps: number; scale: number }
 export interface ClipInfo { id: string; start: number; end: number; track: number }
 
-/** The page URL for a format, clip selection and theme. */
+/** The page URL for a format, clip selection and theme (props go in by openPage: a URL holds a few kilobytes). */
 export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'theme' | 'alpha'> & { bits?: number }) {
   const q = new URLSearchParams({ export: '1', w: String(f.w), h: String(f.h), fps: String(f.fps), scale: String(f.scale) });
   if (o.only) q.set('only', o.only);
@@ -59,10 +59,12 @@ const RELOADS = 5;
 
 /**
  * Open the project's page and wait for it to be ready: checks that it renders the size asked for and that
- * every --only clip exists. `log` gets the page's console errors and warnings.
+ * every --only clip exists. The props (JSON text) are set as window.__REEL_PROPS__ before any of its modules runs,
+ * on every load. `log` gets the page's console errors and warnings.
  */
-export async function openPage(browser: Browser, url: string, f: Format, o: Pick<PageOpts, 'only'>, log: (line: string) => void) {
+export async function openPage(browser: Browser, url: string, f: Format, o: Pick<PageOpts, 'only' | 'props'>, log: (line: string) => void) {
   const page = await browser.newPage({ viewport: { width: f.w, height: f.h }, deviceScaleFactor: 1 });
+  if (o.props) await page.addInitScript((p) => { (window as any).__REEL_PROPS__ = p; }, o.props);
   // (what the page says goes to `log` once a load is kept: a load thrown away for a module that did not arrive
   // takes its errors with it)
   const logs: string[] = [];
@@ -265,7 +267,7 @@ export class Renderer {
     this.rescan();
     const srv = await this.server();
     const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
-    const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', !!o.alpha, o.bits ?? 8]);
+    const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', o.props ?? '', !!o.alpha, o.bits ?? 8]);
     let h = this.pages.get(key);
     if (h && (h.dead || h.page.isClosed() || h.gen !== this.gen)) {
       this.pages.delete(key);
