@@ -49,7 +49,7 @@ export default defineVideo({
 
 ## A scene
 
-Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
+Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar (horizontal, stacked), line and donut charts, a table, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
 
 ```ts
 import type * as THREE from 'three';

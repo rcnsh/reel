@@ -2,7 +2,7 @@
 // the same frame after a seek backwards, and whose faults (text cut off at a layer's edge, text overflowing a
 // block that does not fit it) check names.
 import { afterAll, describe, expect, test } from 'bun:test';
-import { captionPages, clock, textWidth, cssColor, esc, formatNumber, motionAt, splitHighlighted } from '../src/kit';
+import { arcPath, captionPages, clock, columnAlign, donutSlices, formatCell, growth, percents, polar, stackBars, textWidth, cssColor, esc, formatNumber, motionAt, splitHighlighted } from '../src/kit';
 import { Words } from '../src/engine/words';
 import { fixture, hasChrome, reel } from './helpers';
 
@@ -54,6 +54,56 @@ describe('helpers', () => {
     expect(motionAt(false, 0, 0, 1)).toEqual({ opacity: 1, dx: 0, dy: 0, scale: 1 });
   });
 
+  test('stackBars: each bar\'s total and its segments as shares, bottom first', () => {
+    const [a, b, c] = stackBars([[1, 3], [2, 0, 2], [0, 0]]);
+    expect(a).toEqual({ total: 4, segments: [[0, 0.25], [0.25, 1]] });
+    expect(b).toEqual({ total: 4, segments: [[0, 0.5], [0.5, 0.5], [0.5, 1]] });
+    expect(c).toEqual({ total: 0, segments: [[0, 0], [0, 0]] });
+    expect(() => stackBars([[1, -2]])).toThrow('bar 0 has the value -2');
+    expect(() => stackBars([[NaN]])).toThrow('finite');
+  });
+
+  test('growth: one after another, all done at the end; together without stagger', () => {
+    expect(growth(0, 0, 4)).toBe(0);
+    for (let i = 0; i < 4; i++) expect(growth(1, i, 4)).toBe(1);
+    // the first item leads, the last starts only once the first is halfway
+    expect(growth(0.25, 0, 4)).toBeGreaterThan(growth(0.25, 3, 4));
+    expect(growth(0.25, 3, 4)).toBe(0);
+    expect(growth(0.4, 2, 4, false)).toBe(0.4);
+  });
+
+  test('donutSlices and percents: slices end to end round the ring, percents adding up to 100', () => {
+    const s = donutSlices([1, 1, 2]);
+    expect(s.map((x) => [x.start, x.end])).toEqual([[0, 0.25], [0.25, 0.5], [0.5, 1]]);
+    expect(donutSlices([0, 0]).every((x) => x.share === 0 && x.end === 0)).toBe(true);
+    expect(() => donutSlices([1, -1])).toThrow('0 or more');
+    // a third each rounds to 33 + 33 + 33 = 99: the largest remainder (ties to the earliest) takes the last unit
+    expect(percents([1, 1, 1])).toEqual([34, 33, 33]);
+    expect(percents([52, 21, 9, 18])).toEqual([52, 21, 9, 18]);
+    expect(percents([2, 3, 7], 1)).toEqual([16.7, 25, 58.3]);
+    expect(percents([0, 0])).toEqual([0, 0]);
+  });
+
+  test('arcPath: angles clockwise from 12 o\'clock, a pie wedge to the centre, a whole turn in two halves', () => {
+    const [x, y] = polar(100, 100, 50, 0.25);
+    expect([x, y].map((v) => +v.toFixed(6))).toEqual([150, 100]);
+    expect(arcPath(100, 100, 0, 50, 0, 0.25)).toBe('M100.00 50.00 A50.00 50.00 0 0 1 150.00 100.00 L100.00 100.00 Z');
+    expect(arcPath(100, 100, 25, 50, 0, 0.25)).toBe('M100.00 50.00 A50.00 50.00 0 0 1 150.00 100.00 L125.00 100.00 A25.00 25.00 0 0 0 100.00 75.00 Z');
+    expect(arcPath(100, 100, 25, 50, 0.3, 0.3)).toBe('');
+    expect(arcPath(100, 100, 25, 50, 0, 1).match(/M/g)).toHaveLength(2);
+  });
+
+  test('formatCell and columnAlign: grouped numbers, the sign before the prefix, numbers to the right', () => {
+    expect(formatCell(1234.5, { label: '', digits: 2, prefix: '$' })).toBe('$1,234.50');
+    expect(formatCell(-1200.5, { label: '', digits: 2, prefix: '$' })).toBe('−$1,200.50');
+    expect(formatCell(-0.004, { label: '', digits: 1, suffix: '%' })).toBe('0.0%');
+    expect(formatCell('n/a', { label: '', digits: 2 })).toBe('n/a');
+    expect(formatCell(3, { label: '', format: (v, r) => `${v}@${r}` }, 7)).toBe('3@7');
+    const rows = [['a', 1, 'x'], ['b', 2, 3]];
+    expect([0, 1, 2].map((i) => columnAlign(rows, i))).toEqual(['left', 'right', 'left']);
+    expect(columnAlign(rows, 1, { label: '', align: 'center' })).toBe('center');
+  });
+
   test('cssColor maps palette keys to theme variables and passes CSS colours through', () => {
     expect(cssColor('accentHi')).toBe('var(--accent-hi)');
     expect(cssColor('ink2')).toBe('var(--ink2)');
@@ -65,7 +115,8 @@ describe('helpers', () => {
 
 // clips: a Canvas2D line off the centre, an HTML text block changing every frame, the Canvas2D line again (a
 // Layer2D upload after an HTML one must not come out upside down), captions with a word highlighted, a chart and
-// a code block; then the faults
+// a code block; then the faults; then a donut, a pie, horizontal and stacked bars and a table (in place throughout);
+// then vertical stacked bars and a donut with its legend under it
 const project = fixture('kit', {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({
@@ -76,6 +127,8 @@ export default defineVideo({
     { id: 'canvas2', scene: () => import('./scenes/canvas'), start: 2, end: 3 },
     { id: 'parts', scene: () => import('./scenes/parts'), start: 3, end: 5 },
     { id: 'faults', scene: () => import('./scenes/faults'), start: 5, end: 6 },
+    { id: 'data', scene: () => import('./scenes/data'), start: 6, end: 8 },
+    { id: 'data2', scene: () => import('./scenes/data2'), start: 8, end: 9 },
   ],
 });
 `,
@@ -115,6 +168,31 @@ export default class Parts extends Scene {
   }
 }
 `,
+  'scenes/data.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, DonutChart, BarChart, StackedBarChart, Table, clearRT, LIN, W, H } from 'reel';
+const series = [{ label: 'Render' }, { label: 'Encode' }];
+const data = [{ label: 'Demo', values: [30, 12] }, { label: 'Music', values: [44, 16] }];
+export default class Data extends Scene {
+  donut = new DonutChart({ data: [{ label: 'Render', value: 52 }, { label: 'Encode', value: 21 }, { label: 'Mix', value: 18 }], highlight: 0, box: { x: W * 0.06, y: H * 0.06, w: W * 0.42, h: H * 0.4 } });
+  pie = new DonutChart({ data: [{ label: 'Yes', value: 3 }, { label: 'No', value: 1 }], hole: 0, labels: 'around', box: { x: W * 0.52, y: H * 0.06, w: W * 0.42, h: H * 0.4 } });
+  hbars = new BarChart({ data: [{ label: 'Still', value: 1 }, { label: 'Whip', value: 24 }], orientation: 'horizontal', box: { x: W * 0.06, y: H * 0.5, w: W * 0.28, h: H * 0.42 } });
+  stacked = new StackedBarChart({ series, data, orientation: 'horizontal', highlight: 1, box: { x: W * 0.36, y: H * 0.5, w: W * 0.28, h: H * 0.42 } });
+  table = new Table({ columns: ['Clip', { label: 'Cost', prefix: '$', digits: 2 }], rows: [['Demo', 0.81], ['Music', -2.4]], highlight: (f) => (f.lt > 1 ? 1 : undefined), motion: false, box: { x: W * 0.66, y: H * 0.5, w: W * 0.28, h: H * 0.42 } });
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    const r = this.ctx.renderer;
+    clearRT(r, out, LIN.bg);
+    for (const c of [this.donut, this.pie, this.hbars, this.stacked, this.table]) c.draw(r, out, f);
+  }
+}
+`,
+  'scenes/data2.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, DonutChart, StackedBarChart, clearRT, LIN, W, H } from 'reel';
+export default class Data2 extends Scene {
+  stacked = new StackedBarChart({ title: 'Stacked', series: [{ label: 'Render' }, { label: 'Encode' }], data: [{ label: 'Demo', values: [30, 12] }, { label: 'Music', values: [44, 16] }], motion: false, box: { x: W * 0.06, y: H * 0.08, w: W * 0.5, h: H * 0.84 } });
+  tall = new DonutChart({ data: [{ label: 'Render', value: 52 }, { label: 'Encode', value: 21 }, { label: 'Mix', value: 18 }], box: { x: W * 0.62, y: H * 0.08, w: W * 0.3, h: H * 0.84 } });
+  render(f: Frame, out: THREE.WebGLRenderTarget) { const r = this.ctx.renderer; clearRT(r, out, LIN.bg); this.stacked.draw(r, out, f); this.tall.draw(r, out, f); }
+}
+`,
   'scenes/faults.ts': `import type * as THREE from 'three';
 import { Scene, type Frame, HtmlLayer, TextBlock, clearRT, LIN } from 'reel';
 export default class Faults extends Scene {
@@ -152,4 +230,10 @@ test.skipIf(!hasChrome)('a frame of components renders the same after a seek bac
   const again = await reel(['diff', '--t', '4.1', first, '--json', '--project', project.dir]);
   expect(again.json().changed).toBe(0);
   expect(again.code).toBe(0);
+  // charts and a table mid-sweep (a highlight that switches on later): the same after a seek past it and back
+  const data = (await reel(['still', '--t', '6.7', '--json', '--project', project.dir])).json().files[0];
+  await reel(['still', '--t', '7.9', '--json', '--project', project.dir]);
+  const back = await reel(['diff', '--t', '6.7', data, '--json', '--project', project.dir]);
+  expect(back.json().changed).toBe(0);
+  expect(back.code).toBe(0);
 }, 180_000);

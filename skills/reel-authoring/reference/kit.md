@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts (bars, stacked bars, lines, donuts and pies), a table, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -114,7 +114,7 @@ badge = new LottieBox({ src: 'assets/badge.json', box: { x: W / 2 - 200, y: 300,
 
 ## Charts and numbers
 
-Charts grow as their `progress` runs from 0 to 1: by default over 1.4 s from the start of their window, eased; give `progress: (f) => …` to drive it yourself.
+Charts and the table grow as their `progress` runs from 0 to 1: by default over 1.4 s from the start of their window (after a 0.2 s beat), eased; give `progress: (f) => …` to drive it yourself, for example from word times. Chart text is HTML, so `reel check` sees every label and value.
 
 ### BarChart
 
@@ -126,7 +126,20 @@ chart = new BarChart({
 });
 ```
 
-`data`, `max` (a full bar; default the largest value), `format`, `color` (accent), `highlight` (a bar's index, drawn in fg), `title`, `stagger`. Bars grow one after another; with `stagger: false` they grow together, each in proportion, which a comparison needs (staggered, a small bar leads a large one for a moment and the chart says the opposite of its point). Markup: `.frame` (a column) > `.title`, `.bars` (a row) > `.bar` (a column, bottom aligned) > `.value`, `.fill`, `.label`.
+`data`, `max` (a full bar; default the largest value; a value past it fills its bar), `format`, `color` (accent), `highlight` (a bar's index, drawn in fg; an index that is not a bar is an error), `title`, `stagger`, `orientation` (`'vertical'`, the default, or `'horizontal'`: bars run right from an axis, labels on the left and values at their ends, which suits long labels and many bars). Bars grow one after another; with `stagger: false` they grow together, each in proportion, which a comparison needs (staggered, a small bar leads a large one for a moment and the chart says the opposite of its point). Markup: `.frame` (a column) > `.title`, `.bars` (a row) > `.bar` (a column, bottom aligned) > `.value`, `.fill`, `.label`; horizontal: `.bars` is a grid, `.bar` > `.label`, `.track` > `.fill`, `.value`.
+
+### StackedBarChart
+
+```ts
+cost = new StackedBarChart({
+  title: 'Seconds per export', orientation: 'horizontal',
+  series: [{ label: 'Render' }, { label: 'Encode' }, { label: 'Mix', color: 'fg' }],
+  data: [{ label: 'Demo', values: [30, 12, 4] }, { label: 'Music', values: [44, 16, 9] }],
+  format: (v) => `${v.toFixed(0)} s`,
+});
+```
+
+`series` (names for the legend, in the order of each bar's values, and colours), `data` (each bar's label and values, 0 or more, stacked bottom or left first), `legend` (default true), and BarChart's `max` (default the largest total), `format` (the total at each bar's end), `highlight` (that bar keeps its colours, the rest are dimmed), `title`, `stagger`, `orientation`. A bar grows as a whole with its segments in proportion. Series colours default to `seriesColor(i)`: accent, a light accent, fg, a light fg, accentHi, accentLo, in every theme. Markup as BarChart, with `.seg`s inside each `.fill` and `.legend` > `.key` under the title.
 
 ### LineChart
 
@@ -138,6 +151,19 @@ trend = new LineChart({
 ```
 
 `series` (values evenly spaced along x, or several: `[{ values, color, label }]`), `labels` (the first and last are shown under the axis), `min`, `max`, `format`, `title`. The line is revealed left to right, with a dot and the value at its head (on the first series). Classes: `.title`, `.plot`, `.lines`, `.line`, `.head`, `.value`, `.axis`.
+
+### DonutChart
+
+```ts
+share = new DonutChart({
+  title: 'Where the time goes',
+  data: [{ label: 'Render', value: 52 }, { label: 'Encode', value: 21 }, { label: 'Mix', value: 18 }],
+  highlight: 0,                                       // pulled out, the rest dimmed; its share counts up in the hole
+});
+pie = new DonutChart({ data, hole: 0, labels: 'around', show: 'both', format: (v) => `${v} s` });
+```
+
+Slices sweep in clockwise from 12 o'clock as progress runs 0 to 1, each slice's label appearing as the sweep reaches it. `data` (label, value 0 or more, `color`; default `seriesColor(i)`), `hole` (the hole's share of the radius, default 0.6; 0 is a pie), `labels` (`'legend'`, the default: beside the ring in a wide box, under it in a tall one; `'around'`: at each slice, for a few slices with room on both sides; `'none'`), `show` (`'share'`, the default, `'value'` or `'both'`), `format` (values), `shareDigits` (the percents' decimals; they always add up to 100), `center` (*Anim*, the text in the hole; default the highlighted slice's share, else the total, counting up; `''` for none), `caption` (under it; default the highlighted slice's name), `highlight`, `gap` (px between slices), `title`. The hole's text is sized to fit the hole: a small ring has small text, which `reel check` flags. `donutSlices(values)` and `percents(values, digits)` are its maths. Classes: `.title`, `.ring`, `.slice`, `.center` > `.num`, `.cap`; `.legend` > `.key` > `i`, `.name`, `.val`; `.tag`.
 
 ### Counter
 
@@ -154,7 +180,20 @@ bar = new ProgressBar({ box: { x: W * 0.08, y: H * 0.06, w: W * 0.7, h: 40 } });
 timer = new Timer({ format: 'm:ss', from: 30, to: 0 });                                          // counts down over the window
 ```
 
-ProgressBar: `progress` (*Anim*, default `f.p`), `text` (*Anim*, beside the bar), `color`; along the bottom of the safe area by default. Timer: `from` and `to` (seconds shown at the start and end of the window; default counts up from 0), `format` (`'m:ss'`, `'mm:ss'`, `'ss'`, `'m:ss.t'`), `size`, `color`; top right of the safe area by default. Neither moves in or out unless given `motion`. `clock(s, format)` and `formatNumber(x, digits)` are the formatting they use. Classes: `.track`, `.fill`, `.label`; `.clock`.
+ProgressBar: `progress` (*Anim*, default `f.p`), `text` (*Anim*, beside the bar), `color`; along the bottom of the safe area by default. Timer: `from` and `to` (seconds shown at the start and end of the window; default counts up from 0), `format` (`'m:ss'`, `'mm:ss'`, `'ss'`, `'m:ss.t'`), `size`, `color`; top right of the safe area by default. Neither moves in or out unless given `motion`. `clock(s, format)` and `formatNumber(x, digits)` are the formatting they use. Charts grow item by item with `growth(p, i, n, stagger)` and take their default progress from `progressOf(options, f, seconds)`: use them in a component of your own to match. Classes: `.track`, `.fill`, `.label`; `.clock`.
+
+## Table
+
+```ts
+table = new Table({
+  title: 'Exports this week',
+  columns: ['Project', 'Frames', { label: 'Cost', prefix: '$', digits: 2 }, { label: 'Change', suffix: '%', digits: 1 }],
+  rows: [['Demo', 2100, 0.81, 12.5], ['Music', 5400, 2.4, -4.25]],
+  highlight: (f) => (f.lt > 2.5 ? 1 : undefined),    // a row, several ([0, 2]) or none, changing over time
+});
+```
+
+The header shows with the component; rows rise and fade in one after another as progress runs 0 to 1 (by default 0.2 s a row, at least 1.4 s, and done 0.6 s before the window ends however many rows there are; `stagger: false` brings them in together). `columns`: labels, or `{ label, align, digits, prefix, suffix, format, width }` (`width` a share of the table's width). `rows`: cells of numbers or text. A column of numbers aligns right unless told otherwise; numbers are grouped (`1,234.50`), with a true minus before the prefix (`−$1,200.50`) and no sign on a value that rounds to zero; `format: (v, row) => …` replaces that. `highlight` (*Anim*: a row index, an array of them, or undefined; an index that is not a row is an error) draws a tinted band with a bar in `color` (accent); the text is thickened with a stroke rather than set bold, so the columns do not move when the highlight does. `size` (font; it shrinks so the title, header and rows fit the box's height: many rows in a short box come out too small to read, which `reel check` flags, so split them over two tables or clips), `title`. Cells do not wrap: a table wider than its box is cut off and `reel check` reports it. `formatCell(v, column)` and `columnAlign(rows, i, column)` are its formatting. Markup: `.frame` > `.title`, `table` > `thead` > `tr` > `th`; `tbody` > `tr` (`.hi` when highlighted) > `td`.
 
 ## CodeBlock
 
