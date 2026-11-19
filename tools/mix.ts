@@ -27,11 +27,11 @@
 // limiter at -0.4 dBFS instead). --from is the timeline time the video starts at (the render's --from).
 // Sounds on the timeline (the config's `sounds` and a scene's sound(), also in data/cues.json) are laid as they say:
 // from their file's `from`, at their `at`, for their `duration`, looped, at their speed, gain and fades.
-import { $ } from 'bun';
 import { existsSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { run, spawnChild } from '../cli/children';
 import { commit, destOf, onAbort, partialOf } from '../cli/scratch';
 import { durationOf, ffmpegR128, loudnessOf } from './audio-io';
 import { EBUR128, linearGain, loudnessTarget, loudnormFilter, parseLoudnorm } from './loudness';
@@ -138,8 +138,8 @@ export async function mixVideo(o: MixOptions) {
   for (const s of ev.sounds ?? []) {
     const f = soundFile(root, s.file);
     if (lengths.has(f)) continue;
-    const r = await $`ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 ${f}`.quiet().nothrow();
-    if (r.exitCode !== 0 || !r.stdout.toString().trim()) throw new Error(`the sound '${s.file}' (at ${s.at} s) has no audio stream`);
+    const r = await run(['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', f], { quiet: true, nothrow: true });
+    if (r.exitCode !== 0 || !r.text().trim()) throw new Error(`the sound '${s.file}' (at ${s.at} s) has no audio stream`);
     lengths.set(f, await durationOf(f));
   }
   const work = mkdtempSync(path.join(tmpdir(), 'reel-mix-'));
@@ -153,9 +153,9 @@ export async function mixVideo(o: MixOptions) {
 
 /** Write a cue kind's track: its sound decoded once and summed at each offset, a block at a time, as raw f32. */
 async function cueTrack(c: CueLay) {
-  const r = await $`ffmpeg -nostdin -loglevel error -i ${c.file} -map 0:a:0 -af ${FMT} -f f32le -`.quiet().nothrow();
-  if (r.exitCode !== 0) throw new Error(`ffmpeg (decoding ${c.file}, the sound of cue kind '${c.kind}'): ${r.stderr.toString().slice(-1200)}`);
-  const src = new Float32Array(r.arrayBuffer());
+  const r = await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-i', c.file, '-map', '0:a:0', '-af', FMT, '-f', 'f32le', '-'], { quiet: true, nothrow: true });
+  if (r.exitCode !== 0) throw new Error(`ffmpeg (decoding ${c.file}, the sound of cue kind '${c.kind}'): ${r.stderr.slice(-1200)}`);
+  const src = new Float32Array(r.stdout.buffer, r.stdout.byteOffset, r.stdout.byteLength / 4);
   // (offsets are in time order)
   const total = c.offsets.at(-1)! + src.length / 2, block = 48000 * 10;
   const w = Bun.file(c.track).writer();
@@ -176,9 +176,9 @@ async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: Ret
     const lin = linearGain(target, m);
     if (lin !== null) gain = `volume=${lin.toFixed(4)}dB`;
     else {
-      const r2 = await $`ffmpeg ${det} ${ins} -filter_complex ${`${g.filter};[mixed]loudnorm=I=${target.integrated}:TP=${target.truePeak}:LRA=${target.lra ?? 11}:print_format=json[a]`} -map [a] -f null -`.quiet().nothrow();
-      if (r2.exitCode !== 0) throw new Error(`ffmpeg (measuring the mix): ${r2.stderr.toString().slice(-1200)}`);
-      gain = loudnormFilter(target, parseLoudnorm(r2.stderr.toString()));
+      const r2 = await run(['ffmpeg', ...det, ...ins, '-filter_complex', `${g.filter};[mixed]loudnorm=I=${target.integrated}:TP=${target.truePeak}:LRA=${target.lra ?? 11}:print_format=json[a]`, '-map', '[a]', '-f', 'null', '-'], { quiet: true, nothrow: true });
+      if (r2.exitCode !== 0) throw new Error(`ffmpeg (measuring the mix): ${r2.stderr.slice(-1200)}`);
+      gain = loudnormFilter(target, parseLoudnorm(r2.stderr));
     }
   } else if (!g.silent) gain = 'alimiter=limit=0.955:level=false';
   const tail = `[mixed]${gain || 'anull'}[a]`;
@@ -188,7 +188,7 @@ async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: Ret
   // (written beside the output and put in place once finished: a failed or stopped mix leaves the previous file)
   // (spawned rather than through the shell: a stopped mix kills its ffmpeg before removing the partial)
   const dest = destOf(output), partial = partialOf(dest);
-  const ff = Bun.spawn(['ffmpeg', ...det, '-loglevel', 'error', '-y', ...ins, ...subs, '-filter_complex', `${g.filter};${tail}`, '-map', '0:v', '-c:v', 'copy', '-map', '[a]', ...box.audio, '-ar', '48000', ...subMap, '-fflags', '+bitexact', '-flags:a', '+bitexact', ...box.flags, partial], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
+  const ff = spawnChild(['ffmpeg', ...det, '-loglevel', 'error', '-y', ...ins, ...subs, '-filter_complex', `${g.filter};${tail}`, '-map', '0:v', '-c:v', 'copy', '-map', '[a]', ...box.audio, '-ar', '48000', ...subMap, '-fflags', '+bitexact', '-flags:a', '+bitexact', ...box.flags, partial], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
   const offAbort = onAbort(() => { ff.kill(9); rmSync(partial, { force: true }); });
   try {
     const [err, code] = await Promise.all([new Response(ff.stderr).text(), ff.exited]);

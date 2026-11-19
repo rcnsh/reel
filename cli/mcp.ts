@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { pageOf, samplesOf, UsageError, type Values } from './args';
+import { run } from './children';
 import { call } from './daemon';
 import { runDiff } from './diff';
 import { cancelJob, jobView, listJobs, MAX_WAIT_S, startJob, waitJob, type JobView } from './jobs';
@@ -92,8 +93,8 @@ const jobOut = ({ started: _s, project: _p, ...v }: JobView) => v;
 
 /** A project tool (narrate, align, analyze, mix) run to completion: its output and exit code. */
 async function tool(name: string, proj: string, args: string[]): Promise<ToolResult> {
-  const p = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), name, '--project', projectDir(proj), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  const r = await run(['bun', path.join(ENGINE, 'cli/reel.ts'), name, '--project', projectDir(proj), ...args], { quiet: true, nothrow: true });
+  const out = r.text(), err = r.stderr, code = r.exitCode;
   return { content: [text(`exit ${code}\n${(out + (err ? `\n${err}` : '')).trim().slice(-6000)}`)], isError: code !== 0 };
 }
 

@@ -2,7 +2,6 @@
 // force-aligned to the audio (Qwen3-ForcedAligner) rather than transcribed; `--method whisper` transcribes
 // with Whisper and matches the words heard to the script instead, for a reading that departs from it. Writes the
 // same files as `reel narrate`: audio/narration.flac, data/words.json, data/audio.json.
-import { $ } from 'bun';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -12,6 +11,7 @@ import { decode, levels, normalize, SR, trimSilence, writeAudio } from './audio-
 import { report, writeNarration, type PlateAudio } from './narration-files';
 import { parseScript, plateWords, type Plate, type TimedWord } from './script';
 import { DEFAULTS, resolveSettings } from './settings';
+import { run } from '../cli/children';
 import { loadConfig } from '../cli/server';
 
 export const ALIGN_HELP = `reel align <recording | folder> [flags]: time narration.txt to a voice recording
@@ -68,7 +68,7 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
   // a recording, high-passed, at -16 LUFS, without the silence at its ends
   const load = async (f: string, k: string) => {
     const o = path.join(work, `${k}.f32.wav`);
-    await $`ffmpeg -nostdin -loglevel error -y -i ${f} -af ${CLEAN} -ac 1 -ar ${SR} -c:a pcm_f32le ${o}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', f, '-af', CLEAN, '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', o]);
     return trimSilence(await normalize(await decode(o), LOUDNESS, path.join(work, k)), SR, -45, 0.05).pcm;
   };
 
@@ -123,13 +123,13 @@ async function transcribe(items: { pcm: Float32Array; script: string }[], work: 
   const jobs = await Promise.all(items.map(async (it, i) => {
     const w48 = path.join(work, `${name}${i}.f32.wav`), w16 = path.join(work, `${name}${i}.wav`);
     await writeAudio(it.pcm, w48);
-    await $`ffmpeg -nostdin -loglevel error -y -i ${w48} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', w48, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', w16]);
     return { audio: w16, out: path.join(work, `${name}${i}.json`), script: it.script };
   }));
   const jf = path.join(work, `${name}-jobs.json`);
   await Bun.write(jf, JSON.stringify(jobs));
-  const r = await $`uv run -q --with faster-whisper==1.2.1 --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${jf}`.nothrow();
-  if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.toString().slice(-1500)}`);
+  const r = await run(['uv', 'run', '-q', '--with', 'faster-whisper==1.2.1', '--with', 'numpy', 'python', path.join(import.meta.dir, 'whisper_words.py'), jf], { stdout: 'inherit', nothrow: true });
+  if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.slice(-1500)}`);
   return jobs.map((j) => joinFigures(JSON.parse(readFileSync(j.out, 'utf8'))));
 }
 

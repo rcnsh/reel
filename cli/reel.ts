@@ -4,8 +4,10 @@
 // folder) and --json (one JSON object on stdout: { ok, errors, logs, warnings, ... }). Exit codes: 0 done,
 // 1 something failed (scene errors included), 2 a bad command line or no project.
 import { readFileSync, rmSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { checkScale, HELP, int, list, num, pageOf, parseCommand, readProps, samplesOf, UsageError, type PageOpts, type Values } from './args';
+import { run, spawnChild } from './children';
 import { ENGINE, projectDir } from './server';
 import type { Req, Result } from './ops';
 
@@ -37,7 +39,14 @@ if (TOOLS[mode]) {
   const help = rest.includes('--help') || rest.includes('-h');
   let project = path.resolve(dir);
   if (!help) try { project = projectDir(dir); } catch (e) { fail((e as Error).message); }
-  const proc = Bun.spawn([...TOOLS[mode]!, ...rest], { stdio: ['inherit', 'inherit', 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
+  const proc = spawnChild([...TOOLS[mode]!, ...rest], { stdio: ['inherit', 'inherit', 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
+  // (reel waits while the tool cleans up after a stop, rather than ending first and having the watchdog cut that
+  // short: the terminal's Ctrl-C and hang-up reach the tool by themselves, a SIGTERM is passed on, and reel gives up
+  // waiting after a few seconds)
+  for (const sig of ['SIGINT', 'SIGHUP', 'SIGTERM'] as const) process.on(sig, () => {
+    if (sig === 'SIGTERM') proc.kill(sig);
+    setTimeout(() => process.exit(128 + os.constants.signals[sig]), 5000).unref();
+  });
   process.exit(await proc.exited);
 }
 
@@ -81,8 +90,10 @@ if (mode === 'init') {
   Object.assign(out, { project, files });
   if (A.narrated) {
     // time the script with a scratch voice, so the project has its words and length before the first render
-    const p = Bun.spawn(['bun', path.join(ENGINE, 'tools/narrate.ts')], { stdio: ['ignore', json ? 'pipe' : 'inherit', json ? 'pipe' : 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
-    if (await p.exited !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` there once the error above is fixed, or \`reel align <recording>\``);
+    const cmd = ['bun', path.join(ENGINE, 'tools/narrate.ts')], env = { ...process.env, REEL_PROJECT: project };
+    // (with --json its output is kept for the error, not printed)
+    const r = json ? await run(cmd, { quiet: true, nothrow: true, env }) : { exitCode: await spawnChild(cmd, { stdio: ['ignore', 'inherit', 'inherit'], env }).exited, stderr: '' };
+    if (r.exitCode !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` there once the error ${json ? 'below' : 'above'} is fixed, or \`reel align <recording>\`${json ? `:\n${r.stderr.trim().slice(-1500)}` : ''}`);
   }
   out.ok = !out.errors.length;
   finish(out, () => {
