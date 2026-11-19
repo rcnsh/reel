@@ -12,7 +12,7 @@ Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a si
 ## Words (`this.ctx.words`, `src.words`)
 
 - `lines[]`: `{ i, text, start, end, words[] }`, each word `{ w, start, end }`. Text comes with typographic punctuation (`don’t`).
-- `words.get('sudden drop')`: the first line containing the text (case-insensitive, straight or curly quotes); throws when none does. `words.get(text, n)` for the n-th. `find(s)`: all such lines.
+- `words.get('sudden drop')`: the first line containing the text (case-insensitive; straight or curly quotes, `...` or `…`, a hyphen or an en or em dash, spaced or not, all match); throws when none does. `words.get(text, n)` for the n-th. `find(s)`: all such lines.
 - `lineAt(t)`, `lastLine(t)`, `nextLine(t)`, `linesIn(t0, t1)`, `wordAt(t)`, `lastWord(t)`, `findWords('word')`.
 - `Words.wordProgress(word, t)` (0..1 through a word), `Words.lineCharProgress(line, t)` (characters said so far: for letter-by-letter reveals and wipes).
 - Empty (no lines) in a project without `data/words.json`.
@@ -23,7 +23,7 @@ Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a si
 - `beatAt(t)` (continuous beat index), `barAt(t)`, `timeOfBeat(i)`, `nearestBeat(t)`, `beatBefore(t)` (the beat at or before t: a cut that never lands after a word), `nearestDownbeat(t)`, `section(t)`.
 - `env(name, t)` for `rms low mid high vocal drums bass other` (0..1), `envPeak(name, t, w)`, `hit(kind, t, halfLife)` (decaying pulses from `kick snare hat vocal` onsets), `events(kind, t0, t1)`.
 - Every frame carries `f.a` (`rms low mid high vocal drums bass other kick snare hat vonset`), `f.beat`, `f.bar`, `f.beatPhase`, `f.barPhase`.
-- Narration timing gives a silent grid and empty envelopes (`f.a` reads 0). A project without `data/audio.json` gets a silent 100 BPM grid and no track.
+- Narration timing gives a silent grid and empty envelopes (`f.a` reads 0). A project without `data/audio.json` gets a silent 100 BPM grid from 0 and no track; the beat helpers then answer on that grid (downbeats every 4th beat), as they do on `bpm` from the one beat when an analysis has a single beat.
 
 ## Music
 
@@ -43,7 +43,7 @@ A scene that wants a sound calls `cue(kind, t)` in `init()` (a pen tick at each 
 }
 ```
 
-Sound files are the project's, in `audio/`, or the engine's bundled cue sounds by name: `tick`, `click`, `pop`, `whoosh`, `swell`, `impact` (`"file": "whoosh"`); a `cue('whoosh', t)` with no entry in `mix.json` plays the bundled whoosh. `music` runs from the start of clip `from` to the start of clip `to` (without them, from the start of the video and to its end), looped, ducked under the track. `"loudness": { "integrated": -14, "truePeak": -1 }` is the default target (two-pass EBU R128), `false` turns it off. `reel video --mix` renders and mixes in one go; to re-mix a render, `reel events` writes `data/cues.json` (the clips and every cue), then `reel mix <render.mp4> <out.mp4>`. A partial render mixes with the same `--from`. The track comes from its lossless file, so the sound is encoded once.
+Sound files are the project's, in `audio/`, or the engine's bundled cue sounds by name: `tick`, `click`, `pop`, `whoosh`, `swell`, `impact` (`"file": "whoosh"`); a `cue('whoosh', t)` with no entry in `mix.json` plays the bundled whoosh. `music` runs from the start of clip `from` (or from `at` seconds) to the start of clip `to` (without them, from the start of the video and to its end), looped (`"loop": false` plays it once), ducked under the track (`"duck": { "threshold": -20, "ratio": 4, "attack": 80, "release": 600 }` sets it: threshold in dB, by default about -30.5, the others as shown; `false` for none); a partial render hears it from where it has got to. `"loudness": { "integrated": -14, "truePeak": -1 }` is the default target (two-pass EBU R128), `false` turns it off. `reel video --mix` renders and mixes in one go; to re-mix a render, `reel events` writes `data/cues.json` (the clips and every cue), then `reel mix <render.mp4> <out.mp4>`. A partial render mixes with the same `--from`. The track comes from its lossless file, so the sound is encoded once.
 
 A sound that belongs to the edit rather than to a scene goes in the config's `sounds`, as data or a function of the sources: `sounds: (src) => [{ file: 'audio/rain.flac', at: src.words.get('it rained').start, duration: 8, loop: true, db: -12, fadeIn: 1 }]`. Each takes `file` (a project path, a video whose sound to use, or a bundled name), `at`, and optionally `from` (seconds into the file), `duration`, `loop`, `speed` (0.1 to 10, pitch kept), `db`, `fadeIn` and `fadeOut`. A scene can place one the same way with `sound({ … })` in `init()`. A file that is missing is a scene error that `reel check` reports.
 

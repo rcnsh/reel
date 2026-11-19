@@ -31,7 +31,9 @@ reuses; each exits 1 on a scene error)
                              changed                    [--tol 0] [--threshold 0] [--out <diff.png>]
   events                     write the sound-mix cues (the timeline and every cue() of the scenes)
                              [--out data/cues.json]
-  perf    --from 0 --to 5    milliseconds per frame: rendering and the export's pixel readback, apart
+  perf    --from 0 --to 5    milliseconds per frame, apart: render (the CPU side; with --samples auto
+                             the GPU's too, as the sampler waits for it), gpu (the GPU work queued
+                             after that) and the export's pixel readback
                              [--pixels rgb8|yuv420|rgba8|rgb16|rgba16|linear: the readback to time]
   gpu                        the GPU Chrome renders with and the GL backend (software: SwiftShader)
 
@@ -95,7 +97,9 @@ Working on a project
                              folder (used whenever CHROME_PATH is unset)
   chrome path                the Chrome binary renders would use, and its version
   daemon status              the warm renderers running, per project
-  daemon stop                stop the project's warm renderer          [--all: every project's]
+  daemon stop                stop the project's warm renderer          [--all: every project's, and sweep
+                                                                       dead exports' spools and Vite's
+                                                                       stale optimizer folders]
   golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
@@ -115,7 +119,8 @@ Working on a project
 
 Flags for every command that renders
   --project <folder>   the project (default: the current folder)
-  --only a,b           load only these clips (faster; other clips render as nothing)
+  --only a,b           load only these clips (faster; other clips render as nothing, and
+                       check judges only these clips' frames)
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
   --shutter 0.5        the share of the frame time the sub-frames span

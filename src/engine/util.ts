@@ -126,9 +126,9 @@ export function cubicBezier(x1: number, y1: number, x2: number, y2: number): (t:
   };
 }
 
-/** Clamped eased progress of x through [a, b]. */
+/** Clamped eased progress of x through [a, b]; for an empty range (a === b), a step: 0 before a, 1 from a on. */
 export const prog = (x: number, a: number, b: number, fn: (t: number) => number = ease.linear) =>
-  fn(clamp((x - a) / (b - a)));
+  fn(a === b ? (x < a ? 0 : 1) : clamp((x - a) / (b - a)));
 
 export type Extrapolate = 'clamp' | 'extend' | 'identity';
 /**
@@ -307,14 +307,21 @@ export function fbm2(x: number, y: number, oct = 4, seed = 0) {
 
 // ---- keyframes ----
 export type Key = [time: number, value: number, easeFn?: (t: number) => number];
-/** Piecewise interpolation through keyframes; the ease on key i shapes the segment ending at key i. */
+/**
+ * Piecewise interpolation through keyframes; the ease on key i shapes the segment ending at key i. Keys go in time
+ * order (two at one time make a step); out of order is an error.
+ */
 export function keys(t: number, ks: Key[]): number {
   if (ks.length === 0) return 0;
   if (t <= ks[0]![0]) return ks[0]![1];
   for (let i = 1; i < ks.length; i++) {
-    const k = ks[i]!;
+    const k = ks[i]!, p = ks[i - 1]!;
+    // (checked as the walk passes: every key it reads is in order, so the answer is right whenever it returns)
+    if (!(k[0] >= p[0])) {
+      const bad = !Number.isFinite(k[0]) ? i : !Number.isFinite(p[0]) ? i - 1 : -1;
+      throw new Error(bad >= 0 ? `keys: key ${bad} has no time (${ks[bad]![0]})` : `keys: key ${i} at ${k[0]} comes before key ${i - 1} at ${p[0]}: keys go in time order`);
+    }
     if (t <= k[0]) {
-      const p = ks[i - 1]!;
       const u = (t - p[0]) / (k[0] - p[0]);
       return lerp(p[1], k[1], (k[2] ?? ease.inOutCubic)(u));
     }

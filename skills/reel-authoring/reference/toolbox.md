@@ -48,9 +48,9 @@ Easing and motion, every one a pure function of time:
 
 - `ease.*`: `linear` and the easings.net set, `in`/`out`/`inOut` × `Sine Quad Cubic Quart Quint Expo Circ Back Elastic Bounce` (`ease.outBack(t, s)` and `inBack`/`inOutBack` take the overshoot). Back and Elastic leave 0..1 on the way. Circ, and Expo and Elastic at their ends, hold 0 and 1 outside 0..1, so under `interpolate`'s `'extend'` they stop at the end value.
 - `cubicBezier(x1, y1, x2, y2)`: an easing from CSS's `cubic-bezier()`, solved as browsers do (matches Chrome to 1e-6), so a curve from a design tool or a stylesheet moves the same here. `cubicBezier(0.25, 0.1, 0.25, 1)` is CSS `ease`. x1 and x2 must be in 0..1.
-- `prog(x, a, b, ease)`: clamped eased progress of x through [a, b].
+- `prog(x, a, b, ease)`: clamped eased progress of x through [a, b] (a step at a when a === b).
 - `interpolate(x, [in…], [out…], { easing?, extrapolateLeft?, extrapolateRight? })`: piecewise-linear map (Remotion's): `interpolate(f.lt, [0, 0.4, 2, 2.4], [0, 1, 1, 0])` fades in, holds and out. `input` strictly increasing; `easing` shapes each segment. Outside the input: `'extend'` (default) continues the end segment, `'clamp'` holds the end value, `'identity'` returns x.
-- `keys(t, [[t0, v0], [t1, v1, ease], …])`: keyframes (the ease on a key shapes the segment ending there).
+- `keys(t, [[t0, v0], [t1, v1, ease], …])`: keyframes in time order, two at one time for a step, out of order throws (the ease on a key shapes the segment ending there).
 - `spring({ t, mass = 1, stiffness = 100, damping = 10, from = 0, to = 1, delay = 0, duration? })`: Remotion's spring in seconds, the exact solution rather than a simulation. Damping under `2·sqrt(stiffness·mass)` (20 with the defaults) overshoots and rings, at it settles fastest without overshoot, above it creeps in. `duration` stretches time so it settles (within 0.5%) exactly then; `springSettleTime(mass, stiffness, damping)` is its natural settling time.
 - `springStep(t, freq, damping)`: a 0 to 1 step ringing at `freq` Hz; `damping` ≥ 0 sets its decay: under 1 it overshoots, at 1 and over it does not. It leaves 0 already moving (a kick); `spring` starts at rest.
 
