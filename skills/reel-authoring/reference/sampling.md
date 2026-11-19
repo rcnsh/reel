@@ -19,7 +19,30 @@ Simulation (particles integrated over time, feedback buffers) sets `stateful = t
 
 ## Transitions
 
-Clips overlapping on one track make a transition over the overlap, named by the incoming clip's `transition` in the config: `crossfade` (the default), `wipe` (an edge travels across, `softness` its blur as a share of the frame), `slide` (the incoming clip pushes the outgoing one off), `zoom` (the outgoing clip grows as it fades into the incoming one), `dip` (through `color`, a palette key or `#rrggbb`, default `bg` on track 0 and transparent on the tracks above, so a title dipping out does not cover what is below it); `direction` (`left`, the default, `right`, `up`, `down`) is the way a wipe's edge or a slide moves. Each is a pure function of the overlap's progress, so it gets motion blur. A scene with `handlesTransition = true` draws the transition itself: `f.under` is the outgoing clip's texture this frame and `f.tin` runs 0 to 1 over the overlap (`f.tout` likewise into the next clip). Most cuts should be hard cuts on a beat or a word: clips whose windows touch.
+Clips overlapping on one track make a transition over the overlap, named by the incoming clip's `transition` in the config. It lasts exactly as long as the overlap. The kinds, with the options each takes (any other key is an error):
+
+| kind | what it does | options |
+|---|---|---|
+| `crossfade` (default) | mixes the two | |
+| `wipe` | an edge travels across | `direction`, `softness` (share of the frame, default 0.08) |
+| `slide` | the incoming clip pushes the outgoing one off | `direction` |
+| `whip` | a slide with `inOutExpo` timing: almost all the motion in the middle few frames, which the export's motion blur turns into a streak (a preview or a 1-sample still shows a crisp push; keep the overlap short, 0.2 to 0.4 s, and do not cap the clip's `maxSamples`) | `direction` |
+| `zoom` | the outgoing clip grows as it fades into the incoming one | |
+| `dip` | through a colour and out | `color`: palette key or `#rrggbb` (default `bg` on track 0, transparent on the tracks above, so a title dipping out does not cover what is below it) |
+| `iris` | a circle opens from `center` onto the incoming clip | `center: [x, y]` (shares of the frame from its top left, default the middle), `softness` (share of the full radius, default 0.02), `close: true` (the outgoing clip shrinks into the circle instead) |
+| `clock` | a hand sweeps round `center` from 12 o'clock | `center`, `softness` (share of a turn, default 0.01), `clockwise: false` |
+| `flash` | cuts at the middle through the theme's light colour, overexposed so it burns to white and blooms | |
+
+`direction` (`left`, the default, `right`, `up`, `down`) is the way the edge or the clips move. Every kind takes `ease`, a name from the `ease` set (`'outQuad'`, `'inOutQuart'`, `'outBack'`, …) the overlap's progress runs through; the default is `linear` for crossfade, dip and flash, `inOutExpo` for whip, `inOutCubic` for the rest. Each is a pure function of the overlap's progress, so it gets motion blur.
+
+A transition of your own is `{ glsl, uniforms?, ease? }` (no `kind`). `glsl` is either a whole `vec4 transition(vec2 uv) { … }` (the [gl-transitions](https://gl-transitions.com) shape: theirs paste in, with their uniforms' values given in `uniforms`), or that function's body (with `return`), or one expression. In scope: `getFromColor(uv)` (the outgoing clip; transparent outside the frame), `getToColor(uv)` (the incoming one), `progress` (eased, 0 to 1; `p` in a body or expression), `ratio` (width over height), the palette's `C_<KEY>`, and each of `uniforms` (a number is a `float`, an array of 2 to 4 a `vec2`–`vec4`; declared for you unless the source declares it, when it may also be an `int`, `ivec`, `bool` or `bvec` of the same size). The engine's other GLSL helpers (`PI`, `luma`, `hash12`, …) are not in scope, so a pasted shader's own do not clash: define what you use. A uniform the source declares and `uniforms` leaves out is 0. Colours are linear and premultiplied. Each distinct source compiles once, when the video loads; one that does not compile is a load error naming the clip, `[<id>: its transition's glsl] shader failed to compile: …`, with the offending line.
+
+```ts
+{ id: 'next', scene: …, start: 9.4, end: 14, transition: { kind: 'iris', center: [0.7, 0.4], ease: 'outQuart' } },
+{ id: 'last', scene: …, start: 13.4, end: 18, transition: { glsl: 'mix(getFromColor(uv), getToColor(uv), step(fract(uv.x * n), p))', uniforms: { n: 8 } } },
+```
+
+A scene with `handlesTransition = true` draws the transition itself: `f.under` is the outgoing clip's texture this frame and `f.tin` runs 0 to 1 over the overlap (`f.tout` likewise into the next clip). Most cuts should be hard cuts on a beat or a word: clips whose windows touch.
 
 ## Jitter across sub-frames
 
