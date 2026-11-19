@@ -6,7 +6,8 @@ import type { SceneClass } from './engine/scene';
 import type { PostParams } from './engine/post';
 import type { Words } from './engine/words';
 import type { AudioData } from './engine/audio';
-import type { BlendMode } from './engine/gl';
+import type { Grade, Matte, MatteMode, TrackBlend, TrackSettings } from './engine/tracks';
+export type { Grade, Matte, MatteMode, TrackBlend, TrackSettings } from './engine/tracks';
 import type { Theme, ThemeName } from './themes';
 import type { CheckRule } from './engine/report';
 import type { Transition, TransitionKind } from './engine/transitions';
@@ -38,12 +39,27 @@ export interface Clip {
    */
   transition?: TransitionKind | Transition;
   /**
-   * How the clip's track is drawn over the tracks below (default 'normal'), and how strongly (default 1; under
-   * the lowest track is black). Across a transition the opacity fades from the outgoing clip's to the incoming
-   * one's; the blend is the incoming clip's.
+   * How the clip's track is drawn over the tracks below (default the track's, else 'normal'), and how strongly
+   * (default the track's, else 1; under the lowest track is black). Across a transition the opacity fades from
+   * the outgoing clip's to the incoming one's; the blend is the incoming clip's. 'normal', 'add', 'screen',
+   * 'multiply', 'max', and the modes that read the tracks below: 'overlay', 'soft-light', 'hard-light'
+   * (on display values: light above 1 is cut to 1), 'difference', 'color-dodge'.
    */
-  blend?: BlendMode;
+  blend?: TrackBlend;
   opacity?: number;
+  /**
+   * A grade of the clip's whole track while the clip is on it (over the track's own grade in the config's
+   * `tracks`, field by field): exposure, saturation, contrast, tint, fade, flash, blur. Data, or a function of
+   * the clip's time for an animated one; the scene's render() may also return `{ grade }`, which goes over both.
+   * Across a transition the grade moves from the outgoing clip's to the incoming one's.
+   */
+  grade?: Grade | ((f: { t: number; lt: number; p: number }) => Grade);
+  /**
+   * Cut the clip's track by the next track above it (or below: { mode, from: 'below' }) while the clip is on top
+   * of its track: 'alpha' shows it where the matte track has coverage, 'luma' where it is bright, '-inverted'
+   * where it has none. The matte track is not drawn (nor its post overrides) while it is one.
+   */
+  matte?: MatteMode | Matte;
   /** Default post overrides while the clip is on screen (the scene's own overrides win). */
   post?: Partial<PostParams>;
   /** Free-form values handed to the scene as ctx.params (one scene module can serve several clips). */
@@ -129,6 +145,11 @@ export interface VideoConfig {
   audio?: string | false;
   /** How narration.txt is voiced and spaced (reel narrate, reel align). Plain data. */
   narration?: NarrationSettings;
+  /**
+   * Settings per track, by track number: `{ 1: { grade: { saturation: 0 }, blend: 'overlay' }, 2: { matte: 'alpha' } }`.
+   * `blend`, `opacity`, `grade` and `matte` as on a clip; a clip's own value goes over its track's. Plain data.
+   */
+  tracks?: Record<number, TrackSettings>;
   /** The edit: every clip of the video. Called once the sources are loaded. */
   timeline(src: Sources): Clip[];
   /**

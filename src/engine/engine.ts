@@ -17,6 +17,7 @@ import { htmlLayers } from './html';
 import { idleTransitions, TransitionPass, transitionDisplaces, transitionOf, transitionWeights, type Transition } from './transitions';
 import { maskSubFrames } from './tilemask';
 import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
+import { BlendPass, TrackFx, blendOf, gradeOf, isIdentityGrade, isShaderBlend, lerpGrade, matteOf, matteSource, opacityOf, resolveGrade, trackSettingsOf, type Grade, type GradeValues, type MatteMode, type TrackBlend, type TrackSettings } from './tracks';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
 export type TimelineEntry = Clip;
@@ -135,6 +136,22 @@ export class Engine {
   private linearTex: THREE.Texture | null = null;
   private blit: FSPass;
   private transition = new TransitionPass();
+  /**
+   * Per track, the config's settings. Mattes resolved once (mode and the track read): each clip's, each track's,
+   * and the tracks a track's own matte makes mattes for the whole video (clips' mattes make theirs only while on top).
+   */
+  private trackSettings = new Map<number, TrackSettings>();
+  private clipMattes = new Map<string, { mode: MatteMode; src: number }>();
+  private trackMattes = new Map<number, { mode: MatteMode; src: number }>();
+  private staticMattes = new Set<number>();
+  /** A track's grade and matte, drawn into a target per track (made when first needed; none of them masked). */
+  private trackFx = new TrackFx();
+  private fxRTs = new Map<number, THREE.WebGLRenderTarget>();
+  /** The blend modes that read the stack below draw into the other of two stack targets. */
+  private blendPass = new BlendPass();
+  private stackRT2: THREE.WebGLRenderTarget | null = null;
+  /** The matte of a track whose matte track has nothing on screen: transparent, black. */
+  private emptyMatte = (() => { const t = new THREE.DataTexture(new Uint8Array(4), 1, 1); t.needsUpdate = true; return t; })();
   /** Each clip's transition, checked once when the timeline loads (drawing looks it up every sub-frame). */
   private transitions = new WeakMap<TimelineEntry, Transition>();
   private transitionAt(e: TimelineEntry) {
@@ -459,8 +476,13 @@ export class Engine {
       const ex = e.check?.exempt;
       if (ex !== undefined && ex !== true && !(Array.isArray(ex) && ex.every((r) => CHECK_RULES.includes(r))))
         throw new Error(`timeline: clip '${e.id}' check.exempt ${JSON.stringify(ex)}: expected true or a list of ${CHECK_RULES.join(', ')}`);
-      this.transitions.set(e, transitionOf(e.transition, `timeline: clip '${e.id}'`));
+      const where = `timeline: clip '${e.id}'`;
+      this.transitions.set(e, transitionOf(e.transition, where));
+      if (e.blend !== undefined) blendOf(e.blend, where);
+      if (e.opacity !== undefined) opacityOf(e.opacity, where);
+      if (e.grade !== undefined && typeof e.grade !== 'function') gradeOf(e.grade, where);
     }
+    this.checkTracks();
     this.warnings = idleTransitions(this.timeline, 1 / FPS);
     for (const w of this.warnings) console.warn(`timeline: ${w.message}`);
     this._duration = c.duration ?? (this.audio.duration > 0 ? this.audio.duration : Math.max(0, ...this.timeline.map((e) => e.end)));
@@ -500,6 +522,30 @@ export class Engine {
     for (const [id, msg] of await htmlLayers.settle()) this.fail(id, msg);
     htmlLayers.loading(false);
     await this.checkSounds();
+  }
+
+  /**
+   * The config's `tracks` and every matte, checked and resolved: each matte reads a track that exists (the theme
+   * overlay's aside), and the tracks' own mattes do not go round in a circle.
+   */
+  private checkTracks() {
+    this.trackSettings = trackSettingsOf(this.config.tracks);
+    const nums = [...new Set(this.timeline.map((e) => e.track ?? 0))];
+    const resolve = (tn: number, m: unknown, where: string) => { const r = matteOf(m, where); return { mode: r.mode, src: matteSource(tn, r, nums, where) }; };
+    for (const e of this.timeline) if (e.matte !== undefined) this.clipMattes.set(e.id, resolve(e.track ?? 0, e.matte, `timeline: clip '${e.id}'`));
+    for (const [tn, ts] of this.trackSettings) {
+      if (!nums.includes(tn)) throw new Error(`tracks[${tn}]: no clip is on track ${tn} (clips are on ${[...nums].sort((a, b) => a - b).join(', ')})`);
+      if (ts.matte !== undefined) this.trackMattes.set(tn, resolve(tn, ts.matte, `tracks[${tn}]`));
+    }
+    for (const tn of this.trackMattes.keys()) {
+      const seen = [tn];
+      for (let x = this.trackMattes.get(tn); x; x = this.trackMattes.get(x.src)) {
+        const again = seen.includes(x.src);
+        seen.push(x.src);
+        if (again) throw new Error(`tracks: the mattes go round in a circle (track ${seen.join(' is matted by track ')})`);
+      }
+    }
+    this.staticMattes = new Set([...this.trackMattes.values()].map((m) => m.src));
   }
 
   /** Sounds on the timeline must name a file of the project or a bundled sound: one that is missing is a load error. */
@@ -841,34 +887,94 @@ export class Engine {
     const r = this.renderer;
     const active = this.timeline.filter((e) => t >= e.start && t < e.end);
     const tracks = [...new Set(active.map((e) => e.track ?? 0))].sort((a, b) => a - b);
-    let post: PostParams = { ...DEFAULT_POST };
-    let outTex: THREE.Texture | null = null;
-    tracks.forEach((tn, ti) => {
-      const clips = active.filter((e) => (e.track ?? 0) === tn).sort((a, b) => a.start - b.start);
+    const clipsOf = new Map(tracks.map((tn) => [tn, active.filter((e) => (e.track ?? 0) === tn).sort((a, b) => a.start - b.start)]));
+    // a track's matte is its top clip's, else the track's; the tracks read as mattes now are not drawn in the stack
+    const matteOfTrack = (tn: number) => { const c = clipsOf.get(tn)!; return this.clipMattes.get(c[c.length - 1]!.id) ?? this.trackMattes.get(tn); };
+    const mattes = new Set(this.staticMattes);
+    for (const tn of tracks) { const m = matteOfTrack(tn); if (m) mattes.add(m.src); }
+    // each track drawn once, when it is stacked or when a track it is the matte of needs it
+    type Drawn = { tex: THREE.Texture; mode: TrackBlend; opacity: number; matted: boolean; post: PostOverrides };
+    const drawn = new Map<number, Drawn>();
+    const drawing = new Set<number>();
+    const draw = (tn: number): Drawn => {
+      const had = drawn.get(tn);
+      if (had) return had;
+      drawing.add(tn);
+      const ti = tracks.indexOf(tn);
+      const clips = clipsOf.get(tn)!;
       const res = this.compositeTrack(clips, t, dt, seeked, this.trackRTs[ti % this.trackRTs.length]!);
-      post = { ...post, ...res.post };
-      // the track's blend is its latest clip's; its opacity fades from clip to clip across a transition
+      const ts = this.trackSettings.get(tn) ?? {};
+      // the track's blend and matte are its latest clip's (else the track's); its opacity and grade move from clip
+      // to clip across a transition
       const top = clips[clips.length - 1]!, before = clips[clips.length - 2];
-      const mode = top.blend ?? 'normal';
-      let opacity = top.opacity ?? 1;
-      if (before) opacity = (before.opacity ?? 1) + (opacity - (before.opacity ?? 1)) * Math.min(1, (t - top.start) / Math.max(1e-3, before.end - top.start));
-      // (what each clip reported shows at its share of the transition and the track's opacity)
-      clips.forEach((e, i) => boxes.fade(e.id, res.weights[i]! * opacity));
-      // (the lowest track goes into the stack only when it is blended or something is drawn over it)
-      if (ti === 0 && mode === 'normal' && opacity === 1) { outTex = res.outTex; return; }
-      if (ti === 0) clearRT(r, this.stackRT, [0, 0, 0], ALPHA ? 0 : 1);
-      else if (outTex !== this.stackRT.texture) this.comp.draw(r, outTex!, this.stackRT, { mode: 'replace', premult: false });
-      this.comp.draw(r, res.outTex, this.stackRT, { mode, opacity, premult: false });
-      outTex = this.stackRT.texture;
-    });
+      const mode = top.blend ?? ts.blend ?? 'normal';
+      const k = before ? Math.min(1, (t - top.start) / Math.max(1e-3, before.end - top.start)) : 1;
+      let opacity = top.opacity ?? ts.opacity ?? 1;
+      if (before) { const o0 = before.opacity ?? ts.opacity ?? 1; opacity = o0 + (opacity - o0) * k; }
+      let g = this.clipGrade(top, t, ts.grade, res.grades[clips.length - 1]);
+      if (before) g = lerpGrade(this.clipGrade(before, t, ts.grade, res.grades[clips.length - 2]), g, k);
+      const graded = !isIdentityGrade(g);
+      const ms = matteOfTrack(tn);
+      let matte: { tex: THREE.Texture; mode: MatteMode } | null = null;
+      if (ms) {
+        let tex: THREE.Texture = this.emptyMatte;
+        if (drawing.has(ms.src)) {
+          const rec = this.loaded.get(top.id);
+          if (rec) this.renderFailed(rec, `[${top.id}] at ${t.toFixed(3)} s: the mattes of tracks ${[...drawing].join(', ')} go round in a circle`);
+        } else if (tracks.includes(ms.src)) tex = draw(ms.src).tex;
+        matte = { mode: ms.mode, tex };
+      }
+      let tex = res.outTex;
+      if (graded || matte) {
+        // a blur reads the pixels around each one: a masked sub-frame would read tiles drawn by an earlier
+        // sub-frame, so its sub-frames are drawn unmasked (as for a scene's own depth test)
+        if (graded && g.blur > 0 && this.masking) this.depthSeen = true;
+        let rt = this.fxRTs.get(tn);
+        if (!rt) { rt = makeRT(W, H, { depthBuffer: false }); this.fxRTs.set(tn, rt); }
+        this.trackFx.draw(r, tex, rt, graded ? g : null, matte, tn > 0 || ALPHA);
+        tex = rt.texture;
+      }
+      // (what each clip reported shows at its share of the transition, the track's opacity and its fade; a matte
+      // track's not at all)
+      clips.forEach((e, i) => boxes.fade(e.id, mattes.has(tn) ? 0 : res.weights[i]! * opacity * (1 - g.fade)));
+      const d: Drawn = { tex, mode, opacity, matted: !!matte, post: res.post };
+      drawn.set(tn, d);
+      drawing.delete(tn);
+      return d;
+    };
+    let outTex: THREE.Texture | null = null;
+    let first = true;
+    for (const tn of tracks) {
+      // (a matte track's scenes still render every frame they are on, whether or not a track reads them now)
+      if (mattes.has(tn)) { draw(tn); continue; }
+      const d = draw(tn);
+      // (the lowest track goes into the stack only when it is blended, matted or something is drawn over it)
+      if (first && d.mode === 'normal' && d.opacity === 1 && !d.matted) { outTex = d.tex; first = false; continue; }
+      let into = this.stackRT;
+      if (first) clearRT(r, into, [0, 0, 0], ALPHA ? 0 : 1);
+      else if (outTex === this.stackRT2?.texture) into = this.stackRT2;
+      else if (outTex !== this.stackRT.texture) this.comp.draw(r, outTex!, into, { mode: 'replace', premult: false });
+      first = false;
+      if (isShaderBlend(d.mode)) {
+        const dst = into === this.stackRT ? (this.stackRT2 ??= makeRT(W, H, { depthBuffer: false })) : this.stackRT;
+        this.blendPass.draw(r, into.texture, d.tex, dst, d.mode, d.opacity);
+        into = dst;
+      } else this.comp.draw(r, d.tex, into, { mode: d.mode, opacity: d.opacity, premult: false });
+      outTex = into.texture;
+    }
     if (!outTex) { clearRT(r, this.stackRT, [0, 0, 0], ALPHA ? 0 : 1); outTex = this.stackRT.texture; }
+    // (post overrides from every track shown; a matte track's are not)
+    let post: PostParams = { ...DEFAULT_POST };
+    for (const tn of tracks) { const d = drawn.get(tn); if (d && !mattes.has(tn)) post = { ...post, ...d.post }; }
     return { outTex, post };
   }
 
   /** One track at t: its active clips in start order, the later ones transitioning in over the earlier. */
-  private compositeTrack(active: TimelineEntry[], t: number, dt: number, seeked: boolean, rt3: TrackRTs): { outTex: THREE.Texture; post: PostOverrides; weights: number[] } {
+  private compositeTrack(active: TimelineEntry[], t: number, dt: number, seeked: boolean, rt3: TrackRTs): { outTex: THREE.Texture; post: PostOverrides; weights: number[]; grades: (Grade | undefined)[] } {
     const r = this.renderer;
     let post: PostOverrides = {};
+    // the grade each clip's scene returned for its track
+    const grades: (Grade | undefined)[] = active.map(() => undefined);
     // each clip's share of the track's picture (1, unless crossfades mix it with the clips after it)
     const weights = active.map(() => 1);
     let under: THREE.Texture | null = null;
@@ -913,7 +1019,11 @@ export class Engine {
       }
       this.drawing = '';
       rec.lastT = t;
-      post = { ...post, ...(e.post ?? {}), ...(ov ?? {}) };
+      const { grade: sg, ...po } = ov ?? {};
+      if (sg !== undefined) {
+        try { grades[idx] = gradeOf(sg, `[${e.id}] render() returned a`); } catch (err) { this.renderFailed(rec, String((err as Error).message)); }
+      }
+      post = { ...post, ...(e.post ?? {}), ...po };
       if (idx > 0 && !s.handlesTransition && under) {
         // the clip's transition from the previous clip over the overlap (a crossfade unless it says otherwise)
         const tr = this.transitionAt(e);
@@ -929,7 +1039,20 @@ export class Engine {
       } else outTex = rt.texture;
       under = outTex;
     });
-    return { outTex, post, weights };
+    return { outTex, post, weights, grades };
+  }
+
+  /** A clip's grade of its track at t: the track's, the clip's (data or a function of its time), the scene's. */
+  private clipGrade(e: TimelineEntry, t: number, track: Grade | undefined, scene: Grade | undefined): GradeValues {
+    let g = e.grade;
+    if (typeof g === 'function') {
+      try { g = gradeOf(g({ t, lt: t - e.start, p: (t - e.start) / (e.end - e.start) }), `clip '${e.id}' at ${t.toFixed(3)} s: its grade function returned a`); } catch (err) {
+        const rec = this.loaded.get(e.id);
+        if (rec) this.renderFailed(rec, `[${e.id}] ${String((err as Error).message)}`);
+        g = undefined;
+      }
+    }
+    return resolveGrade(track, g, scene);
   }
 
   /** RGBA8 pixels of the last rendered frame (bottom-up rows), PW x PH. */

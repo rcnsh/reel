@@ -27,6 +27,15 @@ export const HEX: Readonly<Record<PaletteKey, string>> = THEME.palette;
 
 const missing = (key: string) => new Error(`palette: the ${THEME.name} theme has no '${key}' (it has ${Object.keys(HEX).join(', ')})`);
 
+/** Whether `c` names a colour: '#rrggbb' or a key of the theme's palette. */
+export function isColor(c: unknown): c is string {
+  return typeof c === 'string' && (/^#[0-9a-f]{6}$/i.test(c) || Object.prototype.hasOwnProperty.call(HEX, c));
+}
+/** A colour named as '#rrggbb' or a palette key, linear. */
+export function colorLinear(c: string): [number, number, number] {
+  return hexToLinear(c.startsWith('#') ? c : HEX[c]!);
+}
+
 /** Linear RGB triplets for GL uniforms (a key the theme lacks throws). */
 export const LIN: Readonly<Record<PaletteKey, [number, number, number]>> = new Proxy(
   Object.fromEntries(Object.entries(HEX).map(([k, v]) => [k, hexToLinear(v)])) as Record<PaletteKey, [number, number, number]>,
