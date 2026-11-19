@@ -124,8 +124,10 @@ export interface ClipSpan { id: string; start: number; end: number; track: numbe
 /**
  * Frame times to sample in [from, to): every `step` seconds, plus frames bunched at every clip's start and end
  * (its first and last frame always), where cuts, fades and entrances go wrong. Each time is a frame's time.
+ * With `only` (the clips loaded, as `--only`), just those clips' frames: the rest of the video draws nothing.
  */
-export function checkTimes(clips: ClipSpan[], duration: number, fps: number, from = 0, to = duration, step = 0.5): number[] {
+export function checkTimes(clips: ClipSpan[], duration: number, fps: number, from = 0, to = duration, step = 0.5, only?: readonly string[]): number[] {
+  if (only) clips = clips.filter((c) => only.includes(c.id));
   const last = Math.ceil(Math.min(to, duration) * fps - 1e-6) - 1, first = Math.ceil(from * fps - 1e-6);
   const frames = new Set<number>();
   for (let t = from; t < to; t += step) frames.add(Math.round(t * fps));
@@ -135,7 +137,8 @@ export function checkTimes(clips: ClipSpan[], duration: number, fps: number, fro
     for (const k of [0, 1, 3, 8, 15]) { frames.add(Math.min(b, a + k)); frames.add(Math.max(a, b - k)); }
     for (const s of [0.25, 0.5]) { frames.add(Math.min(b, a + Math.round(s * fps))); frames.add(Math.max(a, b - Math.round(s * fps))); }
   }
-  return [...frames].filter((f) => f >= first && f <= last).sort((x, y) => x - y).map((f) => f / fps);
+  const shown = (f: number) => !only || clips.some((c) => f >= Math.ceil(c.start * fps - 1e-6) && f < Math.ceil(c.end * fps - 1e-6));
+  return [...frames].filter((f) => f >= first && f <= last && shown(f)).sort((x, y) => x - y).map((f) => f / fps);
 }
 
 // ---- findings ----
@@ -212,6 +215,8 @@ export interface CheckOpts {
   palette: Record<string, string>;
   /** Timeline problems the page found while loading, by clip (a transition with nothing to overlap). */
   warnings?: { clip: string; message: string }[];
+  /** The clips loaded (`--only`): the others draw nothing, so they are left out of every finding. */
+  only?: readonly string[];
 }
 
 const RANK: Record<Severity, number> = { error: 0, warning: 1, info: 2 };
@@ -220,6 +225,8 @@ const quote = (s?: string) => (s ? `'${s.length > 48 ? s.slice(0, 47) + '…' : 
 
 /** Turn sampled frames into findings, one per problem (frames showing the same problem are merged). */
 export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
+  const only = o.only;
+  if (only) samples = samples.map((s) => ({ ...s, clips: s.clips.filter((c) => c === 'overlay' || only.includes(c)) }));
   const exemptClip = new Map(o.clips.map((c) => [c.id, c.exempt]));
   const exempt = (rule: CheckRule, clip: string, box?: { exempt?: CheckRule[] | true }) => {
     const c = exemptClip.get(clip), b = box?.exempt;
@@ -341,9 +348,17 @@ export function findingsOf(samples: Sample[], o: CheckOpts): Finding[] {
   }
 
   // frames that do not change for too long
+  // (with --only, a run ends at a stretch no loaded clip covers: it was not sampled)
+  const spans: [number, number][] = [];
+  if (only) for (const c of o.clips.filter((c) => only.includes(c.id)).sort((x, y) => x.start - y.start)) {
+    const last = spans.at(-1);
+    if (last && c.start <= last[1]) last[1] = Math.max(last[1], c.end); else spans.push([c.start, c.end]);
+  }
+  // (a clip's first frame can sit a hair before its start: checkTimes rounds starts to frames with 1e-6 of slack)
+  const gap = (t0: number, t1: number) => !!only && !spans.some(([a, b]) => t0 >= a - 1e-6 && t1 < b);
   for (let i = 0; i < samples.length;) {
     let j = i;
-    while (j + 1 < samples.length && sameFrame(samples[j + 1]!.stats, samples[i]!.stats)) j++;
+    while (j + 1 < samples.length && sameFrame(samples[j + 1]!.stats, samples[i]!.stats) && !gap(samples[j]!.t, samples[j + 1]!.t)) j++;
     const a = samples[i]!, b = samples[j]!, span = b.t - a.t;
     const clips = [...new Set(samples.slice(i, j + 1).flatMap((s) => s.clips))].filter((c) => c !== 'overlay');
     if (span >= o.frozen && !clips.every((c) => exempt('frozen', c))) {

@@ -10,7 +10,7 @@ import type { BlendMode } from './engine/gl';
 import type { Theme, ThemeName } from './themes';
 import type { CheckRule } from './engine/report';
 import type { Transition, TransitionKind } from './engine/transitions';
-export type { Transition, TransitionKind, TransitionDirection } from './engine/transitions';
+export type { Transition, TransitionKind, TransitionDirection, TransitionUniform, CustomTransition, EaseName } from './engine/transitions';
 
 export { themes, extendTheme, resolveTheme } from './themes';
 export type { Theme, ThemeName, HudParams, ResolvedTheme } from './themes';
@@ -31,11 +31,10 @@ export interface Clip {
    */
   track?: number;
   /**
-   * How the clip comes in over the clip before it on its track while they overlap (default a crossfade):
-   * 'crossfade', 'wipe', 'slide', 'zoom', 'dip', or { kind, direction?: 'left' | 'right' | 'up' | 'down',
-   * softness?: share of the frame (a wipe's edge), color?: palette key or '#rrggbb' (a dip's; default bg, or
-   * transparent on a track above 0) }. A scene with
-   * handlesTransition draws the transition itself instead.
+   * How the clip comes in over the clip before it on its track while they overlap (default a crossfade): a kind
+   * ('crossfade', 'wipe', 'slide', 'zoom', 'dip', 'iris', 'clock', 'whip', 'flash'), { kind, ease?, … } with
+   * that kind's options (see each Transition type), or { glsl, uniforms?, ease? } for a shader of your own. It
+   * lasts as long as the overlap. A scene with handlesTransition draws the transition itself instead.
    */
   transition?: TransitionKind | Transition;
   /**
@@ -166,13 +165,98 @@ export function formatOf(c: VideoConfig): { w: number; h: number; fps: number } 
   return { w, h, fps };
 }
 
+/** A clip of a sequence: a Clip without its window, which the sequence works out from the lengths. */
+export interface SequenceItem extends Omit<Clip, 'start' | 'end' | 'track'> {
+  /** Seconds the clip is on screen, its transitions in and out included. */
+  dur: number;
+  /**
+   * Seconds it overlaps the clip before, over which its transition plays (default: the sequence's `overlap` when it
+   * has a transition, else 0, a cut). An overlap without a transition is a crossfade.
+   */
+  overlap?: number;
+}
+
+/** Where a sequence starts and what its clips take by default. */
+export interface SequenceOptions {
+  /** When the first clip starts, in video seconds (default 0). */
+  start?: number;
+  /** The track its clips are on (default 0). */
+  track?: number;
+  /** The transition of every clip after the first that names none (default none: cuts). */
+  transition?: TransitionKind | Transition;
+  /** The overlap of a clip after the first that has a transition and gives no overlap (default 0.5). */
+  overlap?: number;
+}
+
+/** Times worked out by adding lengths, to the microsecond (so 4.4 - 0.4 is 4, not 4.000000000000001). */
+const us = (x: number) => Math.round(x * 1e6) / 1e6;
+
+/**
+ * Clips back to back on one track, each starting where the one before ends less its overlap: the edit of a video
+ * without narration, written as lengths instead of times.
+ *
+ *   sequence([
+ *     { id: 'title', scene: () => import('./scenes/title'), dur: 4.4 },
+ *     { id: 'light', scene: () => import('./scenes/light'), dur: 5, transition: 'slide' },
+ *   ], { overlap: 0.4 })  // title 0 to 4.4, light 4 to 9, sliding in over 0.4 s
+ */
+export function sequence(items: SequenceItem[], o: SequenceOptions = {}): Clip[] {
+  const out: Clip[] = [];
+  let t = o.start ?? 0, overlapIn = 0;
+  if (!Number.isFinite(t) || t < 0) throw new Error(`sequence: start ${t} must be 0 or more seconds`);
+  items.forEach((it, k) => {
+    const where = `sequence: clip '${it.id}'`;
+    if (!(Number.isFinite(it.dur) && it.dur > 0)) throw new Error(`${where}: dur ${it.dur} must be above 0 seconds`);
+    const { dur, overlap: _, ...clip } = it;
+    const transition = it.transition ?? (k > 0 ? o.transition : undefined);
+    const overlap = k === 0 ? 0 : it.overlap ?? (transition !== undefined ? o.overlap ?? 0.5 : 0);
+    if (k === 0 && it.overlap !== undefined && it.overlap !== 0) throw new Error(`${where}: the first clip has no clip before it to overlap (start the sequence earlier instead)`);
+    if (k > 0 && !(Number.isFinite(overlap) && overlap >= 0 && overlap < dur)) throw new Error(`${where}: overlap ${overlap} must be 0 or more and shorter than the clip`);
+    // (the clip before must still be on screen alone between its own transition in and this one: no three at once)
+    if (k > 0 && (overlapIn + overlap > items[k - 1]!.dur + 1e-9 || overlap >= items[k - 1]!.dur)) throw new Error(`${where}: overlap ${overlap} reaches back past the start of the clip before, '${items[k - 1]!.id}' (${items[k - 1]!.dur} s, ${overlapIn} s of it overlapping the clip before it)`);
+    const start = us(t - overlap), end = us(start + dur);
+    out.push({ ...clip, ...(transition !== undefined ? { transition } : {}), start, end, ...(o.track !== undefined ? { track: o.track } : {}) });
+    t = end;
+    overlapIn = overlap;
+  });
+  return out;
+}
+
+/** How clipsFromSections joins its clips and what it hands them. */
+export interface SectionOptions {
+  /** How each clip after the first comes in: a transition for all, or one per section by name (undefined: a cut). */
+  transition?: TransitionKind | Transition | ((name: string) => TransitionKind | Transition | undefined);
+  /**
+   * Seconds two clips overlap across each section boundary that has a transition, centred on it, over which the
+   * transition plays (default 0.5). Without `transition`, an overlap crossfades every boundary.
+   */
+  overlap?: number;
+  /** ctx.params of every clip, or of each by its section's name. */
+  params?: Record<string, unknown> | ((name: string) => Record<string, unknown> | undefined);
+}
+
 /**
  * One clip per named section that has a scene module of the same name, each running until the next begins
  * (the first from 0): the edit of a narrated video, whose sections are the plates of its script.
- * `modules` is `import.meta.glob('./scenes/*.ts')`.
+ * `modules` is `import.meta.glob('./scenes/*.ts')`. With a transition or an overlap, neighbouring clips overlap
+ * by `overlap` seconds centred on the boundary between them.
  */
-export function clipsFromSections(src: Sources, modules: Record<string, () => Promise<unknown>>): Clip[] {
+export function clipsFromSections(src: Sources, modules: Record<string, () => Promise<unknown>>, o: SectionOptions = {}): Clip[] {
   const mod = (name: string) => modules[`./scenes/${name}.ts`] as Clip['scene'] | undefined;
   const have = src.audio.sections.filter((s) => mod(s.name));
-  return have.map((s, k) => ({ id: s.name, scene: mod(s.name)!, start: k === 0 ? 0 : s.start, end: have[k + 1]?.start ?? src.audio.duration }));
+  const bounds = have.map((s, k) => (k === 0 ? 0 : s.start)).concat(src.audio.duration);
+  const transitionOf = (name: string) => (typeof o.transition === 'function' ? o.transition(name) : o.transition);
+  if (o.overlap !== undefined && !(Number.isFinite(o.overlap) && o.overlap >= 0)) throw new Error(`clipsFromSections: overlap ${o.overlap} must be 0 or more seconds`);
+  // each clip's transition in (none for the first), and half the overlap across the boundary it starts at
+  const transitions = have.map((s, k) => (k > 0 ? transitionOf(s.name) : undefined));
+  const half = have.map((_, k) => (k === 0 ? 0 : o.transition === undefined ? o.overlap ?? 0 : transitions[k] !== undefined ? o.overlap ?? 0.5 : 0) / 2).concat(0);
+  return have.map((s, k) => {
+    const start = us(bounds[k]! - half[k]!), end = us(bounds[k + 1]! + half[k + 1]!);
+    // (as in sequence: never three clips at once, and no clip starting or ending with the one beside it)
+    const len = bounds[k + 1]! - bounds[k]!;
+    if (half[k]! + half[k + 1]! > len + 1e-9 || half[k]! >= len || half[k + 1]! >= len) throw new Error(`clipsFromSections: section '${s.name}' (${(bounds[k + 1]! - bounds[k]!).toFixed(2)} s) is too short for its overlaps`);
+    const transition = transitions[k];
+    const params = typeof o.params === 'function' ? o.params(s.name) : o.params;
+    return { id: s.name, scene: mod(s.name)!, start, end, ...(transition !== undefined ? { transition } : {}), ...(params ? { params } : {}) };
+  });
 }

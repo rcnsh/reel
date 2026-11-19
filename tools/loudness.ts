@@ -1,5 +1,5 @@
-// EBU R128 loudness: reading ffmpeg's loudnorm measurement and the second pass that applies it. Pure, so it is
-// unit-tested.
+// EBU R128 loudness: reading ffmpeg's ebur128 and loudnorm measurements, and the gain that brings a mix to its
+// target. Pure, so it is unit-tested.
 
 /** A measurement: integrated loudness (LUFS), true peak (dBTP), loudness range (LU) and the threshold loudnorm reports. */
 export interface Loudness { integrated: number; truePeak: number; lra: number; threshold: number; offset: number }
@@ -17,6 +17,37 @@ export function parseLoudnorm(stderr: string): Loudness {
   const o = JSON.parse(stderr.slice(i, j + 1)) as Record<string, string>;
   const n = (k: string) => (o[k] === '-inf' ? -Infinity : o[k] === 'inf' ? Infinity : Number(o[k]));
   return { integrated: n('input_i'), truePeak: n('input_tp'), lra: n('input_lra'), threshold: n('input_thresh'), offset: n('target_offset') };
+}
+
+/** A measurement by ffmpeg's ebur128 filter: integrated loudness (LUFS), true peak (dBTP), loudness range (LU). */
+export interface R128 { integrated: number; truePeak: number; lra: number }
+
+/** The filters that measure: ebur128 with true peak, printing its running values (full precision) to stdout. */
+export const EBUR128 = 'ebur128=peak=true:metadata=1:framelog=quiet,ametadata=mode=print:file=-';
+
+/** The last values in the output of EBUR128: the whole file's (silence: -Infinity). */
+export function parseEbur128(text: string): R128 {
+  const last = (k: string) => {
+    const i = text.lastIndexOf(`lavfi.r128.${k}=`);
+    if (i < 0) return NaN;
+    const j = text.indexOf('\n', i);
+    return Number(text.slice(i + k.length + 12, j < 0 ? undefined : j));
+  };
+  const I = last('I'), tp = last('true_peak'), lra = last('LRA');
+  if (Number.isNaN(I) || Number.isNaN(tp)) throw new Error(`no loudness measurement in ebur128's output: ${text.slice(-400)}`);
+  // (ebur128 reports -70 for a file with nothing above its gate, and the true peak as a linear amplitude)
+  return { integrated: I <= -70 ? -Infinity : I, truePeak: tp > 0 ? 20 * Math.log10(tp) : -Infinity, lra: Number.isNaN(lra) ? 0 : lra };
+}
+
+/**
+ * The gain in dB that brings a measured mix to the target where a linear gain can (its true peak stays under the
+ * ceiling and its loudness range within the target's, the test loudnorm's linear mode makes), else null: then the
+ * mix needs loudnorm's dynamic mode. A silent mix gets 0.
+ */
+export function linearGain(t: LoudnessTarget, m: R128): number | null {
+  if (!Number.isFinite(m.integrated)) return 0;
+  const g = t.integrated - m.integrated;
+  return m.truePeak + g <= t.truePeak && m.lra <= (t.lra ?? 11) ? g : null;
 }
 
 /**

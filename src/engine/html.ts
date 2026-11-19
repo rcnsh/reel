@@ -347,12 +347,18 @@ export class HtmlLayer {
     }
   }
 
-  /** Images in the layer decoded before it is uploaded: <img> elements and CSS background images. */
+  /** Images in the layer decoded before it is uploaded: <img> elements, SVG <image> elements and CSS background images. */
   async loadImages() {
     const waits: Promise<unknown>[] = [];
     for (const img of this.root.querySelectorAll('img')) {
       if (img.complete && img.naturalWidth > 0) continue;
       waits.push(img.decode().catch(() => { throw new LayerError(`image '${img.getAttribute('src')}' did not load (a path in the project, served from its folder)`); }));
+    }
+    // (an SVG <image> has no `complete`: each is decoded once for the href it has; Chrome has its decode(), the DOM types not)
+    for (const img of this.root.querySelectorAll<SVGImageElement>('svg image')) {
+      const href = img.href.baseVal;
+      if (!href || svgImagesDone.get(img) === href) continue;
+      waits.push((img as SVGImageElement & { decode(): Promise<void> }).decode().then(() => { svgImagesDone.set(img, href); }, () => { throw new LayerError(`image '${href}' in an SVG did not load (a path in the project, served from its folder)`); }));
     }
     for (const e of this.root.querySelectorAll<HTMLElement>('*')) {
       const bg = getComputedStyle(e).backgroundImage;
@@ -466,6 +472,8 @@ export class HtmlLayer {
 }
 
 const images = new Map<string, Promise<void>>();
+/** SVG <image> elements decoded, and the href each was decoded for. */
+const svgImagesDone = new WeakMap<SVGImageElement, string>();
 function preload(url: string) {
   let p = images.get(url);
   if (!p) {
@@ -504,9 +512,12 @@ function exemptOf(e: Element): CheckRule[] | true | undefined {
  */
 const flowIds = new WeakMap<Element, string>();
 let flowCount = 0;
-/** The run of text an element's text belongs to: its nearest ancestor (or itself) that is not `display: inline`. */
+/**
+ * The run of text an element's text belongs to: its nearest ancestor (or itself) marked `data-flow` (pieces of
+ * text laid out as inline blocks and moved one by one), else its nearest ancestor (or itself) that is not `display: inline`.
+ */
 function flowOf(e: Element) {
-  let n: Element = e;
+  let n: Element = e.closest('[data-flow]') ?? e;
   while (n.parentElement && /^(inline|contents)$/.test(getComputedStyle(n).display)) n = n.parentElement;
   let id = flowIds.get(n);
   if (!id) flowIds.set(n, (id = `html${++flowCount}`));
@@ -526,7 +537,8 @@ function domBoxes(l: HtmlLayer): DomBox[] {
     const label = e.closest('[data-label]')?.getAttribute('data-label') ?? undefined, exempt = exemptOf(e);
     if (e instanceof HTMLImageElement || e instanceof SVGSVGElement || (cs.backgroundImage && cs.backgroundImage.includes('url('))) {
       const r = e.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) out.push({ kind: 'image', ...rel(r), alpha: opacityOf(e), label: label ?? e.getAttribute('alt') ?? undefined, exempt });
+      // (an svg inside another is part of its picture, not one of its own)
+      if (r.width > 0 && r.height > 0 && !(e instanceof SVGSVGElement && e.ownerSVGElement)) out.push({ kind: 'image', ...rel(r), alpha: opacityOf(e), label: label ?? e.getAttribute('alt') ?? undefined, exempt });
       if (e instanceof SVGSVGElement) continue;
     }
     if (!hasText(e)) continue;

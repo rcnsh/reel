@@ -63,6 +63,8 @@ Every element with text of its own is reported with the box of its text, its com
 
 The parts of one run of text (a `<span>` in a paragraph, the words of a caption) are reported separately, so each keeps its own colour, and never count as overlapping each other.
 
+Pieces of text moved one by one as `inline-block`s (each its own run otherwise) are one run under an ancestor marked `data-flow`, so a word rising through the line below is not an overlap.
+
 `data-label="title"` names an element in findings; `data-exempt="offFrame safeArea"` (or `data-exempt` alone: every rule) marks rules it is meant to break, on the element or an ancestor. The layer's draw transform and opacity apply to the boxes.
 
 ## Cost

@@ -73,6 +73,13 @@ describe('checkTimes', () => {
     expect(Math.min(...r)).toBeGreaterThanOrEqual(1);
     expect(Math.max(...r)).toBeLessThan(3);
   });
+  test('only the loaded clips’ frames with --only', () => {
+    const r = checkTimes(clips, 4.5, 30, 0, 4.5, 0.5, ['b']);
+    expect(r.length).toBeGreaterThan(0);
+    expect(Math.min(...r)).toBe(2);
+    expect(Math.max(...r)).toBeCloseTo(134 / 30, 9);
+    expect(checkTimes(clips, 4.5, 30, 0, 1.5, 0.5, ['b'])).toEqual([]);
+  });
 });
 
 describe('findingsOf', () => {
@@ -195,6 +202,21 @@ describe('findingsOf', () => {
     expect(f[1]).toMatchObject({ t: 0, until: 3.5, frames: 5 });
     expect(f[2]).toMatchObject({ t: 0, until: 3.5, value: 3.5 });
     expect(f[0]!.clip).toBe('a');
+  });
+  test('--only: a frozen run ends at a stretch no loaded clip covers, and unloaded clips are not named', () => {
+    const still = { sig: [10, 60], cols: 2, rows: 1, spread: 50 };
+    const o = { ...opts, clips: [{ id: 'a', start: 0, end: 2, track: 0 }, { id: 'x', start: 2, end: 8, track: 0 }, { id: 'b', start: 8, end: 10, track: 0 }], only: ['a', 'b'] };
+    // a and b sampled, x (not loaded) skipped: a's last frame and b's first look alike
+    const ss: Sample[] = [0, 1, 1.9, 8, 9, 9.9].map((t) => ({ t, clips: t < 2 ? ['a'] : ['b'], boxes: [], stats: still, errors: [] }));
+    expect(findingsOf(ss, o)).toEqual([]);
+    expect(findingsOf(ss, { ...o, only: undefined }).map((x) => x.kind)).toEqual(['frozen']);
+    // a clip starting over another loaded one does not end the run
+    const cap = { ...opts, clips: [{ id: 'a', start: 0, end: 8, track: 0 }, { id: 'cap', start: 2, end: 8, track: 1 }], only: ['a', 'cap'] };
+    const held: Sample[] = [0, 1, 2, 3, 4, 5, 6].map((t) => ({ t, clips: t < 2 ? ['a'] : ['a', 'cap'], boxes: [], stats: still, errors: [] }));
+    expect(findingsOf(held, cap).map((x) => [x.kind, x.t, x.until])).toEqual([['frozen', 0, 6]]);
+    const flat = { sig: [10, 10], cols: 2, rows: 1, spread: 0 };
+    const f = findingsOf([{ t: 1, clips: ['a', 'x'], boxes: [], stats: flat, errors: [] }], { ...o, only: ['a'] });
+    expect(f.map((x) => [x.kind, x.clip])).toEqual([['blank', 'a']]);
   });
   test('blank frames that are not next to each other are separate findings', () => {
     const flat = { sig: [10, 10], cols: 2, rows: 1, spread: 0 };

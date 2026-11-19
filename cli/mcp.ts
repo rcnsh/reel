@@ -22,7 +22,7 @@ interface ToolResult { content: Content[]; isError?: boolean; [k: string]: unkno
 const project = z.string().describe('The video project: the folder holding reel.config.ts (absolute, or relative to where the server was started).');
 const page = {
   project,
-  only: z.array(z.string()).optional().describe('Load only these clip ids: faster, and isolates them from errors in other scenes. Clips not loaded render as nothing.'),
+  only: z.array(z.string()).optional().describe('Load only these clip ids: faster, and isolates them from errors in other scenes. Clips not loaded render as nothing, and check_video judges only their frames.'),
   size: z.string().regex(/^\d+x\d+$/).optional().describe("Render at another frame size, 'WxH' (e.g. '1080x1920' to see whether a layout survives a vertical frame). Width a multiple of 4, height even."),
   fps: z.number().positive().max(240).optional().describe('Render at another frame rate.'),
   scale: z.number().int().min(1).max(4).optional().describe('Physical px per logical px (2 renders 3840x2160 from a 1920x1080 project). Default 1.'),
@@ -246,7 +246,7 @@ export async function serveMcp() {
 
   server.registerTool('video_cancel', {
     title: 'Cancel a video render',
-    description: 'Stop a running video job; the partial file is removed by the encoder being killed (it is not playable).',
+    description: 'Stop a running video job; the file at its output is left as it was before the job (an export writes to a partial beside it, removed when stopped).',
     inputSchema: { job: z.string() },
   }, (a) => guard(async () => {
     const j = jobs.get(a.job);
@@ -257,7 +257,7 @@ export async function serveMcp() {
 
   server.registerTool('narrate', {
     title: 'Voice the narration',
-    description: "Voice the project's narration.txt (plates: '# name' headers and their lines) and time every word: writes audio/narration.flac, data/words.json and data/audio.json (one section per plate). Plates are cached, so after an edit only changed plates are voiced again. The voice comes from `narration` in reel.config.ts unless given: 'kokoro[:voice]' (local model, default kokoro:af_heart), 'say[:name]' (macOS scratch), 'elevenlabs:<voice-id>' or 'fish:<voice-id>' (hosted, only with ELEVENLABS_API_KEY / FISH_API_KEY set). The first local run downloads models (minutes).",
+    description: "Voice the project's narration.txt (plates: '# name' headers and their lines) and time every word: writes audio/narration.flac, data/words.json and data/audio.json (one section per plate). Plates are cached as each is voiced, so after an edit, or a failure part-way, only changed or missing plates are voiced again. The voice comes from `narration` in reel.config.ts unless given: 'kokoro[:voice]' (local model, default kokoro:af_heart), 'say[:name]' (macOS scratch), 'elevenlabs:<voice-id>' or 'fish:<voice-id>' (hosted, only with ELEVENLABS_API_KEY / FISH_API_KEY set). The first local run downloads models (minutes).",
     inputSchema: {
       project, voice: z.string().optional().describe("Voice, e.g. 'kokoro:bm_george', 'say:Daniel', 'elevenlabs:<voice-id>'."), speed: z.number().min(0.5).max(2).optional(),
       lead: z.number().min(0).optional().describe('Seconds before the first word (default 0.6).'), hold: z.number().min(0).optional().describe('Seconds at least between plates (default 0.85).'), tail: z.number().min(0).optional().describe('Seconds after the last word (default 1.6).'),

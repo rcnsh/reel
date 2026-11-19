@@ -9,7 +9,7 @@ import { SCALE } from '../engine/gl';
 import { awaitBeforeFirstFrame, notLate } from '../engine/html';
 import type { Frame } from '../engine/scene';
 import { drawPicture } from './image';
-import { checkAt, safeBox, type Box, type ComponentOptions } from './common';
+import { safeBox, windowOf, type Box, type ComponentOptions } from './common';
 import { sourceTime, type VideoTiming } from './video-time';
 
 export interface LottieBoxOptions extends Omit<ComponentOptions, 'css'> {
@@ -35,6 +35,8 @@ interface LottieJson { w: number; h: number; fr: number; ip: number; op: number 
  */
 export class LottieBox {
   readonly box: Box;
+  /** `at` in clip seconds (undefined: the whole clip). */
+  private at: [number, number] | undefined;
   private o: LottieBoxOptions;
   private anim: AnimationItem | null = null;
   private data!: LottieJson;
@@ -46,7 +48,7 @@ export class LottieBox {
   constructor(o: LottieBoxOptions) {
     this.o = o;
     notLate(o.label ?? o.src);
-    checkAt(o.at, o.label ?? o.src);
+    this.at = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     this.tex.colorSpace = THREE.SRGBColorSpace;
     this.tex.flipY = false;
@@ -66,7 +68,7 @@ export class LottieBox {
     const length = (data.op - data.ip) / data.fr;
     const trim: [number, number] = [Math.max(0, o.trim?.[0] ?? 0), Math.min(length, o.trim?.[1] ?? length)];
     if (!(trim[1] > trim[0])) throw new Error(`Lottie '${o.src}': the trim [${o.trim}] holds no frames (it is ${length.toFixed(2)} s)`);
-    this.timing = { at: o.at ?? [0, Infinity], trim, speed: o.speed ?? 1, loop: !!o.loop };
+    this.timing = { at: this.at ?? [0, Infinity], trim, speed: o.speed ?? 1, loop: !!o.loop };
     // the canvas: the animation's fitted size on screen, in physical px
     const b = this.box, s = (o.fit === 'cover' ? Math.max(b.w / data.w, b.h / data.h) : Math.min(b.w / data.w, b.h / data.h)) * SCALE;
     const k = Math.min(s, 8192 / Math.max(data.w, data.h));
@@ -101,7 +103,7 @@ export class LottieBox {
   draw(renderer: THREE.WebGLRenderer, out: THREE.WebGLRenderTarget, f: Frame, o: { opacity?: number } = {}) {
     const anim = this.anim;
     if (!anim) return;
-    const [w0, w1] = this.o.at ?? [0, f.end - f.start];
+    const [w0, w1] = this.at ?? [0, f.end - f.start];
     if (f.lt < w0 || f.lt > w1) return;
     const fr = this.frameAt(f.lt);
     if (fr !== this.shown) {

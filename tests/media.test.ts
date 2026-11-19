@@ -88,6 +88,8 @@ test('svgSize: absolute width and height, else the viewBox, else 300 x 150', () 
   expect(svgSize('<svg viewBox="0 0 400 100" width="100%">')).toEqual([400, 100]);
   expect(svgSize("<svg viewBox='0,0,400,100' height='50'>")).toEqual([200, 50]);
   expect(svgSize('<?xml version="1.0"?><svg>')).toEqual([300, 150]);
+  // (absolute units in px: 1 in is 96 px)
+  expect(svgSize('<svg width="1in" height="72pt">')).toEqual([96, 96]);
 });
 
 describe('video time', () => {

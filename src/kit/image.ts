@@ -8,7 +8,7 @@ import { decodePng16, pngDepth } from '../engine/png16';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
-import { checkAt, motionAt, safeBox, type Box, type ComponentOptions, type Motion } from './common';
+import { motionAt, safeBox, windowOf, type Box, type ComponentOptions, type Motion } from './common';
 
 /** A framing of the image: zoom (1 = fitted) and a pan from -1 to 1 across the room the zoom leaves. */
 export interface Framing { zoom?: number; x?: number; y?: number }
@@ -116,11 +116,17 @@ export function kenBurnsAt(kb: boolean | { from?: Framing; to?: Framing } | unde
   return { zoom: from.zoom + (to.zoom - from.zoom) * k, x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k };
 }
 
-/** An SVG's size in its own units: width and height when absolute, else its viewBox, else 300 x 150 as in HTML. */
+/** A length in an SVG's width or height in px, for the absolute units (none, px, pt, pc, mm, cm, in); else NaN. */
+export function svgLength(v: string | null | undefined): number {
+  const m = /^\s*([\d.]+)\s*(px|pt|pc|mm|cm|in)?\s*$/.exec(v ?? '');
+  return m ? parseFloat(m[1]!) * { px: 1, pt: 4 / 3, pc: 16, mm: 96 / 25.4, cm: 96 / 2.54, in: 96 }[(m[2] ?? 'px') as 'px'] : NaN;
+}
+
+/** An SVG's size in its own units: width and height when absolute (in px), else its viewBox, else 300 x 150 as in HTML. */
 export function svgSize(text: string): [number, number] {
   const tag = /<svg\b[^>]*>/i.exec(text)?.[0] ?? '';
   const attr = (n: string) => new RegExp(`\\s${n}\\s*=\\s*["']([^"']*)["']`, 'i').exec(tag)?.[1];
-  const abs = (v?: string) => (v && /^\s*[\d.]+\s*(px)?\s*$/.test(v) ? parseFloat(v) : NaN);
+  const abs = svgLength;
   const vb = attr('viewBox')?.trim().split(/[\s,]+/).map(Number);
   let w = abs(attr('width')), h = abs(attr('height'));
   const vw = vb?.length === 4 ? vb[2]! : NaN, vh = vb?.length === 4 ? vb[3]! : NaN;
@@ -145,6 +151,8 @@ function halfFloats(f: Float32Array): Uint16Array {
  */
 export class ImageBox {
   readonly box: Box;
+  /** `at` in clip seconds (undefined: the whole clip). */
+  private at: [number, number] | undefined;
   private o: ImageBoxOptions;
   private tex: THREE.Texture | null = null;
   private size: [number, number] = [1, 1];
@@ -154,7 +162,7 @@ export class ImageBox {
   constructor(o: ImageBoxOptions) {
     this.o = o;
     notLate(o.label ?? o.alt ?? o.src);
-    checkAt(o.at, o.label ?? o.alt ?? o.src);
+    this.at = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     awaitBeforeFirstFrame(this.load().catch(async (e: unknown) => {
       const a = await declaredAsset(o.src);
@@ -222,7 +230,7 @@ export class ImageBox {
 
   draw(renderer: THREE.WebGLRenderer, out: THREE.WebGLRenderTarget, f: Frame, o: { opacity?: number } = {}) {
     if (!this.tex) return;
-    const [w0, w1] = this.o.at ?? [0, f.end - f.start];
+    const [w0, w1] = this.at ?? [0, f.end - f.start];
     drawPicture(renderer, out, f, {
       tex: this.tex, size: this.size, box: this.box, fit: this.o.fit, radius: this.o.radius, framing: kenBurnsAt(this.o.kenBurns, f.lt, w0, w1),
       label: this.missing ? `missing asset ${this.missing}` : this.o.label ?? this.o.alt ?? this.o.src,
