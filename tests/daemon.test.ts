@@ -4,6 +4,7 @@ import { afterAll, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { pageOf, samplesOf } from '../cli/args';
+import { glBackend } from '../cli/chrome';
 import { call, laneOf } from '../cli/daemon';
 import type { Op, Req } from '../cli/ops';
 import { projectDir } from '../cli/server';
@@ -12,6 +13,10 @@ import { hasChrome, reel, scratchCopy } from './helpers';
 
 const demo = scratchCopy('demo');
 afterAll(async () => { await reel(['daemon', 'stop', '--project', demo.dir]); demo.cleanup(); });
+
+// A check long enough to outlast a still on a second page: a frame every 0.01 s on a GPU; under SwiftShader, where
+// a checked frame takes about a second, one every 0.1 s over the first 3 s
+const LONG_CHECK = glBackend() === 'swiftshader' ? { step: 0.1, to: 3 } : { step: 0.01 };
 
 const req = (op: Op, args: Record<string, unknown>): Req => ({ op, project: projectDir(demo.dir), page: pageOf({}), samples: samplesOf({}), shutter: 0.5, args });
 
@@ -26,7 +31,7 @@ test.skipIf(!hasChrome)('a still does not queue behind a long check, and renders
   // (warm: the server, Chrome and a page)
   expect((await call(req('still', { times: [2.5], out: out('alone.png') }))).ok).toBe(true);
   let checkDone = 0;
-  const check = call(req('check', { step: 0.01 })).then((r) => { checkDone = Date.now(); return r; });
+  const check = call(req('check', LONG_CHECK)).then((r) => { checkDone = Date.now(); return r; });
   // (the check has the page: the still needs a second one)
   await Bun.sleep(400);
   const still = await call(req('still', { times: [2.5], out: out('beside.png') }));
@@ -44,7 +49,7 @@ test.skipIf(!hasChrome)("a config change during a check: the still gets a new de
   const cfg = path.join(demo.dir, 'reel.config.ts'), was = readFileSync(cfg, 'utf8');
   expect((await call(req('still', { times: [2.5], out: out('print.png') }))).ok).toBe(true);
   let checkDone = 0;
-  const check = call(req('check', { step: 0.01 })).then((r) => { checkDone = Date.now(); return r; });
+  const check = call(req('check', LONG_CHECK)).then((r) => { checkDone = Date.now(); return r; });
   await Bun.sleep(400);
   writeFileSync(cfg, was.replace("theme: 'print'", "theme: 'neutral'"));
   try {
