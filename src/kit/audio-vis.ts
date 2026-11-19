@@ -8,7 +8,7 @@ import { linearColor } from '../engine/palette';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
 import { clamp } from '../engine/util';
-import { motionAt, safeBox, UNIT, type Box, type ComponentOptions } from './common';
+import { motionAt, safeBox, UNIT, windowOf, type Box, type ComponentOptions } from './common';
 
 /** The most levels one draw takes (bars, line points or radial bars). */
 const MAX_N = 2048;
@@ -114,6 +114,8 @@ abstract class AudioVis {
   /** The levels as a texture of the component's own, uploaded only when they change. */
   private levels = new Float32Array(0);
   private tex: THREE.DataTexture | null = null;
+  /** `at` in clip seconds (undefined: the whole clip). */
+  private at: [number, number] | undefined;
   constructor(o: ComponentOptions & { audio: AudioData; color?: string; restColor?: string }, box: Box, what: 'waveform' | 'spectrum') {
     if (!o.audio) throw new Error(`a ${what} needs the song's analysis: { audio: this.ctx.audio }`);
     if (!(what === 'waveform' ? o.audio.hasWave : o.audio.hasSpectrum)) {
@@ -122,6 +124,7 @@ abstract class AudioVis {
     // (a colour that is no palette key fails here, not on every frame)
     for (const c of [o.color, o.restColor]) if (c !== undefined) linearColor(c);
     this.o = o;
+    this.at = windowOf(o.at, o.label ?? what);
     this.box = o.box ?? box;
   }
 
@@ -150,7 +153,7 @@ abstract class AudioVis {
 
   /** Draw it over `out` (call in render(); outside its window it draws nothing). */
   draw(renderer: THREE.WebGLRenderer, out: THREE.WebGLRenderTarget, f: Frame, o: { opacity?: number } = {}) {
-    const [w0, w1] = this.o.at ?? [0, f.end - f.start];
+    const [w0, w1] = this.at ?? [0, f.end - f.start];
     const m = motionAt(this.o.motion ?? { from: 'fade' }, f.lt, w0, w1);
     if (!m) return;
     const v = this.layout(f), b = this.box, p = visPass();
