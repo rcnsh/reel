@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { pageOf, samplesOf, UsageError, type Values } from './args';
 import { call } from './daemon';
 import { runDiff } from './diff';
+import { cancelJob, jobView, listJobs, MAX_WAIT_S, startJob, waitJob, type JobView } from './jobs';
 import { type Op, type Req, type Result } from './ops';
 import { listed, notesPath, patchNote, readNotes } from './notes';
 import { downscale, encodePng, readPng } from './png';
@@ -65,9 +66,7 @@ async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
 /** Tool calls being answered now: the server does not exit under them when its input ends. */
 let pending = 0;
 
-// ---- video jobs: `reel video` in a child process, polled and cancellable ----
-interface Job { id: string; project: string; out: string; state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'; queue?: { running: string | null; ahead: number }; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
-const jobs = new Map<string, Job>();
+// ---- video jobs: `reel video` run detached (cli/jobs.ts), so a job outlives the server that started it ----
 
 /**
  * The `reel video` command line for video_start's arguments. Without `out` the CLI picks the default for the format
@@ -83,41 +82,13 @@ export function videoArgs(a: Record<string, any>, proj: string): string[] {
   return args;
 }
 
-function startVideo(a: Record<string, any>): Job {
+function startVideo(a: Record<string, any>): JobView {
   const proj = projectDir(a.project);
   const out = a.out ? path.resolve(a.out) : '(the format\'s default under out/; the result names the file)';
-  const args = videoArgs(a, proj);
-  const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: a.wait ? 'queued' : 'running', progress: null, started: Date.now(), output: '', proc };
-  jobs.set(job.id, job);
-  void (async () => {
-    // progress: one JSON line per update on stderr; anything else there is kept as output
-    const dec = new TextDecoder();
-    let buf = '';
-    for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) {
-      buf += dec.decode(chunk, { stream: true });
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        try {
-          const p = JSON.parse(line);
-          if (typeof p.frames === 'number') { job.progress = p; if (job.state === 'queued') { job.state = 'running'; job.queue = undefined; } continue; }
-          if (p.queued === true) { job.queue = { running: p.running, ahead: p.ahead }; continue; }
-          if (p.queued === false) { if (job.state === 'queued') job.state = 'running'; job.queue = undefined; continue; }
-        } catch {}
-        job.output = (job.output + line + '\n').slice(-4000);
-      }
-    }
-  })();
-  void (async () => {
-    const stdout = await new Response(proc.stdout as ReadableStream).text();
-    const code = await proc.exited;
-    try { job.result = JSON.parse(stdout); } catch { job.result = stdout.slice(-4000); }
-    if (job.state === 'running' || job.state === 'queued') job.state = code === 0 ? 'done' : 'failed';
-  })();
-  return job;
+  return startJob(['bun', path.join(ENGINE, 'cli/reel.ts'), ...videoArgs(a, proj)], { project: proj, out, wait: !!a.wait });
 }
-const jobView = (j: Job) => ({ job: j.id, state: j.state, out: j.out, ...(j.state === 'queued' && j.queue ? { queue: j.queue } : {}), progress: j.progress, seconds: +((Date.now() - j.started) / 1000).toFixed(1), ...(j.state !== 'running' && j.state !== 'queued' ? { result: j.result } : {}), ...(j.output && j.state !== 'running' && j.state !== 'queued' ? { output: j.output } : {}) });
+/** A job for the model: what it needs, without the bookkeeping. */
+const jobOut = ({ started: _s, project: _p, ...v }: JobView) => v;
 
 /** A project tool (narrate, align, analyze, mix) run to completion: its output and exit code. */
 async function tool(name: string, proj: string, args: string[]): Promise<ToolResult> {
@@ -215,7 +186,7 @@ export async function serveMcp() {
 
   server.registerTool('video_start', {
     title: 'Start a video render',
-    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details, unless `wait` is true, which queues it (state 'queued', with the export ahead, until the slot frees; queued exports run in the order they started). The project's config can set export defaults (`export: { crf, preset, noaudio, samples }`); arguments given here override them.",
+    description: "Start exporting the video (or a range) in the background and return a job id at once. Follow it with video_status (with wait_s, it waits for the next change instead of returning at once) until state is done or failed; video_cancel stops it. The job runs on its own: it keeps rendering if this server exits or restarts, and a later server finds it by its id. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details, unless `wait` is true, which queues it (state 'queued', with the export ahead, until the slot frees; queued exports run in the order they started). The project's config can set export defaults (`export: { crf, preset, noaudio, samples }`); arguments given here override them.",
     inputSchema: {
       ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output path (its extension picks the format when `format` is not given; for sequences, the frames are named after it with the frame number).'),
       format: z.enum(['h264', 'hevc', 'prores', 'prores4444', 'webm', 'gif', 'webp', 'png', 'png16', 'jpeg', 'exr']).optional().describe('Output format (default from the out extension, else h264).'),
@@ -231,30 +202,32 @@ export async function serveMcp() {
     },
   }, (a) => guard(async () => {
     reqOf('still', a, {}); // (the flags checked here, before a process is started)
-    return { content: [text(jobView(startVideo(a)))] };
+    return { content: [text(jobOut(startVideo(a)))] };
   }));
 
   server.registerTool('video_status', {
     title: 'Video render status',
-    description: 'The state of a video job (queued, running, done, failed, cancelled), its progress (frames written of total, fps, seconds left) and, once finished, the result (file, frames, errors).',
-    inputSchema: { job: z.string().describe('The id video_start returned.') },
+    description: `The state of a video job (queued, running, done, failed, cancelled), its progress (frames written of total, fps, seconds left), the export ahead while queued and, once finished, the result (file, frames, errors). With wait_s it waits up to that many seconds (at most ${MAX_WAIT_S}) and returns as soon as the state changes or progress moves by a twentieth of the frames: call it again with wait_s until the job ends instead of polling in a loop. Without a job it lists the jobs on this machine, newest first (any server's, including ones started before this server did; finished ones are kept a week).`,
+    inputSchema: {
+      job: z.string().optional().describe('The id video_start returned; leave out to list the jobs.'),
+      wait_s: z.number().min(0).max(MAX_WAIT_S).optional().describe(`Wait up to this many seconds (at most ${MAX_WAIT_S}) for a change before answering (default 0: at once).`),
+      project: project.optional().describe('With no job: list only this project\'s jobs.'),
+    },
     annotations: { readOnlyHint: true },
-  }, (a) => guard(async () => {
-    const j = jobs.get(a.job);
-    if (!j) throw new Error(`no job '${a.job}' (jobs: ${[...jobs.keys()].join(', ') || 'none'})`);
-    return { content: [text(jobView(j))], isError: j.state === 'failed' };
+  }, (a, extra) => guard(async () => {
+    if (!a.job) {
+      if (a.wait_s) throw new UsageError('wait_s needs a job');
+      return { content: [text({ jobs: listJobs(a.project ? projectDir(a.project) : undefined).map((j) => ({ ...jobOut(j), project: j.project })) })] };
+    }
+    const v = a.wait_s ? await waitJob(a.job, a.wait_s, extra.signal) : jobView(a.job);
+    return { content: [text(jobOut(v))], isError: v.state === 'failed' };
   }));
 
   server.registerTool('video_cancel', {
     title: 'Cancel a video render',
-    description: 'Stop a running video job; the file at its output is left as it was before the job (an export writes to a partial beside it, removed when stopped).',
+    description: 'Stop a queued or running video job, whichever server started it; the file at its output is left as it was before the job (an export writes to a partial beside it, removed when stopped).',
     inputSchema: { job: z.string() },
-  }, (a) => guard(async () => {
-    const j = jobs.get(a.job);
-    if (!j) throw new Error(`no job '${a.job}'`);
-    if (j.state === 'running' || j.state === 'queued') { j.state = 'cancelled'; j.proc.kill('SIGTERM'); await j.proc.exited; }
-    return { content: [text(jobView(j))] };
-  }));
+  }, (a) => guard(async () => ({ content: [text(jobOut(await cancelJob(a.job)))] })));
 
   server.registerTool('narrate', {
     title: 'Voice the narration',
@@ -323,20 +296,18 @@ export async function serveMcp() {
     return { content: [text(listed(proj, patchNote(proj, a.id, { status: a.reopen ? 'open' : 'done' })))] };
   }));
 
-  // (a job left running when the client goes away would hold Chromes and ffmpeg)
-  const cleanup = () => { for (const j of jobs.values()) if (j.state === 'running') j.proc.kill('SIGTERM'); };
-  process.on('exit', cleanup);
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { cleanup(); process.exit(0); });
+  // (video jobs are detached: they finish whether or not this server is still here)
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => process.exit(0));
   const transport = new StdioServerTransport();
-  transport.onclose = () => { cleanup(); process.exit(0); };
+  transport.onclose = () => process.exit(0);
   // (the client went away without a goodbye: the transport does not notice its input ending, and the server
-  // would outlive it, holding its video jobs)
+  // would outlive it)
   // (calls already sent are answered first: a script may pipe its requests in and close)
   let leaving = false;
   const leave = () => {
     if (leaving) return;
     leaving = true;
-    const t = setInterval(() => { if (!pending) { clearInterval(t); cleanup(); process.stdout.write('', () => process.exit(0)); } }, 50);
+    const t = setInterval(() => { if (!pending) { clearInterval(t); process.stdout.write('', () => process.exit(0)); } }, 50);
   };
   for (const ev of ['end', 'close'] as const) process.stdin.on(ev, leave);
   await server.connect(transport);

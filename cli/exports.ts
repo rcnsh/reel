@@ -9,7 +9,8 @@ import { mkdirSync, readdirSync, readFileSync, renameSync, rmSync, statSync, wri
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 
-const DIR = () => path.join(process.env.REEL_EXPORTS_DIR ?? tmpdir(), 'reel-exports');
+/** The folder of the machine's export claims, queue and video jobs (cli/jobs.ts): REEL_EXPORTS_DIR or the temp folder. */
+export const exportsDir = () => path.join(process.env.REEL_EXPORTS_DIR ?? tmpdir(), 'reel-exports');
 
 export interface Claim { pid: number; project: string; out: string; started: number; pstart?: string }
 
@@ -36,8 +37,8 @@ function live(c: Claim) {
   return now === null || now === c.pstart;
 }
 
-/** Write a claim or ticket whole (a reader never sees it half written): to a temporary name, then renamed. */
-function writeWhole(f: string, c: Claim) {
+/** Write a JSON file whole (a reader never sees it half written): to a temporary name, then renamed. */
+export function writeWhole(f: string, c: unknown) {
   const tmp = `${f}.${process.pid}.tmp`;
   writeFileSync(tmp, JSON.stringify(c));
   renameSync(tmp, f);
@@ -64,10 +65,10 @@ function claimsIn(dir: string): Claim[] {
 }
 
 /** The exports running on this machine now (claims of dead processes are removed). */
-export const runningExports = () => claimsIn(DIR());
+export const runningExports = () => claimsIn(exportsDir());
 
 /** The exports waiting for the slot (`reel video --wait`), first in line first. */
-export const queuedExports = () => claimsIn(path.join(DIR(), 'queue')).sort((a, b) => a.started - b.started || a.pid - b.pid);
+export const queuedExports = () => claimsIn(path.join(exportsDir(), 'queue')).sort((a, b) => a.started - b.started || a.pid - b.pid);
 
 const claimOf = (project: string, out: string): Claim => ({ pid: process.pid, project, out, started: Date.now(), pstart: processStart(process.pid) ?? undefined });
 
@@ -76,8 +77,8 @@ const claimOf = (project: string, out: string): Claim => ({ pid: process.pid, pr
  * other's claim, both take theirs back (false) and try again after a random pause, so at most one ever keeps it.
  */
 function take(project: string, out: string): (() => void) | false {
-  mkdirSync(DIR(), { recursive: true });
-  const f = path.join(DIR(), `${process.pid}.json`);
+  mkdirSync(exportsDir(), { recursive: true });
+  const f = path.join(exportsDir(), `${process.pid}.json`);
   writeWhole(f, claimOf(project, out));
   if (runningExports().length) { rmSync(f, { force: true }); return false; }
   const release = () => { rmSync(f, { force: true }); process.off('exit', release); };
@@ -93,8 +94,8 @@ const busy = (o: Claim) => `pid ${o.pid}, ${o.project} -> ${o.out}, for ${Math.r
  */
 export function claimExport(project: string, file: string, force: boolean): () => void {
   if (force) {
-    mkdirSync(DIR(), { recursive: true });
-    const f = path.join(DIR(), `${process.pid}.json`);
+    mkdirSync(exportsDir(), { recursive: true });
+    const f = path.join(exportsDir(), `${process.pid}.json`);
     writeWhole(f, claimOf(project, file));
     const release = () => { rmSync(f, { force: true }); process.off('exit', release); };
     process.on('exit', release);
@@ -118,7 +119,7 @@ export function claimExport(project: string, file: string, force: boolean): () =
  * one, whenever that changes. Exports run in the order they queued.
  */
 export async function queueExport(project: string, file: string, onWait: (running: Claim | null, ahead: number) => void = () => {}, poll = 1000): Promise<() => void> {
-  const q = path.join(DIR(), 'queue'), ticket = path.join(q, `${process.pid}.json`), mine = claimOf(project, file);
+  const q = path.join(exportsDir(), 'queue'), ticket = path.join(q, `${process.pid}.json`), mine = claimOf(project, file);
   mkdirSync(q, { recursive: true });
   writeWhole(ticket, mine);
   const drop = () => { rmSync(ticket, { force: true }); process.off('exit', drop); };

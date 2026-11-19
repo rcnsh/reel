@@ -104,7 +104,8 @@ Working on a project
                                                                        stale optimizer folders]
   golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
-                             it with Claude Code and other clients)
+                             it with Claude Code and other clients); its video jobs run detached and
+                             outlive it (state in $REEL_EXPORTS_DIR or the temp folder, reel-exports/jobs)
   dev                        the preview player with live reload (prints its URL)  [--port <n>]
                              [--props <json|file>: the preview's props; ?props=<JSON> in the URL overrides]
   narrate                    voice narration.txt (Kokoro by default; say, elevenlabs, fish) and time

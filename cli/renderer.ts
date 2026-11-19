@@ -1,6 +1,8 @@
 // A project's renderer: its dev server, a headless Chrome and pages opened on the project, one per format and
 // clip selection. A command run with --no-daemon makes one, uses it once and closes it; the warm renderer
 // (cli/daemon.ts) keeps one for a project and reuses its pages, reloading them when the project's files change.
+// Two requests may run at once (the warm renderer's two lanes): each leases a page of its own for the request
+// (page() to release()), so a second request for the same format gets a second page, never one in use.
 import { chromium, type Browser, type Page, type Request } from 'playwright-core';
 import { formatOf } from '../src/config';
 import { resolveTheme } from '../src/themes';
@@ -130,6 +132,10 @@ export async function openPage(browser: Browser, url: string, f: Format, o: Pick
 export class PageHandle {
   logs: string[] = [];
   dead = false;
+  /** Leased to a request (page() until release()): no other request uses it, and it is not closed under it. */
+  busy = false;
+  /** Its dev server was replaced while it was leased: closed (and that server stopped) once released. */
+  retired = false;
   constructor(public page: Page, public key: string, public gen: number, public fmt: Format, public used: number) {}
   /** Whether the page's GL context was lost (the GPU process went away): it cannot render any more. */
   async lost(): Promise<boolean> {
@@ -153,6 +159,10 @@ export class Renderer {
   private configDirty = false;
   private restart = false;
   private uses = 0;
+  /** page() one at a time (it may start the server or Chrome, or close pages); the requests themselves overlap. */
+  private opening: Promise<unknown> = Promise.resolve();
+  /** Dev servers replaced while pages of theirs were leased: each stops when its last such page is released. */
+  private retiring: { srv: Awaited<ReturnType<typeof startServer>>; pages: Set<PageHandle> }[] = [];
 
   /** What the project's files looked like at the last request (path -> mtime and size). */
   private seen = new Map<string, string>();
@@ -243,8 +253,13 @@ export class Renderer {
       const c = await loadConfig(this.project);
       const same = JSON.stringify([formatOf(c), resolveTheme(c.theme ?? 'neutral')]) === JSON.stringify([this.srv.format, this.srv.theme]);
       if (!same || this.restart) {
+        // (a request in the other lane finishes on the old server, which stops after it; the next starts beside it)
+        const busy = [...this.pages.values()].filter((h) => h.busy);
+        for (const h of busy) { h.retired = true; this.pages.delete(h.key); }
+        // (registered before any await: the other request may end meanwhile)
+        if (busy.length) this.retiring.push({ srv: this.srv, pages: new Set(busy) });
         await this.closePages();
-        await this.srv.stop().catch(() => {});
+        if (!busy.length) await this.srv.stop().catch(() => {});
         this.srv = undefined;
       }
     }
@@ -262,45 +277,88 @@ export class Renderer {
     return this.browser;
   }
 
-  /** The page for these options, ready for a request: reused while the project is unchanged, else (re)opened. */
+  /**
+   * The page for these options, leased to the caller until release() (or drop()): reused while the project is
+   * unchanged and no other request holds it, else (re)opened.
+   */
   async page(o: PageOpts): Promise<PageHandle> {
-    this.rescan();
-    const srv = await this.server();
-    const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
-    const key = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', o.props ?? '', !!o.alpha, o.bits ?? 8]);
-    let h = this.pages.get(key);
-    if (h && (h.dead || h.page.isClosed() || h.gen !== this.gen)) {
-      this.pages.delete(key);
-      await h.page.close().catch(() => {});
-      h = undefined;
-    }
-    if (!h) {
-      if (o.theme) resolveTheme(o.theme); // (a name that is not a theme fails here, not in the page)
-      const browser = await this.chrome();
-      // (the oldest page goes when there are too many: each holds a GL context and its targets)
-      while (this.pages.size >= (this.opts.maxPages ?? 4)) {
-        const [k, old] = [...this.pages].sort((a, b) => a[1].used - b[1].used)[0]!;
-        this.pages.delete(k);
-        await old.page.close().catch(() => {});
-      }
-      const early: string[] = [], gen = this.gen;
-      let handle: PageHandle | undefined;
-      const page = await openPage(browser, pageUrl(srv.url, fmt, o), fmt, o, (l) => (handle ? handle.logs : early).push(l));
-      handle = h = new PageHandle(page, key, gen, fmt, 0);
-      handle.logs = early;
-      page.on('crash', () => { handle!.dead = true; });
-      page.on('close', () => { handle!.dead = true; });
-      this.pages.set(key, h);
-    } else {
-      h.logs = [];
-    }
-    h.used = ++this.uses;
-    if (!(await h.page.evaluate(() => (window as any).__reel.beginRequest()))) {
+    const turn = this.opening.then(() => this.lease(o));
+    this.opening = turn.catch(() => {});
+    const h = await turn;
+    let fresh: boolean;
+    try { fresh = await h.page.evaluate(() => (window as any).__reel.beginRequest()); } catch (e) { this.release(h); throw e; }
+    if (!fresh) {
       // (a warm page whose GL context was lost renders nothing: open a fresh one)
       await this.drop(h);
       return this.page(o);
     }
     return h;
+  }
+
+  private async lease(o: PageOpts): Promise<PageHandle> {
+    this.rescan();
+    const srv = await this.server();
+    const fmt: Format = { w: o.w ?? srv.format.w, h: o.h ?? srv.format.h, fps: o.fps ?? srv.format.fps, scale: o.scale ?? 1 };
+    const base = JSON.stringify([fmt, o.only ?? '', o.theme ?? '', o.props ?? '', !!o.alpha, o.bits ?? 8]);
+    // (a page per format and lane: '#0' unless that one is in use)
+    let h: PageHandle | undefined;
+    for (let slot = 0; ; slot++) {
+      const key = `${base}#${slot}`;
+      const c = this.pages.get(key);
+      if (c?.busy) continue;
+      if (c && (c.dead || c.page.isClosed() || c.gen !== this.gen)) {
+        this.pages.delete(key);
+        await c.page.close().catch(() => {});
+      } else h = c;
+      if (!h) h = await this.open(key, fmt, o, srv.url);
+      break;
+    }
+    if (h.used) h.logs = []; // (a fresh page keeps what it said while loading)
+    h.used = ++this.uses;
+    h.busy = true;
+    return h;
+  }
+
+  private async open(key: string, fmt: Format, o: PageOpts, url: string): Promise<PageHandle> {
+    if (o.theme) resolveTheme(o.theme); // (a name that is not a theme fails here, not in the page)
+    const browser = await this.chrome();
+    // (the oldest idle page goes when there are too many: each holds a GL context and its targets)
+    for (;;) {
+      const idle = [...this.pages].filter(([, p]) => !p.busy);
+      if (this.pages.size < (this.opts.maxPages ?? 4) || !idle.length) break;
+      const [k, old] = idle.sort((a, b) => a[1].used - b[1].used)[0]!;
+      this.pages.delete(k);
+      await old.page.close().catch(() => {});
+    }
+    const early: string[] = [], gen = this.gen;
+    let handle: PageHandle | undefined;
+    const page = await openPage(browser, pageUrl(url, fmt, o), fmt, o, (l) => (handle ? handle.logs : early).push(l));
+    const h = handle = new PageHandle(page, key, gen, fmt, 0);
+    h.logs = early;
+    page.on('crash', () => { h.dead = true; });
+    page.on('close', () => { h.dead = true; });
+    this.pages.set(key, h);
+    return h;
+  }
+
+  /** Give a page back after its request: the next request may use it. */
+  release(h: PageHandle) {
+    if (!h.busy) return;
+    h.busy = false;
+    if (!h.retired) {
+      // (a format's extra pages, opened while its first was in use, close once none of them is: one GL context each)
+      const base = h.key.slice(0, h.key.lastIndexOf('#'));
+      const same = [...this.pages.values()].filter((p) => p.key.startsWith(`${base}#`));
+      if (same.length > 1 && same.every((p) => !p.busy)) {
+        for (const p of same) if (!p.key.endsWith('#0')) { this.pages.delete(p.key); void p.page.close().catch(() => {}); }
+      }
+      return;
+    }
+    void h.page.close().catch(() => {});
+    const r = this.retiring.find((x) => x.pages.has(h));
+    if (!r) return;
+    r.pages.delete(h);
+    if (!r.pages.size) { this.retiring.splice(this.retiring.indexOf(r), 1); void r.srv.stop().catch(() => {}); }
   }
 
   /** The dev server's URL and the config's format and theme (starting the server if needed). */
@@ -311,7 +369,8 @@ export class Renderer {
 
   /** Drop a page (after a crash or a failed request), so the next request opens a fresh one. */
   async drop(h: PageHandle) {
-    this.pages.delete(h.key);
+    this.release(h);
+    if (this.pages.get(h.key) === h) this.pages.delete(h.key);
     await h.page.close().catch(() => {});
   }
 
@@ -322,6 +381,7 @@ export class Renderer {
 
   async close() {
     await this.closePages();
+    for (const r of this.retiring.splice(0)) { for (const h of r.pages) await h.page.close().catch(() => {}); await r.srv.stop().catch(() => {}); }
     await this.browser?.close().catch(() => {});
     this.browser = undefined;
     await this.srv?.stop().catch(() => {});
