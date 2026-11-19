@@ -7,7 +7,7 @@ The export renders each frame as the average of sub-frames spread over the shutt
 What that asks of a scene:
 
 - Sub-frames are rendered out of time order and in any number: the output depends on `f.t` only. Nothing may count `render()` calls or carry state between them.
-- Per-frame flicker and jitter use `frameIdx(t)`, which is constant over the frame's shutter. `Math.floor(t * FPS)` switches at the frame's own time and double-exposes two states in every frame.
+- Per-frame flicker and jitter use `frameIdx(t)`, which is constant over the frame's shutter. On a clip that remaps time `f.t` runs at another rate and off the frame grid, so jitter that must hold for the output frame uses `frameIdx(f.vt)`. `Math.floor(t * FPS)` switches at the frame's own time and double-exposes two states in every frame.
 - Noise seeded by continuous `t` is resampled in every sub-frame: it averages out, slowly, and makes the sampler work harder (and the export slower). Seed it with `frameIdx(t)` unless it is meant to smooth out.
 - A particle emitter whose rate changes over time takes the rate as a function of each particle's birth time; a rate read at the current `t` re-times every particle between sub-frames.
 - Post parameters a scene returns (shake, flash, zoom, fades) are read at one point of the shutter, 1/8 of it after the frame's time; grain and dither are drawn once per frame.
@@ -15,7 +15,7 @@ What that asks of a scene:
 
 ## Stateful scenes
 
-Simulation (particles integrated over time, feedback buffers) sets `stateful = true`, resets in `reset()` and integrates with `f.dt`. After a seek the engine resets it and fast-forwards from up to `prerollMax` seconds (default 6) before `t` (`f.preroll` is true then: skip work that only matters on screen). Such a video exports with a fixed `--samples N`, never `auto`, and on one worker.
+Simulation (particles integrated over time, feedback buffers) sets `stateful = true`, resets in `reset()` and integrates with `f.dt`. After a seek the engine resets it and fast-forwards from up to `prerollMax` seconds (default 6) before `t` (`f.preroll` is true then: skip work that only matters on screen). Such a video exports with a fixed `--samples N`, never `auto`, and on one worker. Its clip may set `speed` (`f.dt` is then in scene seconds, and `prerollMax` counts scene seconds), not `offset`, `reverse`, `hold` or `freeze`: the scene fails to load with them.
 
 ## Transitions
 

@@ -112,7 +112,7 @@ export const rig = orbit({ target: [0, 0, 0], radius: 6, height: 2, from: -30, t
 export const MOON: [number, number, number] = [1.2, 0.5, 0];
 
 // scenes/labels.ts (track 1), in render():
-const p = screenPoint(rig(f.t - this.ctx.clip('orbit').start), MOON, { fov: 35 });   // the stage's fov
+const p = screenPoint(rig(f.vt - this.ctx.clip('orbit').start), MOON, { fov: 35 });   // the stage's fov
 if (!p.behind) this.tag.draw(this.ctx.renderer, out, { x: p.x + 40, y: p.y - 22 });
 ```
 

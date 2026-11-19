@@ -161,7 +161,12 @@ function setupExport() {
     props: engine.props,
     /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
     stateful,
-    timeline: TIMELINE.map(({ id, start, end, track, check }) => ({ id, start, end, track: track ?? 0, ...(check?.exempt ? { exempt: check.exempt } : {}) })),
+    timeline: TIMELINE.map(({ id, start, end, track, check, freeze }) => {
+      // (a frozen clip is still on purpose: `reel check` does not report it as frozen)
+      const ex = check?.exempt;
+      const exempt = ex === true ? ex : freeze !== undefined ? [...new Set([...(ex ?? []), 'frozen' as const])] : ex;
+      return { id, start, end, track: track ?? 0, ...(exempt ? { exempt } : {}) };
+    }),
     /** The theme's palette, #rrggbb per key. */
     palette: THEME.palette,
     /** Ids of the clips on screen at t, lowest track first. */

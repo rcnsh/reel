@@ -14,7 +14,7 @@ Where to read before acting:
 
 ## Words
 
-- **Scene**: a class that draws (`scenes/<name>.ts` in a project). **Clip**: a scene placed on the timeline, with an id and a window. **Track**: a layer of clips; tracks stack in number order. **Project**: the folder holding a video's config, scenes and data.
+- **Scene**: a class that draws (`scenes/<name>.ts` in a project). **Clip**: a scene placed on the timeline, with an id and a window, and optionally a time mapping (`speed`, `offset`, `reverse`, `hold`, `freeze`: `src/engine/cliptime.ts`) that the scene's `f.t` follows. **Track**: a layer of clips; tracks stack in number order. **Project**: the folder holding a video's config, scenes and data.
 - A narrated project's script is split into **plates** (`# name` headers in `narration.txt`); each becomes a section in `data/audio.json` and, through `clipsFromSections`, a clip shown by the scene of the same name.
 
 ## How the pieces connect
@@ -46,7 +46,7 @@ reel video --mix (or reel events ─▶ data/cues.json ─▶ reel mix) + mix.js
 
 ## Rules
 
-- **Deterministic.** A scene's output depends on `f.t` only. Randomness comes from `hash`/`mulberry32` with fixed seeds; per-frame jitter uses `frameIdx(t)`, which holds across a frame's shutter, and a frame step is `1 / FPS`, never `1 / 60`. `--samples auto` renders sub-frames out of order and in any number, so nothing may count `render()` calls. Simulation state means `stateful = true`, and the engine then refuses adaptive sampling (render such a video with a fixed `--samples N`).
+- **Deterministic.** A scene's output depends on `f.t` only. Randomness comes from `hash`/`mulberry32` with fixed seeds; per-frame jitter uses `frameIdx(t)`, which holds across a frame's shutter (on a clip that remaps time, `frameIdx(f.vt)`: `f.t` there runs at the clip's speed and off the frame grid), and a frame step is `1 / FPS`, never `1 / 60`. `--samples auto` renders sub-frames out of order and in any number, so nothing may count `render()` calls. Simulation state means `stateful = true`, and the engine then refuses adaptive sampling (render such a video with a fixed `--samples N`).
 - **Anchored to words.** Scenes find timing by text: `ctx.words.get('some words')` (throws when the line is missing, so a script edit fails loudly) and its word times. Times typed as numbers break the moment the voice is re-timed.
 - **Logical pixels.** Scenes lay out in logical px, `W`×`H` (the `--size`, default 1920×1080), at every output scale; `PW`/`PH`, `gl_FragCoord`, `fwidth` and canvas backing sizes are physical. GLSL uses `FRAG_PX`, `PX_SCALE` and `pxLine` (`skills/reel-authoring/reference/sampling.md`, "Output scale").
 - **Linear colour, from the theme.** Render targets are HalfFloat linear HDR. Colours come from the theme's palette (`src/engine/palette.ts`): `LIN.<key>` for GL, `C_<KEY>` in GLSL, `rgba('<key>', a)` for Canvas2D. Scenes meant to follow any theme use the keys every palette has: `bg`, `fg`, `accent`, `accentHi`, `accentLo`. The engine's own colours (flash, invert, heat ramp, spark, HUD) come from those keys too, never from a theme's extra keys.

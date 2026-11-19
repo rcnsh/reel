@@ -6,6 +6,7 @@ import type { AudioData, AudioSample } from './audio';
 import type { Words } from './words';
 import type { Compositor } from './gl';
 import type { PostParams } from './post';
+import type { ClipTime } from './cliptime';
 import type { Grade } from './tracks';
 
 export interface SceneCtx {
@@ -25,12 +26,13 @@ export interface SceneCtx {
   /** The clip's id and its free-form params (lets one scene module serve several clips). */
   id: string;
   params: Record<string, unknown>;
-  /** The clip's window (seconds). */
+  /** The scene's window (seconds, in its own time: the clip's window unless the clip remaps time; see Frame.start). */
   start: number;
   end: number;
   /**
-   * Another clip of the timeline by id: its window and track (throws when there is none, so a renamed clip fails
-   * loudly). For a clip that follows another: `f.t - this.ctx.clip('orbit').start` is that clip's local time.
+   * Another clip of the timeline by id: its window in video time and its track (throws when there is none, so a
+   * renamed clip fails loudly). For a clip that follows another: `f.vt - this.ctx.clip('orbit').start` is that
+   * clip's local time (when it does not remap its own).
    */
   clip(id: string): { id: string; start: number; end: number; track: number };
   /**
@@ -57,21 +59,32 @@ export interface SceneCtx {
  * The clip whose scene is being constructed and initialised (null at any other time): what a component made as a
  * scene's field reads to place things in video time, such as a video's own sound.
  */
-export const LOADING: { clip: { id: string; start: number; end: number } | null } = { clip: null };
+export const LOADING: { clip: { id: string; start: number; end: number; time: ClipTime } | null } = { clip: null };
 
 export interface Frame {
-  /** Time in the video (s). */
+  /**
+   * The scene's time (s): the video's, unless the clip remaps it (speed, offset, reverse, freeze, hold), when it is
+   * start + lt. Word times and the window compare with it.
+   */
   t: number;
-  /** Time since the previous rendered frame: 1/fps on export, 0 after a seek (and at the start of each chunk a worker of a multi-worker export renders, unless a scene is stateful). Not for drawing: a frame depends on t alone. */
+  /** Time in the video (s): what the audio analysis (a, beat, bar) is read at. Equal to t on a clip without remapping. */
+  vt: number;
+  /**
+   * How much scene time the step from the previous rendered frame covers (1/fps on export at speed 1; 0 after a seek,
+   * at the start of each chunk a worker of a multi-worker export renders unless a scene is stateful, or while frozen
+   * or held; not for drawing: a frame depends on t alone). Never negative: on a reversed clip f.t falls by dt.
+   */
   dt: number;
-  /** Local time since this scene's start, and 0..1 progress through its window. */
+  /** Local time since this scene's start, and 0..1 progress through its window (both in the scene's time). */
   lt: number;
   p: number;
+  /** The scene's window: [start, end) in its own time (the clip's window, unless the clip remaps time). */
   start: number;
   end: number;
   /**
-   * The span of video time this frame's sub-frames cover, centred on t (s): 0 in a one-sample render (previews,
-   * stills, check), dt x shutter in an export with --samples. What prepare() must have ready for render().
+   * The span of scene time this frame's sub-frames cover, centred on t (s): 0 in a one-sample render (previews,
+   * stills, check), dt x shutter (times the clip's speed) in an export with --samples. What prepare() must have
+   * ready for render().
    */
   exposure: number;
   /** True when time jumped (scrub/seek, a new export chunk) — stateful scenes should reset. */
