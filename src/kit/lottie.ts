@@ -6,7 +6,7 @@
 import * as THREE from 'three';
 import type { AnimationItem } from 'lottie-web';
 import { SCALE } from '../engine/gl';
-import { awaitBeforeFirstFrame } from '../engine/html';
+import { awaitBeforeFirstFrame, notLate } from '../engine/html';
 import type { Frame } from '../engine/scene';
 import { drawPicture } from './image';
 import { safeBox, windowOf, type Box, type ComponentOptions } from './common';
@@ -47,6 +47,7 @@ export class LottieBox {
 
   constructor(o: LottieBoxOptions) {
     this.o = o;
+    notLate(o.label ?? o.src);
     this.at = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     this.tex.colorSpace = THREE.SRGBColorSpace;

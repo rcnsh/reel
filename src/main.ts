@@ -138,6 +138,8 @@ function setupExport() {
     track: engine.audio.track,
     /** Scene and shader errors: the page's load errors and the render errors since beginRequest(). */
     get errors() { return engine.errors; },
+    /** Timeline problems that are not errors (a transition that never plays), by clip. */
+    get warnings() { return engine.warnings; },
     /**
      * Start a request on a warm page: render errors are reported again from here (once per clip). Returns false
      * when the page can no longer render (its GL context was lost: the GPU process crashed or was reset).
@@ -179,7 +181,17 @@ function setupExport() {
       try { engine.render(t, 1 / FPS, true, samples, shutter); } finally { engine.collectBoxes = false; }
       const px = { data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE };
       const boxes = engine.lastBoxes.map((b) => ({ ...b, ...(b.kind === 'text' && b.color && /^#[0-9A-F]{6}$/i.test(b.color) && (b.alpha ?? 1) >= 0.05 ? { m: measureText(px, b, hexRgb(b.color)) } : {}) }));
-      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors, textDraws: engine.lastTextDraws };
+      return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors, textDraws: engine.lastTextDraws, clocks: engine.lastClocks, stepped: [...engine.lastStepped] };
+    },
+    /**
+     * For `reel check`'s second renders: render t by a seek (whatever was rendered before) and return the frame's
+     * stats, the scene errors so far and whether a scene failed in this render (even one that had failed before).
+     */
+    async recheck(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
+      engine.forgetTime();
+      const failures = engine.failures;
+      await engine.renderFrame(t, 1 / FPS, true, samples, shutter);
+      return { stats: frameStats({ data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE }), errors: engine.errors, failed: engine.failures > failures };
     },
     /**
      * The last rendered frame as a PNG (base64): the export's pixels at full resolution, or `crop` (x, y, w, h in

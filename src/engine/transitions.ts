@@ -169,6 +169,35 @@ export function transitionOf(t: unknown, where: string): Transition {
   return o as unknown as Transition;
 }
 
+/**
+ * Clips whose `transition` is set but never runs: a transition plays over the overlap with the clip before it on
+ * its track, so a clip that starts as (or after) that one ends, overlaps it by less than `frame` seconds, or is
+ * first on its track, just cuts. One warning
+ * per such clip, naming it.
+ */
+export function idleTransitions(clips: readonly { id: string; start: number; end: number; track?: number; transition?: unknown }[], frame = 0): { clip: string; message: string }[] {
+  const out: { clip: string; message: string }[] = [];
+  for (const [i, e] of clips.entries()) {
+    if (e.transition === undefined) continue;
+    const track = e.track ?? 0;
+    // (the order the engine composites a track in: by start, clips that start together in timeline order)
+    const before = clips.filter((o, j) => (o.track ?? 0) === track && (o.start < e.start || (o.start === e.start && j < i)));
+    // (an overlap shorter than a frame shows on no frame: a cut; with a little slack for 9 - 1/30 written as a start)
+    if (before.some((o) => o.end > e.start && o.end - e.start >= frame - 1e-6)) continue;
+    const kind = typeof e.transition === 'string' ? e.transition : (e.transition as { kind?: string }).kind;
+    const prev = before.sort((a, b) => b.end - a.end)[0];
+    out.push({
+      clip: e.id,
+      message: prev
+        ? `clip '${e.id}' has a ${kind} transition but ${prev.end > e.start ? 'overlaps' : 'does not overlap'} '${prev.id}' before it on track ${track}${prev.end > e.start ? ' by less than a frame' : ''} ('${prev.id}' ends at ${+prev.end.toFixed(3)} s, '${e.id}' starts at ${+e.start.toFixed(3)} s), so it cuts: a transition plays over the overlap, so overlap it by the transition's length (start '${e.id}' that long before '${prev.id}' ends)`
+        : `clip '${e.id}' has a ${kind} transition but no clip before it on track ${track} to come in over, so it never plays: a transition plays over the overlap with the clip before it on its track`,
+    });
+  }
+  return out;
+}
+
+const inOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
+
 /** The transition's easing curve: its `ease`, else its kind's default (linear for a custom transition). */
 export function transitionEase(t: Transition): (x: number) => number {
   return ease[t.ease ?? (t.kind === undefined ? 'linear' : KINDS[t.kind].ease)];

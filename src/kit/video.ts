@@ -3,7 +3,7 @@
 // contain, stacked alpha, held or blended frames; the clip's sound goes to the mix.
 import * as THREE from 'three';
 import { createFile, DataStream, Endianness, type ISOFile } from 'mp4box';
-import { awaitBeforeFirstFrame } from '../engine/html';
+import { awaitBeforeFirstFrame, notLate } from '../engine/html';
 import { LOADING, type Frame } from '../engine/scene';
 import { sound } from '../engine/util';
 import { drawPicture, kenBurnsAt, type Framing } from './image';
@@ -105,6 +105,7 @@ export class VideoClip {
     const own = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     const clip = LOADING.clip;
+    notLate(o.label ?? o.src);
     awaitBeforeFirstFrame((async () => {
       const res = await fetch(o.src);
       if (!res.ok) throw new Error(`video '${o.src}' did not load (a path in the project, served from its folder): ${res.status} ${res.statusText}`);

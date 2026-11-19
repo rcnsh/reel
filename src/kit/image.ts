@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { FSPass, H, SCALE } from '../engine/gl';
 import { assetPlaceholder, declaredAsset } from '../engine/assets';
-import { awaitBeforeFirstFrame } from '../engine/html';
+import { awaitBeforeFirstFrame, notLate } from '../engine/html';
 import { decodePng16, pngDepth } from '../engine/png16';
 import { report, reporting } from '../engine/report';
 import type { Frame } from '../engine/scene';
@@ -161,6 +161,7 @@ export class ImageBox {
 
   constructor(o: ImageBoxOptions) {
     this.o = o;
+    notLate(o.label ?? o.alt ?? o.src);
     this.at = windowOf(o.at, o.label ?? o.alt ?? o.src);
     this.box = o.box ?? safeBox();
     awaitBeforeFirstFrame(this.load().catch(async (e: unknown) => {

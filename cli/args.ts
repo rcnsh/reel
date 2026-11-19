@@ -19,6 +19,7 @@ reuses; each exits 1 on a scene error)
                              spaced from --from to --to (both included), or --frames N consecutive
                              frames from --from     [--cell 360] [--out <file.png>] [--max-size <px>]
   check                      sweep the video for problems and print findings: blank or frozen frames,
+                             frames that differ when rendered again, transitions with no overlap,
                              scene errors, and the text HTML layers and scenes report (report(),
                              reportText()): off the frame, in the safe margin, overlapping, too small,
                              low in contrast, overflowing or clipped; each with a cropped image.

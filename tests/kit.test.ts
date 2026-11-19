@@ -112,11 +112,17 @@ describe('helpers', () => {
     expect(kineticPieces('Café 🎬!', 'letter')).toEqual([['C', 'a', 'f', 'é'], ['🎬', '!']]);
   });
 
-  test('cssColor maps palette keys to theme variables and passes CSS colours through', () => {
+  test('cssColor maps palette keys to theme variables, passes CSS colours through and throws on an unknown key', () => {
     expect(cssColor('accentHi')).toBe('var(--accent-hi)');
-    expect(cssColor('ink2')).toBe('var(--ink2)');
+    expect(cssColor('accentLo')).toBe('var(--accent-lo)');
     expect(cssColor('#ff0000')).toBe('#ff0000');
     expect(cssColor('white')).toBe('white');
+    expect(cssColor('rgb(1, 2, 3)')).toBe('rgb(1, 2, 3)');
+    // (under bun the theme is neutral, which has 'muted'; print and film do not)
+    expect(cssColor('muted')).toBe('var(--muted)');
+    expect(() => cssColor('accent-hi')).toThrow("colour 'accent-hi'");
+    expect(cssColor('var(--brand)')).toBe('var(--brand)');
+    expect(() => cssColor('nope')).toThrow("colour 'nope': the theme has no such palette key (it has bg, fg, accent");
     expect(cssColor('none')).toBe('none');
     expect(esc('<a & "b">')).toBe('&lt;a &amp; &quot;b&quot;&gt;');
   });
@@ -279,6 +285,107 @@ test.skipIf(!hasChrome)('a component timed by a span of the words shows over the
   expect(await differs(16.5, after)).toBeLessThanOrEqual(1);
   expect(await differs(13.3, after)).toBeLessThanOrEqual(1);
   expect(await differs(13.3, during)).toBeGreaterThan(100);
+}, 180_000);
+
+// the mistakes that used to pass silently: a component made at a module's top level or lazily in render(), a
+// colour that only another theme has, a window in video seconds, a frame drawn from Math.random(), a transition
+// with nothing to overlap
+const mistakes = fixture('mistakes', {
+  'reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({
+  size: [640, 360], fps: 30, theme: 'print',
+  timeline: () => [
+    { id: 'module', scene: () => import('./scenes/module'), start: 0, end: 1 },
+    { id: 'lazy', scene: () => import('./scenes/lazy'), start: 1, end: 2 },
+    { id: 'muted', scene: () => import('./scenes/muted'), start: 2, end: 3 },
+    { id: 'late', scene: () => import('./scenes/late'), start: 3, end: 4 },
+    { id: 'random', scene: () => import('./scenes/random'), start: 4, end: 5, transition: 'wipe' },
+    { id: 'image', scene: () => import('./scenes/image'), start: 5, end: 6 },
+    { id: 'shared', scene: () => import('./scenes/shared'), start: 6, end: 7 },
+  ],
+});
+`,
+  'scenes/module.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, TextBlock, clearRT, LIN } from 'reel';
+const title = new TextBlock({ text: 'Made at the top level' });
+export default class M extends Scene {
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); title.draw(this.ctx.renderer, out, f); }
+}
+`,
+  'scenes/lazy.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, TextBlock, clearRT, LIN } from 'reel';
+export default class L extends Scene {
+  title?: TextBlock;
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    this.title ??= new TextBlock({ text: 'Made lazily' });
+    this.title.draw(this.ctx.renderer, out, f);
+  }
+}
+`,
+  'scenes/muted.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, TextBlock, clearRT, LIN } from 'reel';
+export default class C extends Scene {
+  title = new TextBlock({ text: 'Muted', color: 'muted' });
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); this.title.draw(this.ctx.renderer, out, f); }
+}
+`,
+  'scenes/late.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, TextBlock, clearRT, LIN } from 'reel';
+export default class T extends Scene {
+  title = new TextBlock({ text: 'Late', at: [3.2, 3.8] });
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); this.title.draw(this.ctx.renderer, out, f); }
+}
+`,
+  'scenes/image.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, ImageBox, clearRT, LIN } from 'reel';
+export default class I extends Scene {
+  img?: ImageBox;
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    this.img ??= new ImageBox({ src: 'missing.png' });
+    this.img.draw(this.ctx.renderer, out, f);
+  }
+}
+`,
+  'logo.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="#c8301e"/></svg>',
+  'scenes/shared.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, ImageBox, clearRT, LIN } from 'reel';
+// (an image made at a module's top level, as a helper shared by scenes would: loaded with the scenes, and fine)
+const logo = new ImageBox({ src: 'logo.svg', box: { x: 220, y: 80, w: 200, h: 200 } });
+export default class S extends Scene {
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); logo.draw(this.ctx.renderer, out, f); }
+}
+`,
+  'scenes/random.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, Layer2D, clearRT, LIN, rgba, W, H } from 'reel';
+export default class R extends Scene {
+  layer = new Layer2D();
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    clearRT(this.ctx.renderer, out, LIN.bg);
+    this.layer.clear();
+    this.layer.ctx.fillStyle = rgba('fg');
+    this.layer.ctx.fillRect(Math.random() * W * 0.8, H * 0.3, W * 0.2, H * 0.4);
+    this.ctx.comp.draw(this.ctx.renderer, this.layer.upload(), out);
+  }
+}
+`,
+});
+afterAll(async () => { await reel(['daemon', 'stop', '--project', mistakes.dir]); mistakes.cleanup(); });
+
+test.skipIf(!hasChrome)('check names the mistakes that used to draw nothing, or the wrong thing, silently', async () => {
+  const r = await reel(['check', '--json', '--project', mistakes.dir]);
+  const findings: (Finding & { message: string })[] = r.json().findings;
+  const of = (clip: string, kind: string) => findings.filter((f) => f.clip === clip && f.kind === kind).map((f) => f.message).join('\n');
+  expect(of('module', 'sceneError')).toContain('make it a field of the scene or create it in init()');
+  expect(of('lazy', 'sceneError')).toContain('make it a field of the scene or create it in init()');
+  expect(of('image', 'sceneError')).toContain('missing.png: a kit component was made after the scenes loaded');
+  expect(findings.filter((f) => f.clip === 'shared')).toEqual([]);
+  expect(of('muted', 'sceneError')).toMatch(/colour 'muted': the theme has no such palette key \(it has [^)]*\bink2\b/);
+  expect(of('late', 'sceneError')).toContain("is outside the clip 'late'");
+  expect(of('random', 'nondeterministic')).toContain("'random' Math.random() was called");
+  expect(of('random', 'timeline')).toContain("has a wipe transition but does not overlap 'late'");
+  expect(r.code).toBe(1);
 }, 180_000);
 
 test.skipIf(!hasChrome)('kinetic text: a frame is the same whatever frame came before it', async () => {
