@@ -43,7 +43,7 @@ export default class Card extends Scene {
 
 ## CSS animations
 
-`@keyframes` and `animation` work as written, on the clip's clock: every animation in a layer is paused and set to the time since the clip's start, so `animation: rise .8s .3s both` starts 0.3 s into the clip, in previews, stills and exports alike, and a seek backwards shows the same frame. An animation started later by a class you add (a word lighting up when it is said) begins at its element's `data-at` (clip-local seconds; on the element or an ancestor): set it together with the class, from `f`.
+`@keyframes` and `animation` work as written, on the clip's clock: every animation in a layer is paused and set to the time since the clip's start, so `animation: rise .8s .3s both` starts 0.3 s into the clip, in previews, stills and exports alike, and a seek backwards shows the same frame. An animation started later by a class you add (a word lighting up when it is said) begins at its element's `data-at` (clip-local seconds; on the element or an ancestor): set it together with the class, from `f`. The engine owns these animations: a layer that changes is laid out again from scratch, which replaces its `Animation` objects and fires `animationstart`/`animationcancel`, so don't keep the objects or drive anything from those events; state comes from `f`.
 
 CSS transitions jump to their end at once: when a style changed is not a function of `t`. Animate with `@keyframes`, or set the value from `f` in `update`.
 

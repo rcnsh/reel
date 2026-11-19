@@ -115,6 +115,7 @@ export const htmlLayers = {
       try { if (l.sync(f)) dirty.push(l); } catch (e) { if (!errors.has(l.owner)) errors.set(l.owner, `${l.label}: ${describe(e)}`); }
     }
     if (!dirty.length) return errors;
+    rebuild(dirty.filter((l) => l.stale), frames);
     for (const l of dirty) {
       try { await l.loadImages(); } catch (e) { if (!errors.has(l.owner)) errors.set(l.owner, `${l.label}: ${describe(e)}`); }
     }
@@ -125,6 +126,19 @@ export const htmlLayers = {
     return errors;
   },
 };
+
+/**
+ * Have layers laid out and painted from scratch: out of the render tree and back, all in one style recalc.
+ * Chrome keeps an element's paint state across DOM changes (text in an element that once had an opacity below 1
+ * rasterises a fraction of a pixel off from the same DOM painted fresh), so without this a layer's picture would
+ * depend on the frames painted before it, and a seek, or how an export is split between pages, would change it.
+ * The round trip restarts CSS animations, so they are set to the frame again (scroll offsets survive it).
+ */
+function rebuild(stale: HtmlLayer[], frames: Map<string, Frame>) {
+  for (const l of stale) l.el.style.display = 'none';
+  for (const l of stale) void getComputedStyle(l.el).display; // (the style recalc drops their layout and paint state)
+  for (const l of stale) { l.el.style.display = 'block'; l.retime(frames.get(l.owner)!); }
+}
 
 /** Keep a promise (an image a component loads) for the engine to await before the first frame. */
 export function awaitBeforeFirstFrame<T>(p: Promise<T>): Promise<T> {
@@ -230,6 +244,8 @@ export class HtmlLayer {
   private uploaded = false;
   private boxCache: { key: string; boxes: DomBox[] } | null = null;
   private fontsOk = new Set<string>();
+  /** Set by sync: the layer changed while it was laid out, so it is to be laid out again from scratch (rebuild). */
+  stale = false;
 
   constructor(o: HtmlLayerOptions | string = {}, css?: string) {
     const opts: HtmlLayerOptions = typeof o === 'string' ? { html: o, css } : o;
@@ -292,7 +308,8 @@ export class HtmlLayer {
 
   /** The engine's: show the layer for frame f and run its update; true when its picture changed since the last upload. */
   sync(f: Frame): boolean {
-    if (this.el.style.display === 'none') this.el.style.display = 'block';
+    const hidden = this.el.style.display === 'none';
+    if (hidden) this.el.style.display = 'block';
     this.update?.(f, this);
     this.timeAnimations(f);
     this.observer.takeRecords();
@@ -300,8 +317,13 @@ export class HtmlLayer {
     if (this.uploaded && now === this.shown) return false;
     this.checkFonts();
     this.shown = now;
+    // (a layer coming out of display: none is laid out from scratch already)
+    this.stale = !hidden;
     return true;
   }
+
+  /** The engine's: set the layer's animations to frame f again (after rebuild restarted them). */
+  retime(f: Frame) { this.timeAnimations(f); }
 
   hide() { if (this.el.style.display !== 'none') this.el.style.display = 'none'; }
 
