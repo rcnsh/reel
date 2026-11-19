@@ -67,7 +67,8 @@ Writes `data/audio.json` and copies the song to `audio/` as the track:
 - Onsets `[time, strength]`: `kick snare hat` from the drum stem, `vocal` from the vocal stem.
 - Sections: `--sections sections.json` (`[{ "name": "intro", "bar": 0 }, { "name": "drop", "start": 31.2 }]`, named
   after scenes), else segmented (`part1`, `part2` …).
-- `--fast`: no models (librosa; stems are rough proxies; a moving tempo loses it). For drafts.
+- `--fast`: no models (librosa; stems are rough proxies; one fitted tempo loses a moving one, `--free-tempo`
+  follows it). For drafts.
 - A bed under narration: time the narration first, then `reel analyze bed.flac --keep-sections --offset 12`, and
   lay it in `mix.json` from the same time: `{ "file": "bed.flac", "at": 12 }`.
 
