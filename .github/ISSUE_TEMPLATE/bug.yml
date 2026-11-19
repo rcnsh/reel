@@ -1,0 +1,23 @@
+name: Bug
+description: Something renders wrong, fails or crashes
+labels: [bug]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What happened
+      description: The command you ran, what you expected and what you got. Paste the output (`--json` helps).
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: How to reproduce
+      description: The smallest project or example that shows it (`reel init` gives a starting point), and the frame times.
+  - type: input
+    id: env
+    attributes:
+      label: Environment
+      description: OS, `bun --version`, and the `gl` field of `reel gpu --project <folder> --json`
+    validations:
+      required: true

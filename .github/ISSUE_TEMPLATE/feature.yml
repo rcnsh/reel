@@ -1,0 +1,11 @@
+name: Feature
+description: Something reel should do
+labels: [enhancement]
+body:
+  - type: textarea
+    id: what
+    attributes:
+      label: What you want to make
+      description: The video or the step it's for, and what's missing or awkward today.
+    validations:
+      required: true
