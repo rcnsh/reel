@@ -4,8 +4,8 @@
 import { HEX } from './palette';
 
 /** The rules of `reel check` a box or a clip can be exempt from. */
-export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped' | 'tiny' | 'empty' | 'unreported';
-export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped', 'tiny', 'empty', 'unreported'];
+export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped' | 'tiny' | 'empty' | 'unreported' | 'nondeterministic' | 'timeline';
+export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped', 'tiny', 'empty', 'unreported', 'nondeterministic', 'timeline'];
 
 export interface DrawnBox {
   /**
@@ -57,6 +57,10 @@ let paused = false;
 /** fillText and strokeText calls of this frame, by clip: text the check can only see when it is also reported. */
 let draws: Record<string, number> = {};
 let lastDraws: Record<string, number> = {};
+/** Math.random, Date.now and performance.now called by the project's code this frame, by clip and name (1: called): what makes a frame depend on more than t. */
+let clocks: Record<string, Record<string, number>> = {};
+let lastClocks: Record<string, Record<string, number>> = {};
+let stacks = 0;
 
 let scratch = 0;
 /**
@@ -87,6 +91,43 @@ function hookTextDraws() {
       });
     }
   }
+  // (counted inside a clip's draw, and only when called from the project's own code: the engine's and its
+  // libraries' calls (three's ids, lottie-web's) are not the scene's doing)
+  const wrap = (o: object | undefined, k: string, name: string) => {
+    const orig = (o as Record<string, unknown> | undefined)?.[k];
+    if (typeof orig !== 'function') return;
+    Object.defineProperty(o, k, {
+      configurable: true, writable: true,
+      value(this: unknown, ...a: unknown[]) {
+        // (stacks capped per frame: three and other libraries call these a lot, and none of theirs count)
+        if (sink && !paused && clip && !clocks[clip]?.[name] && stacks++ < 1024) {
+          // (the stack down to the caller and no further: capturing more costs, and three calls these a lot)
+          const E = Error as { stackTraceLimit?: number }, was = E.stackTraceLimit;
+          E.stackTraceLimit = 2;
+          let stack: string | undefined;
+          try { stack = new Error().stack; } finally { E.stackTraceLimit = was; }
+          if (fromProject(stack)) (clocks[clip] ??= {})[name] = 1;
+        }
+        return (orig as (...x: unknown[]) => unknown).apply(this, a);
+      },
+    });
+  };
+  wrap(Math, 'random', 'Math.random()');
+  wrap(Date, 'now', 'Date.now()');
+  wrap(globalThis.performance, 'now', 'performance.now()');
+}
+
+/**
+ * Whether the caller of a wrapped function (the third line of `stack`) is the project's code: a module the dev
+ * server serves from outside the engine's `src/` and outside any `node_modules/`.
+ */
+export function fromProject(stack: string | undefined) {
+  const line = stack?.split('\n')[2] ?? '';
+  const url = /\(?((?:https?|file):\/\/[^\s)]+?):\d+:\d+\)?\s*$/.exec(line)?.[1];
+  if (!url) return false;
+  let p: string;
+  try { p = new URL(url).pathname; } catch { return false; }
+  return !p.startsWith('/src/') && !p.includes('/node_modules/');
 }
 
 /** Whether this frame's boxes are being collected (to skip work that only feeds report()). */
@@ -146,7 +187,7 @@ const cssHex = (s: string) => parseCss(s)?.[0];
 
 /** The engine's side: collect the boxes of the next draws, naming the clip that draws. */
 export const boxes = {
-  begin() { hookTextDraws(); sink = []; draws = {}; paused = false; },
+  begin() { hookTextDraws(); sink = []; draws = {}; clocks = {}; stacks = 0; paused = false; },
   clip(id: string, onTrack = 0) { clip = id; track = onTrack; },
   /** Scale the alpha of what `id` reported by `k` (its weight in a crossfade, its track's opacity). */
   fade(id: string, k: number) {
@@ -154,7 +195,9 @@ export const boxes = {
   },
   /** Draws that are not the frame's own (a stateful scene fast-forwarding) report nothing. */
   pause(on: boolean) { paused = on; },
-  end(): ReportedBox[] { const b = sink ?? []; sink = null; clip = ''; lastDraws = draws; draws = {}; return b; },
+  end(): ReportedBox[] { const b = sink ?? []; sink = null; clip = ''; lastDraws = draws; draws = {}; lastClocks = clocks; clocks = {}; return b; },
   /** The fillText and strokeText calls per clip between the last begin() and end(). */
   textDraws(): Record<string, number> { return lastDraws; },
+  /** The Math.random, Date.now and performance.now calls per clip (and per name) between the last begin() and end(). */
+  clocks(): Record<string, Record<string, number>> { return lastClocks; },
 };

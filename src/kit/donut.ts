@@ -3,7 +3,8 @@
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
 import { cssColor, esc, HtmlComponent, safeBox, UNIT, val, type Anim } from './common';
-import { formatNumber, progressOf, seriesColor, type ProgressOptions } from './charts';
+import { formatNumber, seriesColor } from './charts';
+import { progressOf, type ProgressOptions } from './common';
 
 /** A slice of a ring: where it starts and ends, in turns clockwise from 12 o'clock (0 to 1), and its share. */
 export interface Slice { start: number; end: number; share: number }
@@ -160,7 +161,7 @@ export class DonutChart extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const p = progressOf(this.o, f), { cx, cy, r0, r1, gap, out } = this.geo, n = this.slices.length;
+    const p = progressOf(this.o, f, this.window(f)[0]), { cx, cy, r0, r1, gap, out } = this.geo, n = this.slices.length;
     this.layer.$$('path').forEach((e, i) => {
       const s = this.slices[i]!, mid = (s.start + s.end) / 2;
       // (the gap is a fixed width at the outer edge: half of it off each end of every slice, none for a lone slice)

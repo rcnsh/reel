@@ -79,7 +79,7 @@ export class Words {
   linesIn(t0: number, t1: number): Line[] {
     return this.lines.filter((l) => l.end > t0 && l.start < t1);
   }
-  /** Lines whose text includes `s` (case-insensitive, straight or curly quotes). Handy for finding a line by content. */
+  /** Lines whose text includes `s` (case-insensitive; straight or curly quotes, `...` or `…`, any dash, spaced or not). Handy for finding a line by content. */
   find(s: string): Line[] {
     const q = fold(s);
     return this.lines.filter((l) => fold(l.text).includes(q));
@@ -137,4 +137,7 @@ export class Words {
 }
 
 export const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9()]/g, '');
-const fold = (s: string) => s.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"');
+/** Case and typography folded away: curly quotes to straight, `…` to `...`, every dash to `-` (spaces around it dropped). */
+const fold = (s: string) =>
+  s.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\u2026/g, '...')
+    .replace(/\s*(?:--|[-\u2010-\u2015\u2212])\s*/g, '-');

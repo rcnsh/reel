@@ -7,7 +7,7 @@ The agent already knows how reel works, from the skills `reel init` puts in the 
 ## What the agent works with
 
 - **Files are the video.** The agent authors by editing the project: `reel.config.ts` (the edit), `scenes/*.ts`, `narration.txt`, `mix.json`. No MCP tool writes a scene.
-- **The MCP tools are for looking and exporting.** `project_info` first, then `render_still`, `motion_strip` and `contact_sheet` to see frames, `check_video` to find layout and render faults, `video_start` / `video_status` to export, `narrate`, `align_recording`, `analyze_song`, `mix_audio`, `subtitles` and `assets` for sound and generated media, `review_notes` and `resolve_note` for a person's notes. Every tool takes the project folder.
+- **The MCP tools are for looking and exporting.** `project_info` first, then `render_still`, `motion_strip` and `contact_sheet` to see frames, `check_video` to find layout and render faults, `video_start` / `video_status` to export (`wait_s` on `video_status` waits for the next change, so the agent need not poll; a job keeps running if the server restarts, and `video_status` without a job lists them), `narrate`, `align_recording`, `analyze_song`, `mix_audio`, `subtitles` and `assets` for sound and generated media, `review_notes` and `resolve_note` for a person's notes. Every tool takes the project folder.
 - **The server must be registered before the session starts** (`claude mcp add --scope user reel -- bun <path to reel>/cli/reel.ts mcp`); tools do not appear in a session that is already running. Without them the same commands exist as `reel <command>` in a shell, and the brief does not change.
 - **The agent sees frames, not video, and hears nothing.** It judges motion from strips and pacing from contact sheets, and it measures loudness instead of listening. Anything only an ear or a played video can judge (the voice's tone, whether the music suits, the feel of a cut) is yours to review.
 
@@ -51,6 +51,8 @@ Every file you want, with what the engine needs to know to make it:
 - **Sound**: mixed to the default target (-14 LUFS) or another; subtitles as a soft track, as SRT/VTT files, or burned in as captions.
 - **Parts**: a title card alone, a teaser of the first seconds, a range.
 
+- **Variants**: the same video with other data (a title, a figure, a list per region or per customer). Say what varies; the agent gives the config `props` defaults and renders each variant with `--props` (the MCP tools' `props` argument).
+
 Give the output folder if it matters.
 
 ### 6. Limits
@@ -61,7 +63,7 @@ What the agent cannot find out by itself: the machine's memory and what else it 
 
 What must be true before the agent stops:
 
-- `check_video` reports no errors at every size delivered, and no warnings it did not choose.
+- `check_video` reports no errors at every size delivered, and no warnings it did not choose. (It also renders some frames twice: a frame that comes out different is a `nondeterministic` error, and a `transition` on a clip that overlaps nothing a `timeline` warning.)
 - It has looked at a full draft as frames (a contact sheet every half second or so, strips of each transition and each fast move) before any final render.
 - It has pulled frames out of each final file and looked at them, measured the loudness, and confirmed the streams.
 

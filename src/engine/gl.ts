@@ -83,11 +83,12 @@ export class FSPass {
   mesh: THREE.Mesh;
   scene = new THREE.Scene();
   cam = new THREE.OrthographicCamera(-1, 1, 1, -1, 0, 1);
-  constructor(frag: string, uniforms: Record<string, THREE.IUniform> = {}, opts: { blending?: THREE.Blending; transparent?: boolean } = {}) {
+  /** `prelude`: GLSL put before `frag` in place of GLSL_COMMON (for source written elsewhere, whose names it must not clash with). */
+  constructor(frag: string, uniforms: Record<string, THREE.IUniform> = {}, opts: { blending?: THREE.Blending; transparent?: boolean; prelude?: string } = {}) {
     this.mat = new THREE.RawShaderMaterial({
       glslVersion: THREE.GLSL3,
       vertexShader: `precision highp float;\nin vec3 position;\n${FS_VERT}`,
-      fragmentShader: `precision highp float;\nprecision highp int;\nin vec2 vUv;\nout vec4 fragColor;\n${GLSL_COMMON}\n${frag}`,
+      fragmentShader: `precision highp float;\nprecision highp int;\nin vec2 vUv;\nout vec4 fragColor;\n${opts.prelude ?? GLSL_COMMON}\n${frag}`,
       uniforms,
       depthTest: false,
       depthWrite: false,

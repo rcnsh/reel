@@ -2,7 +2,8 @@
 // right by default) and formatted, and rows picked out by a highlight that may change over time.
 import type { Frame } from '../engine/scene';
 import { cssColor, esc, HtmlComponent, safeBox, UNIT, val, type Anim } from './common';
-import { formatNumber, growth, progressOf, type ProgressOptions } from './charts';
+import { formatNumber, growth } from './charts';
+import { progressOf, type ProgressOptions } from './common';
 
 export interface TableColumn {
   label: string;
@@ -92,7 +93,7 @@ export class Table extends HtmlComponent {
   protected update(f: Frame) {
     // (0.2 s a row, at least 1.4 s, and done before the window's last 0.6 s however many rows there are)
     const o = this.o, n = o.rows.length, [w0, w1] = this.window(f);
-    const p = progressOf(o, f, Math.min(Math.max(1.4, 0.2 * (n + 2)), Math.max(0.4, w1 - w0 - 0.8)));
+    const p = progressOf(o, f, w0, Math.min(Math.max(1.4, 0.2 * (n + 2)), Math.max(0.4, w1 - w0 - 0.8)));
     const h = o.highlight === undefined ? undefined : val(o.highlight, f), hi = new Set(h === undefined ? [] : Array.isArray(h) ? h : [h]);
     for (const i of hi) if (!(Number.isInteger(i) && i >= 0 && i < n)) throw new Error(`table: highlight ${i} is not a row (0 to ${n - 1})`);
     this.layer.$$('tbody tr').forEach((e, i) => this.layer.set(e, { vars: { k: growth(p, i, n, o.stagger !== false).toFixed(4) }, class: { hi: hi.has(i) } }));
