@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, and drawn-on paths and arrows; and layout helpers that cut boxes from a box. Each component is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -19,7 +19,7 @@ export default class Point extends Scene {
 
 - Make components as fields of a scene (they belong to its clip) and call `draw(renderer, out, f, { opacity? })` in `render()`, in back-to-front order. On a track above 0, clear to transparent first.
 - Options every component takes:
-  - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side.
+  - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side. To lay out several, cut their boxes from one with the [layout helpers](#layout).
   - `at: [from, to]`: the seconds of the clip it shows in, counted from the clip's start (default the whole clip). Word times are video seconds, so take the clip's start off: `at: [this.ctx.words.get('the tide').start - this.ctx.start, 9]`.
   - `motion`: its entrance and exit, `{ from: 'up' | 'down' | 'left' | 'right' | 'fade' | 'scale' | 'none', in: 0.6, out: 0.4, delay: 0, distance }`, or `false` for none. Motion is drawn in GL per sub-frame, so it gets motion blur under `--samples auto`.
   - `css`: CSS added to its layer, to restyle it (each component lists its classes below).
@@ -156,6 +156,41 @@ timer = new Timer({ format: 'm:ss', from: 30, to: 0 });                         
 
 ProgressBar: `progress` (*Anim*, default `f.p`), `text` (*Anim*, beside the bar), `color`; along the bottom of the safe area by default. Timer: `from` and `to` (seconds shown at the start and end of the window; default counts up from 0), `format` (`'m:ss'`, `'mm:ss'`, `'ss'`, `'m:ss.t'`), `size`, `color`; top right of the safe area by default. Neither moves in or out unless given `motion`. `clock(s, format)` and `formatNumber(x, digits)` are the formatting they use. Classes: `.track`, `.fill`, `.label`; `.clock`.
 
+## Drawn lines
+
+### SvgDraw
+
+```ts
+wave = new SvgDraw({
+  paths: ['M0 50 C50 0 100 0 150 50 S250 100 300 50', { d: 'M120 10 h40 v40 h-40 Z', color: 'fg', fill: 'accentHi' }],
+  viewBox: [0, 0, 300, 100], box: { x: W * 0.3, y: H * 0.2, w: W * 0.4, h: H * 0.2 }, width: 6,
+});
+logo = new SvgDraw({ src: 'assets/logo.svg', box: center(safeBox(), 600, 400), progress: (f) => prog(f.lt, 0.5, 3) });
+```
+
+Strokes drawn on along their length as `progress` runs 0 to 1 (*Anim*; by default from 0.2 s to 1.6 s into the window, eased out), one after another with each overlapping the next (`stagger: false`: all together); a fill fades in as its stroke finishes.
+
+- `paths`: path data (`d` strings, or `{ d, color, width, fill }`) in `viewBox` units (default the box's own px); `color` (accent), `width` (logical px whatever the viewBox, default 0.5% of the short side; with `fit: 'stretch'`, along the narrower scale), `fill` (none; `fill: 'none'` on one path turns the drawing's fill off for it). Round caps and joins.
+- `src`: an SVG file in the project instead, put in the layer as markup: its shapes (paths, lines, polylines, polygons, rects, circles, ellipses; not those in `defs`, clip paths, masks, markers or symbols) draw on in document order with the file's own strokes (a non-scaling stroke scales with the drawing); their fills fade in, and their own dashes and markers show once they are drawn. A shape with no stroke only fades in, as `<use>`, `<text>` and `<image>` elements do in their turn; what the file hides (itself, or a group of it) stays hidden and takes no turn. Loaded before the first frame with the images it names (relative to the file); a missing or malformed file is an error of the clip (no placeholder for a declared asset not made yet, as ImageBox has). Scripts, event handlers, `foreignObject` and SMIL animation (`<animate>`, `<set>` and the like, which would run on the wall clock) are dropped; the files it names (`href`s) are relative to it, as in a browser, but `url()`s in its styles are relative to the project. Its text needs its fonts loaded, as any layer's does. Give it a `viewBox` (without one, its width and height in absolute units stand in).
+- `fit`: `contain` (default), `cover` (cropped at the box), `stretch`, as `preserveAspectRatio`.
+- Its layer reaches a little past its box, so strokes on the box's edge keep their caps. Default motion: it cuts in (drawing on is its entrance) and fades out over 0.3 s. Reported to `reel check` as a picture named by its `label` (default its `src`). Markup: `.host` > `svg.art` > the shapes (`.stroke` for `paths`).
+
+### Arrow
+
+```ts
+a = new TextBlock({ text: 'Scene', box: cells[0] });
+b = new TextBlock({ text: 'Engine', box: cells[1] });
+link = new Arrow({ from: this.a.box, to: this.b.box, curve: 0.2, at: [1, 6] });     // met at the sides facing each other
+point = new Arrow({ from: { x: W * 0.7, y: H * 0.8 }, to: this.b.box, toSide: 'bottom', heads: 'both', color: 'fg' });
+```
+
+An arrow drawn on from `from` to `to` as `progress` runs 0 to 1 (as SvgDraw), its head riding the end of the drawn line.
+
+- `from`, `to`: points `{ x, y }` or boxes (a component's `box`). A box is met at `fromSide` / `toSide`: `'top' | 'right' | 'bottom' | 'left' | 'center'`, or `'auto'` (default), the side facing the other end (its side's point when that is fixed, else its centre). `gap`: px left clear of a box's side (default 12; 0 for a point).
+- `curve`: a bow as a share of its length, positive bending left of the way it runs (on screen), negative right (default 0, straight). `heads`: `'end'` (default), `'start'`, `'both'`, `'none'`. `color` (accent), `width` (default 0.5% of the short side), `head` (its length, default 4.5 widths).
+- Its `box` is the line's bounds (its layer reaches past them for the heads, and `reel check` sees the line's bounds); it is fixed when made, so make an arrow between boxes that do not move (an arrow to a moving component: draw it at the component's final place, or make it per layout). Same default motion as SvgDraw. Classes: `.art`, `.line`, `.head`, `.tail` (the start's head).
+- `anchor(box, side, toward?)`, `arrowTrack(a, b, curve)` and `pointAlong(track, px)` are the geometry it uses, for drawings of your own.
+
 ## CodeBlock
 
 ```ts
@@ -168,9 +203,27 @@ code = new CodeBlock({
 
 `code`, `lang` (one of `CODE_LANGUAGES`: bash, cpp, css, diff, glsl, go, javascript, json, python, rust, sql, typescript, xml, yaml, and their aliases ts, js, py, sh, html, c, rs, yml; an unknown language is an error), `size` (largest; the font shrinks so the longest line and every line fit, no line wraps), `lineNumbers`, `highlight` (1-based lines, *Anim*), `reveal` (how many lines show, *Anim*), `title` (a file name bar), `panel`. Highlighted by highlight.js in the theme's colours: keywords in the accent, strings between the accent and fg, comments dimmed. Classes: `.code`, `.ln`, `.no`, `.on`, `.hljs-*`.
 
+## Layout
+
+Boxes cut from a box, so a scene lays out in shares of the frame instead of sums. Each returns plain `Box`es, to give any component (or an `Arrow`, or your own drawing):
+
+```ts
+const area = safeBox(0.1);
+const [left, right] = split(area, 'h', [2, 1], 60);          // a row: left twice as wide as right, 60 px between
+const cells = grid(inset(left, 20), 3, 2, [24, 32]);          // 3 across, 2 down, row by row: cells[r * 3 + c]
+const badge = center(right, 300, 300);                        // a 300 x 300 box in the middle of right
+const corner = align(right, 200, 80, 'end', 'start');         // top right of right
+const stacked = split(area, H > W ? 'v' : 'h', 2, 40);        // side by side, or one above the other in a vertical cut
+```
+
+- `split(box, 'h' | 'v', shares, gap = 0)`: `'h'` a row of parts left to right, `'v'` a column top to bottom; `shares` are relative (`[2, 1]`, `[0.56, 0.26]`), or a count of equal parts. Gaps go between parts only, so the parts fill the box.
+- `grid(box, cols, rows, gap = 0)`: equal cells, `gap` one number or `[across, down]`. Gaps wider than the box can hold shrink, so parts never leave it.
+- `inset(box, px)`: shrunk on every side, or per side `{ top, right, bottom, left }` (`x` and `y` set two at once); negative grows it.
+- `align(box, w, h, x = 'center', y = 'center')` with `'start' | 'center' | 'end'`, and `center(box, w, h)`: a box of a size placed in another.
+
 ## Your own component
 
-`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`. The defaults passed to `super` must include a `box` (the layer is made that size):
+`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`. The defaults passed to `super` must include a `box` (the layer is made that size; `pad: px` makes it larger by that much on each side, for strokes on the box's edge, with the box at `pad` px in):
 
 ```ts
 import { HtmlComponent, type ComponentOptions, safeBox, type Frame } from 'reel';
