@@ -11,7 +11,7 @@ What that asks of a scene:
 - Noise seeded by continuous `t` is resampled in every sub-frame: it averages out, slowly, and makes the sampler work harder (and the export slower). Seed it with `frameIdx(t)` unless it is meant to smooth out.
 - A particle emitter whose rate changes over time takes the rate as a function of each particle's birth time; a rate read at the current `t` re-times every particle between sub-frames.
 - Post parameters a scene returns (shake, flash, zoom, fades) are read at one point of the shutter, 1/8 of it after the frame's time; grain and dither are drawn once per frame.
-- A clip with slowly converging noise can cap its sub-frames: `maxSamples` on the clip.
+- A clip with slowly converging noise can cap its sub-frames: `maxSamples` on the clip. A scene can ask for a default cap itself with `this.ctx.capSamples(n)` from its constructor or `init()` (later calls are ignored; a `Stage3D` made there asks for 108); the clip's `maxSamples` wins.
 
 ## Stateful scenes
 
@@ -54,7 +54,7 @@ A shader that supersamples with the 4 rotated-grid taps takes `ssTap: SS_TAP` in
 
 ## Tile masking (scene targets)
 
-With `--samples auto`, tiles that have converged are masked out of later sub-frames (rejected before shading). That covers `out` and the engine's targets. A scene's own render target is drawn in full unless the scene lists it in `tileMasked: [{ rt, margin: 0 | 1, moving? }]`: only for a target with a depth buffer whose texels are read back at their own screen position or within a few px (`margin: 1` widens the mask by a tile), or, with `moving: true`, through a zoom or pan the scene gives before each sub-frame's draws with `this.ctx.mapTileMask(rt, map)` (null while it is read through a warp). A target read through a warp or a wide blur must not be listed. A draw that depth-tests its own 3D into a masked target makes the engine draw that clip unmasked; draw 3D into a target of your own instead, call `this.ctx.maskDepth(rt)` in place of clearing its depth (converged tiles go to the near plane, so your depth test skips them), then composite it into `out`. The `Stage3D` of the `reel-3d` skill does all of this.
+With `--samples auto`, tiles that have converged stop taking sub-frames, and where it saves time (software rendering, such as Linux without a GPU) they are masked out of the later sub-frames themselves (rejected before shading). That covers `out` and the engine's targets. A scene's own render target is drawn in full unless the scene lists it in `tileMasked: [{ rt, margin: 0 | 1, moving? }]`: only for a target with a depth buffer whose texels are read back at their own screen position or within a few px (`margin: 1` widens the mask by a tile), or, with `moving: true`, through a zoom or pan the scene gives before each sub-frame's draws with `this.ctx.mapTileMask(rt, map)` (null while it is read through a warp). A target read through a warp or a wide blur must not be listed. A draw that depth-tests its own 3D into a masked target makes the engine draw that clip unmasked; draw 3D into a target of your own instead, call `this.ctx.maskDepth(rt)` in place of clearing its depth (converged tiles go to the near plane, so your depth test skips them), then composite it into `out`. The `Stage3D` of the `reel-3d` skill does all of this.
 
 ## Output scale (4K)
 
