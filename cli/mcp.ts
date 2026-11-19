@@ -8,6 +8,7 @@ import { z } from 'zod';
 import { pageOf, samplesOf, UsageError, type Values } from './args';
 import { call } from './daemon';
 import { runDiff } from './diff';
+import { cancelJob, jobView, listJobs, MAX_WAIT_S, startJob, waitJob, type JobView } from './jobs';
 import { type Op, type Req, type Result } from './ops';
 import { listed, notesPath, patchNote, readNotes } from './notes';
 import { downscale, encodePng, readPng } from './png';
@@ -22,11 +23,12 @@ interface ToolResult { content: Content[]; isError?: boolean; [k: string]: unkno
 const project = z.string().describe('The video project: the folder holding reel.config.ts (absolute, or relative to where the server was started).');
 const page = {
   project,
-  only: z.array(z.string()).optional().describe('Load only these clip ids: faster, and isolates them from errors in other scenes. Clips not loaded render as nothing.'),
+  only: z.array(z.string()).optional().describe('Load only these clip ids: faster, and isolates them from errors in other scenes. Clips not loaded render as nothing, and check_video judges only their frames.'),
   size: z.string().regex(/^\d+x\d+$/).optional().describe("Render at another frame size, 'WxH' (e.g. '1080x1920' to see whether a layout survives a vertical frame). Width a multiple of 4, height even."),
   fps: z.number().positive().max(240).optional().describe('Render at another frame rate.'),
   scale: z.number().int().min(1).max(4).optional().describe('Physical px per logical px (2 renders 3840x2160 from a 1920x1080 project). Default 1.'),
   theme: z.enum(['print', 'film', 'neutral']).optional().describe("Render with a built-in theme instead of the project's."),
+  props: z.record(z.string(), z.unknown()).optional().describe("The render's props, a JSON object over the config's `props` defaults (timeline() reads them as src.props, scenes as ctx.props): one project rendered as variants, e.g. { title: 'Q3', accent: '#e33' }. With defaults, only their keys, each of the same kind."),
   samples: z.union([z.number().int().min(1), z.string().regex(/^(auto|[1-9]\d*)$/, "expected a whole number such as 1, or 'auto'")]).optional().describe("Motion-blur sub-frames per frame: a whole number, 1 by default (fast), or 'auto' (adaptive, what a final export of moving pictures uses)."),
   shutter: z.number().positive().max(1).optional().describe('Share of the frame time the sub-frames span (default 0.5).'),
 };
@@ -39,7 +41,7 @@ const imageOpts = {
 function reqOf(op: Op, a: Record<string, any>, args: Record<string, unknown>): Req {
   const v: Values = {
     size: a.size, fps: a.fps === undefined ? undefined : String(a.fps), scale: a.scale === undefined ? undefined : String(a.scale),
-    only: a.only?.length ? a.only.join(',') : undefined, theme: a.theme, samples: a.samples === undefined ? undefined : String(a.samples),
+    only: a.only?.length ? a.only.join(',') : undefined, theme: a.theme, props: a.props === undefined ? undefined : JSON.stringify(a.props), samples: a.samples === undefined ? undefined : String(a.samples),
   };
   return { op, project: projectDir(a.project), page: pageOf(v), samples: samplesOf(v), shutter: a.shutter ?? 0.5, args };
 }
@@ -64,9 +66,7 @@ async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
 /** Tool calls being answered now: the server does not exit under them when its input ends. */
 let pending = 0;
 
-// ---- video jobs: `reel video` in a child process, polled and cancellable ----
-interface Job { id: string; project: string; out: string; state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'; queue?: { running: string | null; ahead: number }; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
-const jobs = new Map<string, Job>();
+// ---- video jobs: `reel video` run detached (cli/jobs.ts), so a job outlives the server that started it ----
 
 /**
  * The `reel video` command line for video_start's arguments. Without `out` the CLI picks the default for the format
@@ -76,47 +76,19 @@ export function videoArgs(a: Record<string, any>, proj: string): string[] {
   const args = ['video', '--project', proj, '--json', '--progress'];
   if (a.out) args.push('--out', path.resolve(a.out));
   const flag = (k: string, v: unknown) => { if (v !== undefined && v !== false) args.push(`--${k}`, ...(v === true ? [] : [Array.isArray(v) ? v.join(',') : String(v)])); };
-  flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme);
+  flag('from', a.from); flag('to', a.to); flag('only', a.only); flag('size', a.size); flag('fps', a.fps); flag('scale', a.scale); flag('theme', a.theme); flag('props', a.props === undefined ? undefined : JSON.stringify(a.props));
   flag('samples', a.samples); flag('shutter', a.shutter); flag('preset', a.preset); flag('crf', a.crf); flag('noaudio', a.noaudio); if (a.noaudio === false) args.push('--audio'); flag('mix', a.mix); flag('subtitles', a.subtitles);
   flag('format', a.format); flag('chroma', a.chroma); flag('depth', a.depth); flag('alpha', a.alpha); flag('opaque', a.opaque); flag('quality', a.quality); flag('max-fps', a.max_fps); flag('max-size', a.max_size); flag('draft', a.draft); flag('wait', a.wait);
   return args;
 }
 
-function startVideo(a: Record<string, any>): Job {
+function startVideo(a: Record<string, any>): JobView {
   const proj = projectDir(a.project);
   const out = a.out ? path.resolve(a.out) : '(the format\'s default under out/; the result names the file)';
-  const args = videoArgs(a, proj);
-  const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: a.wait ? 'queued' : 'running', progress: null, started: Date.now(), output: '', proc };
-  jobs.set(job.id, job);
-  void (async () => {
-    // progress: one JSON line per update on stderr; anything else there is kept as output
-    const dec = new TextDecoder();
-    let buf = '';
-    for await (const chunk of proc.stderr as ReadableStream<Uint8Array>) {
-      buf += dec.decode(chunk, { stream: true });
-      let i;
-      while ((i = buf.indexOf('\n')) >= 0) {
-        const line = buf.slice(0, i); buf = buf.slice(i + 1);
-        try {
-          const p = JSON.parse(line);
-          if (typeof p.frames === 'number') { job.progress = p; if (job.state === 'queued') { job.state = 'running'; job.queue = undefined; } continue; }
-          if (p.queued === true) { job.queue = { running: p.running, ahead: p.ahead }; continue; }
-          if (p.queued === false) { if (job.state === 'queued') job.state = 'running'; job.queue = undefined; continue; }
-        } catch {}
-        job.output = (job.output + line + '\n').slice(-4000);
-      }
-    }
-  })();
-  void (async () => {
-    const stdout = await new Response(proc.stdout as ReadableStream).text();
-    const code = await proc.exited;
-    try { job.result = JSON.parse(stdout); } catch { job.result = stdout.slice(-4000); }
-    if (job.state === 'running' || job.state === 'queued') job.state = code === 0 ? 'done' : 'failed';
-  })();
-  return job;
+  return startJob(['bun', path.join(ENGINE, 'cli/reel.ts'), ...videoArgs(a, proj)], { project: proj, out, wait: !!a.wait });
 }
-const jobView = (j: Job) => ({ job: j.id, state: j.state, out: j.out, ...(j.state === 'queued' && j.queue ? { queue: j.queue } : {}), progress: j.progress, seconds: +((Date.now() - j.started) / 1000).toFixed(1), ...(j.state !== 'running' && j.state !== 'queued' ? { result: j.result } : {}), ...(j.output && j.state !== 'running' && j.state !== 'queued' ? { output: j.output } : {}) });
+/** A job for the model: what it needs, without the bookkeeping. */
+const jobOut = ({ started: _s, project: _p, ...v }: JobView) => v;
 
 /** A project tool (narrate, align, analyze, mix) run to completion: its output and exit code. */
 async function tool(name: string, proj: string, args: string[]): Promise<ToolResult> {
@@ -136,8 +108,8 @@ export async function serveMcp() {
 
   server.registerTool('project_info', {
     title: 'Project info',
-    description: "A project's format (size, fps), duration, audio track, theme, tracks, every clip (id, start, end, track) and the sound cues scenes recorded. Call it first: clip ids and times for the other tools come from here.",
-    inputSchema: { project },
+    description: "A project's format (size, fps), duration, audio track, theme, props (the render's, over the config's defaults), tracks, every clip (id, start, end, track) and the sound cues scenes recorded. Call it first: clip ids and times for the other tools come from here. Pass the same `props` as the renders when the timeline depends on them.",
+    inputSchema: { project, props: page.props },
     annotations: { readOnlyHint: true },
   }, (a) => guard(async () => {
     const r = await call(reqOf('info', a, {}));
@@ -184,7 +156,7 @@ export async function serveMcp() {
 
   server.registerTool('check_video', {
     title: 'Check the video',
-    description: 'Sweep the video (or a range) for problems and return findings as JSON, each with kind, severity (error, warning, info), time span, clip, rectangle, a message saying how to fix it and a cropped image file; the worst crops come inline. Finds blank and frozen frames, scene and shader errors, and from the boxes scenes report (reportText/report) text off the frame, in the safe margin, overlapping, too small, or low in contrast against the rendered pixels. isError is true when any finding is an error. Run it after every round of edits, and with size \'1080x1920\' for vertical.',
+    description: 'Sweep the video (or a range) for problems and return findings as JSON, each with kind, severity (error, warning, info), time span, clip, rectangle, a message saying how to fix it and a cropped image file; the worst crops come inline. Finds blank and frozen frames, frames that come out different when rendered again (nondeterministic), transitions on clips that overlap nothing, scene and shader errors, and from the boxes scenes report (reportText/report) text off the frame, in the safe margin, overlapping, too small, or low in contrast against the rendered pixels. isError is true when any finding is an error. Run it after every round of edits, and with size \'1080x1920\' for vertical.',
     inputSchema: {
       ...page, from: z.number().min(0).optional(), to: z.number().optional(), step: z.number().positive().optional().describe('Seconds between sampled frames (default 0.5; clip starts and ends are sampled densely anyway).'),
       safe: z.number().min(0).max(0.45).optional().describe('Safe margin as a share of each side (default 0.05).'), min_text: z.number().positive().optional().describe('Smallest text size in px (default 2.2% of the shorter side).'),
@@ -201,7 +173,7 @@ export async function serveMcp() {
     description: 'Compare two PNGs (a and b), or a fresh render of time t against b (a still or golden saved earlier; rendered at b\'s size): changed pixel count and share, max and mean difference, the bounding box of the change, and a diff image (b in grey, changes in red). isError when more than `threshold` of the pixels changed. Grain differs per frame, so compare the same time, and use tol (e.g. 8) to ignore it.',
     inputSchema: {
       b: z.string().describe('The reference PNG.'), a: z.string().optional().describe('The other PNG (or give project and t).'), project: project.optional(), t: z.number().min(0).optional().describe('Render this time and compare it to b.'),
-      only: page.only, size: page.size, theme: page.theme, samples: page.samples,
+      only: page.only, size: page.size, theme: page.theme, props: page.props, samples: page.samples,
       tol: z.number().int().min(0).max(255).optional().describe('Channel difference (0-255) a pixel may have and still count as unchanged (default 0).'),
       threshold: z.number().min(0).max(1).optional().describe('Share of pixels that may change (default 0).'), ...imageOpts,
     },
@@ -214,7 +186,7 @@ export async function serveMcp() {
 
   server.registerTool('video_start', {
     title: 'Start a video render',
-    description: "Start exporting the video (or a range) in the background and return a job id at once. Poll video_status until state is done or failed; video_cancel stops it. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details, unless `wait` is true, which queues it (state 'queued', with the export ahead, until the slot frees; queued exports run in the order they started). The project's config can set export defaults (`export: { crf, preset, noaudio, samples }`); arguments given here override them.",
+    description: "Start exporting the video (or a range) in the background and return a job id at once. Follow it with video_status (with wait_s, it waits for the next change instead of returning at once) until state is done or failed; video_cancel stops it. The job runs on its own: it keeps rendering if this server exits or restarts, and a later server finds it by its id. The format comes from `format`, else from the `out` extension: h264 (.mp4, default: x264 with the project's sound), hevc (.mp4, 10-bit), prores (.mov, 422 HQ editing master), prores4444 (.mov with alpha), webm (VP9 with alpha), gif and webp (short loops, rate and size capped), png, png16, jpeg (numbered frames) and exr (the linear HDR frame, for grading). Transparent formats clear the theme's background to transparent. Use samples 'auto' for the final motion blur. Default output: out/video.mp4 in the project (out/video.hevc.mp4, out/video.4444.mov and so on for other formats; out/<format>/frame_NNNNNN.<ext> for sequences). One export runs at a time on a machine: a start while another export is running fails with that export's details, unless `wait` is true, which queues it (state 'queued', with the export ahead, until the slot frees; queued exports run in the order they started). The project's config can set export defaults (`export: { crf, preset, noaudio, samples }`); arguments given here override them.",
     inputSchema: {
       ...page, from: z.number().min(0).optional(), to: z.number().optional(), out: z.string().optional().describe('Output path (its extension picks the format when `format` is not given; for sequences, the frames are named after it with the frame number).'),
       format: z.enum(['h264', 'hevc', 'prores', 'prores4444', 'webm', 'gif', 'webp', 'png', 'png16', 'jpeg', 'exr']).optional().describe('Output format (default from the out extension, else h264).'),
@@ -230,34 +202,36 @@ export async function serveMcp() {
     },
   }, (a) => guard(async () => {
     reqOf('still', a, {}); // (the flags checked here, before a process is started)
-    return { content: [text(jobView(startVideo(a)))] };
+    return { content: [text(jobOut(startVideo(a)))] };
   }));
 
   server.registerTool('video_status', {
     title: 'Video render status',
-    description: 'The state of a video job (queued, running, done, failed, cancelled), its progress (frames written of total, fps, seconds left) and, once finished, the result (file, frames, errors).',
-    inputSchema: { job: z.string().describe('The id video_start returned.') },
+    description: `The state of a video job (queued, running, done, failed, cancelled), its progress (frames written of total, fps, seconds left), the export ahead while queued and, once finished, the result (file, frames, errors). With wait_s it waits up to that many seconds (at most ${MAX_WAIT_S}) and returns as soon as the state changes or progress moves by a twentieth of the frames: call it again with wait_s until the job ends instead of polling in a loop. Without a job it lists the jobs on this machine, newest first (any server's, including ones started before this server did; finished ones are kept a week).`,
+    inputSchema: {
+      job: z.string().optional().describe('The id video_start returned; leave out to list the jobs.'),
+      wait_s: z.number().min(0).max(MAX_WAIT_S).optional().describe(`Wait up to this many seconds (at most ${MAX_WAIT_S}) for a change before answering (default 0: at once).`),
+      project: project.optional().describe('With no job: list only this project\'s jobs.'),
+    },
     annotations: { readOnlyHint: true },
-  }, (a) => guard(async () => {
-    const j = jobs.get(a.job);
-    if (!j) throw new Error(`no job '${a.job}' (jobs: ${[...jobs.keys()].join(', ') || 'none'})`);
-    return { content: [text(jobView(j))], isError: j.state === 'failed' };
+  }, (a, extra) => guard(async () => {
+    if (!a.job) {
+      if (a.wait_s) throw new UsageError('wait_s needs a job');
+      return { content: [text({ jobs: listJobs(a.project ? projectDir(a.project) : undefined).map((j) => ({ ...jobOut(j), project: j.project })) })] };
+    }
+    const v = a.wait_s ? await waitJob(a.job, a.wait_s, extra.signal) : jobView(a.job);
+    return { content: [text(jobOut(v))], isError: v.state === 'failed' };
   }));
 
   server.registerTool('video_cancel', {
     title: 'Cancel a video render',
-    description: 'Stop a running video job; the partial file is removed by the encoder being killed (it is not playable).',
+    description: 'Stop a queued or running video job, whichever server started it; the file at its output is left as it was before the job (an export writes to a partial beside it, removed when stopped).',
     inputSchema: { job: z.string() },
-  }, (a) => guard(async () => {
-    const j = jobs.get(a.job);
-    if (!j) throw new Error(`no job '${a.job}'`);
-    if (j.state === 'running' || j.state === 'queued') { j.state = 'cancelled'; j.proc.kill('SIGTERM'); await j.proc.exited; }
-    return { content: [text(jobView(j))] };
-  }));
+  }, (a) => guard(async () => ({ content: [text(jobOut(await cancelJob(a.job)))] })));
 
   server.registerTool('narrate', {
     title: 'Voice the narration',
-    description: "Voice the project's narration.txt (plates: '# name' headers and their lines) and time every word: writes audio/narration.flac, data/words.json and data/audio.json (one section per plate). Plates are cached, so after an edit only changed plates are voiced again. The voice comes from `narration` in reel.config.ts unless given: 'kokoro[:voice]' (local model, default kokoro:af_heart), 'say[:name]' (macOS scratch), 'elevenlabs:<voice-id>' or 'fish:<voice-id>' (hosted, only with ELEVENLABS_API_KEY / FISH_API_KEY set). The first local run downloads models (minutes).",
+    description: "Voice the project's narration.txt (plates: '# name' headers and their lines) and time every word: writes audio/narration.flac, data/words.json and data/audio.json (one section per plate). Plates are cached as each is voiced, so after an edit, or a failure part-way, only changed or missing plates are voiced again. The voice comes from `narration` in reel.config.ts unless given: 'kokoro[:voice]' (local model, default kokoro:af_heart), 'say[:name]' (macOS scratch), 'elevenlabs:<voice-id>' or 'fish:<voice-id>' (hosted, only with ELEVENLABS_API_KEY / FISH_API_KEY set). The first local run downloads models (minutes).",
     inputSchema: {
       project, voice: z.string().optional().describe("Voice, e.g. 'kokoro:bm_george', 'say:Daniel', 'elevenlabs:<voice-id>'."), speed: z.number().min(0.5).max(2).optional(),
       lead: z.number().min(0).optional().describe('Seconds before the first word (default 0.6).'), hold: z.number().min(0).optional().describe('Seconds at least between plates (default 0.85).'), tail: z.number().min(0).optional().describe('Seconds after the last word (default 1.6).'),
@@ -275,14 +249,14 @@ export async function serveMcp() {
 
   server.registerTool('analyze_song', {
     title: 'Analyze a song',
-    description: "Beats and downbeats (Beat This!), loudness envelopes of the mix and of Demucs stems (drums, bass, other, vocal), drum and vocal onsets and sections of a song into data/audio.json (the song becomes the track). Extra flags as in `reel analyze --help`, e.g. ['--sections', 'sections.json'], ['--keep-sections', '--offset', '12'] or ['--fast'] (no models, a draft). The first run fetches packages and models (minutes).",
+    description: "Beats and downbeats (Beat This!), loudness envelopes of the mix and of Demucs stems (drums, bass, other, vocal), a waveform and spectrum bands of the mix, drum and vocal onsets and sections of a song into data/audio.json (the song becomes the track). Extra flags as in `reel analyze --help`, e.g. ['--sections', 'sections.json'], ['--keep-sections', '--offset', '12'] or ['--fast'] (no models, a draft). The first run fetches packages and models (minutes).",
     inputSchema: { project, song: z.string().describe('The audio file.'), args: z.array(z.string()).optional().describe('Extra flags for reel analyze.') },
   }, (a) => guard(() => tool('analyze', a.project, [path.resolve(a.song), ...(a.args ?? [])])));
 
   server.registerTool('mix_audio', {
     title: 'Mix music and cues',
-    description: "The finished sound under a rendered video, into a new file of the same container (.mp4 with AAC, .mov with PCM, .webm with Opus): the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render. (video_start with mix: true renders and mixes in one job.)",
-    inputSchema: { project, input: z.string().describe('The rendered .mp4, .mov or .webm.'), output: z.string().describe('The mixed file to write (.mp4, .mov or .webm).'), from: z.number().min(0).optional() },
+    description: "The finished sound under a rendered video, into a new file of the same container (.mp4 with AAC, .mov with PCM, .webm with Opus): the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render, and `props` the render's props. (video_start with mix: true renders and mixes in one job.)",
+    inputSchema: { project, input: z.string().describe('The rendered .mp4, .mov or .webm.'), output: z.string().describe('The mixed file to write (.mp4, .mov or .webm).'), from: z.number().min(0).optional(), props: page.props },
   }, (a) => guard(async () => {
     // (the cues the mix needs, from the project as it is now)
     const ev = await call(reqOf('events', a, {}));
@@ -322,20 +296,18 @@ export async function serveMcp() {
     return { content: [text(listed(proj, patchNote(proj, a.id, { status: a.reopen ? 'open' : 'done' })))] };
   }));
 
-  // (a job left running when the client goes away would hold Chromes and ffmpeg)
-  const cleanup = () => { for (const j of jobs.values()) if (j.state === 'running') j.proc.kill('SIGTERM'); };
-  process.on('exit', cleanup);
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => { cleanup(); process.exit(0); });
+  // (video jobs are detached: they finish whether or not this server is still here)
+  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => process.exit(0));
   const transport = new StdioServerTransport();
-  transport.onclose = () => { cleanup(); process.exit(0); };
+  transport.onclose = () => process.exit(0);
   // (the client went away without a goodbye: the transport does not notice its input ending, and the server
-  // would outlive it, holding its video jobs)
+  // would outlive it)
   // (calls already sent are answered first: a script may pipe its requests in and close)
   let leaving = false;
   const leave = () => {
     if (leaving) return;
     leaving = true;
-    const t = setInterval(() => { if (!pending) { clearInterval(t); cleanup(); process.stdout.write('', () => process.exit(0)); } }, 50);
+    const t = setInterval(() => { if (!pending) { clearInterval(t); process.stdout.write('', () => process.exit(0)); } }, 50);
   };
   for (const ev of ['end', 'close'] as const) process.stdin.on(ev, leave);
   await server.connect(transport);

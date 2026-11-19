@@ -18,7 +18,8 @@ assets.json: { "assets": [ { "id": "ridge", "kind": "image", "prompt": "…", "s
 
 Generates the missing ones, and those whose prompt, size or duration changed, when the provider's key is set:
 images with OpenAI (OPENAI_API_KEY; REEL_IMAGE_MODEL, default gpt-image-1), sound effects and music with
-ElevenLabs (ELEVENLABS_API_KEY). Only the prompt and size or duration are sent. Without a key it prints what each
+ElevenLabs (ELEVENLABS_API_KEY). Only the prompt and size or duration are sent; a request is retried on HTTP 429,
+5xx and network errors. Without a key it prints what each
 missing asset needs and where it goes, and exits 1. Files it did not make are never replaced; --force makes the
 generated ones again. --list only lists. Renders show a labelled placeholder for a missing image, and reel check
 reports every missing asset.`;
