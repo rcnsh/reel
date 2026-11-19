@@ -7,13 +7,14 @@
 - `reel narrate`: a voice from the script: Kokoro (local, the default), `say` (macOS scratch), or ElevenLabs / Fish Audio (hosted, with their key). Word times come from the voice's own timestamps or a forced aligner. Plates are cached: only the ones whose text changed are voiced again.
 - `reel align <recording>`: a real recording (one take, or a folder of per-plate files named after the plates). The script's words are force-aligned to it (Qwen3-ForcedAligner, about 15 ms from where words really start); `--method whisper` transcribes and matches instead, for a reading that departs from the script.
 
-Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a silent 100 BPM grid, one section per plate), with `--lead`, `--hold` and `--tail` seconds of silence before the first word, between plates and after the last word (or `narration: { lead, hold, tail }` in the config). With `clipsFromSections` in the config, each plate shows the scene of the same name; a plate without a scene is skipped, so a video is built one plate at a time.
+Both write `audio/narration.flac`, `data/words.json` and `data/audio.json` (a silent 100 BPM grid, one section per plate, each starting a quarter second before its first word), with `--lead`, `--hold` and `--tail` seconds of silence before the first word, between plates and after the last word (or `narration: { lead, hold, tail }` in the config). With `clipsFromSections` in the config, each plate shows the scene of the same name; a plate without a scene is skipped, so a video is built one plate at a time. The plates cut; `clipsFromSections(src, glob, { transition: 'wipe', overlap: 0.5 })` overlaps each pair across the cut instead, half before it and half after; a plate starts a quarter second before its first word (less when the hold is shorter than that), so with an overlap of 0.5 s or less the transition is over by the time that word is said. A `transition` function that returns undefined for a plate cuts to it.
 
 ## Words (`this.ctx.words`, `src.words`)
 
 - `lines[]`: `{ i, text, start, end, words[] }`, each word `{ w, start, end }`. Text comes with typographic punctuation (`don’t`).
 - `words.get('sudden drop')`: the first line containing the text (case-insensitive; straight or curly quotes, `...` or `…`, a hyphen or an en or em dash, spaced or not, all match); throws when none does. `words.get(text, n)` for the n-th. `find(s)`: all such lines.
 - `lineAt(t)`, `lastLine(t)`, `nextLine(t)`, `linesIn(t0, t1)`, `wordAt(t)`, `lastWord(t)`, `findWords('word')`.
+- A kit component's `at` takes lines and words directly, in video time: `new TextBlock({ text: '…', at: this.ctx.words.get('sudden drop') })` shows while the line is said (reference/kit.md).
 - `Words.wordProgress(word, t)` (0..1 through a word), `Words.lineCharProgress(line, t)` (characters said so far: for letter-by-letter reveals and wipes).
 - Empty (no lines) in a project without `data/words.json`.
 

@@ -2,7 +2,8 @@
 // the same frame after a seek backwards, and whose faults (text cut off at a layer's edge, text overflowing a
 // block that does not fit it) check names.
 import { afterAll, describe, expect, test } from 'bun:test';
-import { captionPages, clock, textWidth, cssColor, esc, formatNumber, kineticPieces, motionAt, splitHighlighted } from '../src/kit';
+import { captionPages, clock, textWidth, cssColor, esc, formatNumber, kineticPieces, motionAt, splitHighlighted, windowOf } from '../src/kit';
+import { LOADING } from '../src/engine/scene';
 import { ease, stagger, staggerStart } from '../src/engine/util';
 import { Words } from '../src/engine/words';
 import { fixture, hasChrome, reel } from './helpers';
@@ -55,6 +56,34 @@ describe('helpers', () => {
     expect(motionAt(false, 0, 0, 1)).toEqual({ opacity: 1, dx: 0, dy: 0, scale: 1 });
   });
 
+  test('windowOf: clip seconds as given, spans of the words taken off the loading clip', () => {
+    const words = Words.timed([{ text: 'the tide comes in', start: 12, end: 14 }, { text: 'and goes out', start: 15, end: 17 }], 1);
+    expect(windowOf(undefined, 'x')).toBeUndefined();
+    expect(windowOf([1, 5], 'x')).toEqual([1, 5]);
+    expect(windowOf([5, 5], 'x')).toEqual([5, 5]);
+    expect(windowOf([2, Infinity], 'x')).toEqual([2, Infinity]);
+    expect(() => windowOf([-Infinity, 2], 'x')).toThrow('expected seconds');
+    expect(() => windowOf([5, 4], 'x')).toThrow('ends before it starts');
+    expect(() => windowOf([words.get('tide'), 5], 'text block')).toThrow('text block: at [{ start: 12, end: 14 }, 5]: a span of the words is in video time');
+    LOADING.clip = { id: 'c', start: 10, end: 20 };
+    try {
+      expect(windowOf([words.get('tide'), 9], 'x')).toEqual([2, 9]);
+      expect(windowOf([1, words.get('goes out')], 'x')).toEqual([1, 7]);
+      expect(windowOf(words.get('goes out'), 'x')).toEqual([5, 7]);
+      expect(windowOf([words.findWords('comes')[0]!, words.get('goes')], 'x')).toEqual([words.findWords('comes')[0]!.start - 10, 7]);
+      expect(() => windowOf([words.find('tide'), 9] as never, 'x')).toThrow('each end is clip seconds or a span');
+      expect(() => windowOf([1, 2, 3] as never, 'x')).toThrow('expected [from, to]');
+      expect(() => windowOf([1, NaN], 'x')).toThrow('expected seconds');
+      expect(() => windowOf([words.get('tide'), 1.5], 'x')).toThrow('its window [2, 1.5] in clip seconds ends before it starts');
+      expect(windowOf([words.get('goes out'), Infinity], 'x')).toEqual([5, Infinity]);
+      LOADING.clip = { id: 'c', start: 0, end: 10 };
+      expect(() => windowOf(words.get('goes out'), 'x')).toThrow("is outside the clip 'c' (0 to 10)");
+      LOADING.clip = { id: 'c', start: 17, end: 20 };
+      expect(() => windowOf(words.get('tide'), 'x')).toThrow("its window [-5, -3] in clip seconds is outside the clip 'c'");
+      expect(windowOf([words.get('tide'), 2], 'x')).toEqual([-5, 2]); // (from before the clip into it: shown from its start)
+    } finally { LOADING.clip = null; }
+  });
+
   test('stagger: each item eases in over dur, starting each apart, in the order asked', () => {
     const o = { at: 1, each: 0.1, dur: 0.5, ease: ease.linear };
     expect(stagger(0.9, 0, 4, o)).toBe(0);
@@ -95,7 +124,7 @@ describe('helpers', () => {
 
 // clips: a Canvas2D line off the centre, an HTML text block changing every frame, the Canvas2D line again (a
 // Layer2D upload after an HTML one must not come out upside down), captions with a word highlighted, a chart and
-// a code block; then the faults
+// a code block; then the faults; then a text block timed by a span of the words and the same timed in clip seconds
 const project = fixture('kit', {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({
@@ -109,6 +138,8 @@ export default defineVideo({
     { id: 'kinetic', scene: () => import('./scenes/kinetic'), start: 6, end: 9, check: { exempt: ['blank'] } },
     { id: 'drawn', scene: () => import('./scenes/drawn'), start: 9, end: 11 },
     { id: 'scaled', scene: () => import('./scenes/scaled'), start: 11, end: 13 },
+    { id: 'spans', scene: () => import('./scenes/timed'), start: 13, end: 15, params: { spans: true }, check: { exempt: ['blank'] } },
+    { id: 'numbers', scene: () => import('./scenes/timed'), start: 15, end: 17, check: { exempt: ['blank'] } },
   ],
 });
 `,
@@ -146,6 +177,14 @@ export default class Parts extends Scene {
     clearRT(r, out, LIN.bg);
     this.chart.draw(r, out, f); this.code.draw(r, out, f); this.caps.draw(r, out, f);
   }
+}
+`,
+  'data/words.json': JSON.stringify({ lines: [{ text: 'the tide comes in', start: 13.5, end: 14.2, words: [{ w: 'the', start: 13.5, end: 13.6 }, { w: 'tide', start: 13.6, end: 13.8 }, { w: 'comes', start: 13.8, end: 14 }, { w: 'in', start: 14, end: 14.2 }] }] }),
+  'scenes/timed.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, TextBlock, clearRT, LIN } from 'reel';
+export default class Timed extends Scene {
+  text = new TextBlock({ text: 'The tide comes in', motion: false, at: this.ctx.params.spans ? this.ctx.words.get('tide') : [0.5, 1.2] });
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); this.text.draw(this.ctx.renderer, out, f); }
 }
 `,
   // words rising far enough to cross the line below them, letters sliding up behind their words' baselines, and
@@ -227,6 +266,19 @@ test.skipIf(!hasChrome)('check passes the components and names the faults', asyn
   const faults = real.filter((f) => f.clip === 'faults').map((f) => `${f.kind} ${f.severity} ${f.text!.split(' ')[0]}`).sort();
   expect(faults).toEqual(['clipped warning Cut', 'clipped warning Overfull', 'clipped warning Unbreakablewordthatcannotfitatall', 'clipped warning kinetic', 'overflow error Too']);
   expect(r.code).toBe(1);
+}, 180_000);
+
+test.skipIf(!hasChrome)('a component timed by a span of the words shows over the span, in clip seconds', async () => {
+  const still = async (t: number) => (await reel(['still', '--t', String(t), '--json', '--project', project.dir])).json().files[0] as string;
+  // (the largest difference in levels: the dither differs from frame to frame by 1)
+  const differs = async (t: number, file: string) => (await reel(['diff', '--t', String(t), file, '--json', '--project', project.dir])).json().max as number;
+  const before = await still(13.3), during = await still(13.9), after = await still(14.5);
+  // the same as the clip timed in numbers at the same clip time, and blank outside the span
+  expect(await differs(15.3, before)).toBeLessThanOrEqual(1);
+  expect(await differs(15.9, during)).toBeLessThanOrEqual(1);
+  expect(await differs(16.5, after)).toBeLessThanOrEqual(1);
+  expect(await differs(13.3, after)).toBeLessThanOrEqual(1);
+  expect(await differs(13.3, during)).toBeGreaterThan(100);
 }, 180_000);
 
 test.skipIf(!hasChrome)('kinetic text: a frame is the same whatever frame came before it', async () => {

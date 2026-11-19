@@ -171,7 +171,7 @@ export class SvgDraw extends HtmlComponent {
 
   protected update(f: Frame) {
     if (!this.ready) return; // (a file that did not load: the error says so)
-    const parts = this.partsOf(), ks = drawShares(progressOf(this.o, f), parts.length, this.o.stagger ?? true);
+    const parts = this.partsOf(), ks = drawShares(progressOf(this.o, f, this.window(f)[0]), parts.length, this.o.stagger ?? true);
     parts.forEach((p, i) => {
       const k = ks[i]!, fade = clamp((k - 0.6) / 0.4);
       if (k === p.last) return; // (unchanged since the last frame: a finished or waiting part costs nothing)
@@ -309,7 +309,7 @@ export class Arrow extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const heads = this.o.heads ?? 'end', tr = this.track, L = tr.length, s = progressOf(this.o, f) * L;
+    const heads = this.o.heads ?? 'end', tr = this.track, L = tr.length, s = progressOf(this.o, f, this.window(f)[0]) * L;
     const end = heads === 'end' || heads === 'both', start = heads === 'start' || heads === 'both';
     // the line runs from behind the start's head to behind the end's, so neither tip has a line poking through it
     const tuck = this.hl * 0.7, s0 = start ? Math.min(tuck, L / 2) : 0, s1 = end ? Math.max(s0, s - tuck) : s;
