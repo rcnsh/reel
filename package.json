@@ -2,6 +2,29 @@
   "name": "reel",
   "type": "module",
   "private": true,
+  "version": "0.1.0",
+  "description": "A deterministic WebGL video engine and CLI for agents: scenes in TypeScript and three.js, rendered by headless Chrome into ffmpeg at any size and frame rate.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/rcnsh/reel.git"
+  },
+  "bugs": "https://github.com/rcnsh/reel/issues",
+  "homepage": "https://github.com/rcnsh/reel#readme",
+  "keywords": [
+    "video",
+    "webgl",
+    "three.js",
+    "motion-graphics",
+    "headless-chrome",
+    "ffmpeg",
+    "mcp",
+    "agents",
+    "bun"
+  ],
+  "engines": {
+    "bun": ">=1.4"
+  },
   "devDependencies": {
     "@types/bun": "latest",
     "@types/fontkit": "^2.0.9",
