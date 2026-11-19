@@ -1,8 +1,8 @@
 // Kokoro-82M, a local model (tools/voices/kokoro_tts.py through uv): a natural voice with no key and nothing sent
 // anywhere. Runs through MLX on Apple Silicon and PyTorch elsewhere; its duration predictor gives the word times.
-import { $ } from 'bun';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
+import { run } from '../../cli/children';
 import type { VoiceSource } from './voice';
 
 export const kokoro: VoiceSource = {
@@ -17,8 +17,8 @@ export const kokoro: VoiceSource = {
         const items = reqs.map((r, i) => ({ text: r.text, speed: r.speed, out: path.join(work, `kokoro${i}.wav`) }));
         const jf = path.join(work, 'kokoro.json');
         await Bun.write(jf, JSON.stringify({ voice, items }));
-        const r = await $`uv run -q ${path.join(import.meta.dir, 'kokoro_tts.py')} ${jf}`.nothrow();
-        if (r.exitCode !== 0) throw new Error(`kokoro failed:\n${r.stderr.toString().slice(-1500)}`);
+        const r = await run(['uv', 'run', '-q', path.join(import.meta.dir, 'kokoro_tts.py'), jf], { stdout: 'inherit', nothrow: true });
+        if (r.exitCode !== 0) throw new Error(`kokoro failed:\n${r.stderr.slice(-1500)}`);
         return items.map((it) => ({ file: it.out, words: JSON.parse(readFileSync(`${it.out}.json`, 'utf8')) }));
       },
     };

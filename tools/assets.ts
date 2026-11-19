@@ -2,11 +2,11 @@
 // it makes the missing ones (and those whose prompt changed), fitted to their size and format and recorded in
 // data/generated-assets.json; without one it lists what each needs, so a person can make the file elsewhere and
 // drop it in. A file reel assets did not make is never replaced.
-import { $ } from 'bun';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { run } from '../cli/children';
 import { assetKey, describe, loadAssets, RECORD, statusOf, type AssetEntry, type Status } from './asset-manifest';
 import { providerFor, type ProviderEnv } from './providers';
 
@@ -57,9 +57,9 @@ async function fit(raw: string, a: AssetEntry, out: string) {
   mkdirSync(path.dirname(out), { recursive: true });
   if (a.kind === 'image') {
     const [w, h] = a.size!;
-    await $`ffmpeg -nostdin -loglevel error -y -i ${raw} -vf ${`scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h}`} -frames:v 1 ${out}`;
-  } else if (path.extname(out).toLowerCase() === path.extname(raw).toLowerCase()) await $`cp ${raw} ${out}`;
-  else await $`ffmpeg -nostdin -loglevel error -y -i ${raw} ${out}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', raw, '-vf', `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h}`, '-frames:v', '1', out]);
+  } else if (path.extname(out).toLowerCase() === path.extname(raw).toLowerCase()) copyFileSync(raw, out);
+  else await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', raw, out]);
 }
 
 if (import.meta.main) {

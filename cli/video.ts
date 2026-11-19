@@ -5,6 +5,7 @@ import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
 import { PIXELS } from '../src/engine/pixels';
 import { ffmpegArgs, ffmpegDeepGain, ffmpegHasAlphaModes, hasFfmpegEncoder as hasEncoder, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
+import { run, spawnChild } from './children';
 import { launchChrome, openPage, pageUrl, type Format } from './renderer';
 
 export interface VideoOpts {
@@ -79,7 +80,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   const f0 = Math.round(from * fps), f1 = Math.round(to * fps), total = f1 - f0;
   if (webpFrames) mkdirSync(webpFrames, { recursive: true });
   const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: o.out, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames, alphaModes: o.plan.format.id !== 'exr' || ffmpegHasAlphaModes(), deepGain: o.plan.pixels === 'rgb16' || o.plan.pixels === 'rgba16' ? ffmpegDeepGain() : 1 });
-  const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
+  const ff = spawnChild(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
 
   const chunk = Math.max(1, o.chunk);
   // (a scene with simulation state needs its frames in order from one renderer)
@@ -217,8 +218,8 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     const code = await ff.exited;
     if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`);
     if (webpFrames) {
-      const w = Bun.spawnSync(webpArgs(webpFrames, total, fps, o.enc, o.out), { stdout: 'pipe', stderr: 'pipe' });
-      if (w.exitCode !== 0) throw new Error(`img2webp failed: ${w.stderr.toString().trim().slice(-800)}`);
+      const w = await run(webpArgs(webpFrames, total, fps, o.enc, o.out), { quiet: true, nothrow: true });
+      if (w.exitCode !== 0) throw new Error(`img2webp failed: ${w.stderr.trim().slice(-800)}`);
     }
     ok = true;
   } finally {
@@ -259,7 +260,7 @@ async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
     // (the browser tags the stream with the canvas's sRGB transfer: retagged BT.709, as every other YUV stream reel writes,
     // in the bitstream and in the container's colr box, which is written from the input's tags otherwise)
     const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'h264', '-r', String(fps), '-i', 'pipe:0', '-c:v', 'copy', '-bsf:v', 'h264_metadata=transfer_characteristics=1', '-color_trc', 'bt709', ...(o.enc.comment ? ['-metadata', `comment=${o.enc.comment}`] : []), '-movflags', '+faststart', '-f', 'mp4', pic];
-    const proc = ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
+    const proc = ff = spawnChild(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
     let count = 0, frames = 0;
     const step = Math.max(1, Math.round(total / 100));
     server = Bun.serve({
@@ -288,9 +289,9 @@ async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
     const code = await proc.exited;
     if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`);
     if (audio) {
-      const mux = Bun.spawnSync(['ffmpeg', '-y', '-loglevel', 'error', '-i', pic, '-ss', String(from), '-t', String(to - from), '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-shortest', '-map_metadata', '0', '-movflags', '+faststart', o.out], { stderr: 'pipe' });
+      const mux = await run(['ffmpeg', '-y', '-loglevel', 'error', '-i', pic, '-ss', String(from), '-t', String(to - from), '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-shortest', '-map_metadata', '0', '-movflags', '+faststart', o.out], { quiet: true, nothrow: true });
       rmSync(pic, { force: true });
-      if (mux.exitCode !== 0) throw new Error(`ffmpeg (muxing the sound): ${mux.stderr.toString().slice(-800)}`);
+      if (mux.exitCode !== 0) throw new Error(`ffmpeg (muxing the sound): ${mux.stderr.slice(-800)}`);
     }
     ok = true;
     return { file: o.out, frames: r.frames!, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers: 1, subFrames: { 1: r.frames! }, spoolPeak: 0, errors, logs, encoder: `WebCodecs H.264 in the page (${r.encoder})`, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };

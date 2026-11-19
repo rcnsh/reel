@@ -23,10 +23,10 @@
 // limiter at -0.4 dBFS instead). --from is the timeline time the video starts at (the render's --from).
 // Sounds on the timeline (the config's `sounds` and a scene's sound(), also in data/cues.json) are laid as they say:
 // from their file's `from`, at their `at`, for their `duration`, looped, at their speed, gain and fades.
-import { $ } from 'bun';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { run } from '../cli/children';
 import { durationOf, measure } from './audio-io';
 import { loudnessTarget, loudnormFilter, parseLoudnorm } from './loudness';
 import { buildMix, type Events, type MixConfig } from './mix-graph';
@@ -126,8 +126,8 @@ export async function mixVideo(o: MixOptions) {
   for (const s of ev.sounds ?? []) {
     const f = soundFile(root, s.file);
     if (lengths.has(f)) continue;
-    const r = await $`ffprobe -v error -select_streams a -show_entries stream=index -of csv=p=0 ${f}`.quiet().nothrow();
-    if (r.exitCode !== 0 || !r.stdout.toString().trim()) throw new Error(`the sound '${s.file}' (at ${s.at} s) has no audio stream`);
+    const r = await run(['ffprobe', '-v', 'error', '-select_streams', 'a', '-show_entries', 'stream=index', '-of', 'csv=p=0', f], { quiet: true, nothrow: true });
+    if (r.exitCode !== 0 || !r.text().trim()) throw new Error(`the sound '${s.file}' (at ${s.at} s) has no audio stream`);
     lengths.set(f, await durationOf(f));
   }
   const g = buildMix(cfg, ev, dur, from, track, (f) => soundFile(root, f), (f) => lengths.get(f) ?? Infinity);
@@ -137,15 +137,15 @@ export async function mixVideo(o: MixOptions) {
   const det = ['-nostdin', '-hide_banner', '-filter_complex_threads', '1', '-threads', '1'];
   let tail = '[mixed]anull[a]';
   if (!g.silent && target) {
-    const r = await $`ffmpeg ${det} ${ins} -filter_complex ${`${g.filter};[mixed]loudnorm=I=${target.integrated}:TP=${target.truePeak}:LRA=${target.lra ?? 11}:print_format=json[a]`} -map [a] -f null -`.quiet().nothrow();
-    if (r.exitCode !== 0) throw new Error(`ffmpeg (measuring the mix): ${r.stderr.toString().slice(-1200)}`);
-    tail = `[mixed]${loudnormFilter(target, parseLoudnorm(r.stderr.toString()))}[a]`;
+    const r = await run(['ffmpeg', ...det, ...ins, '-filter_complex', `${g.filter};[mixed]loudnorm=I=${target.integrated}:TP=${target.truePeak}:LRA=${target.lra ?? 11}:print_format=json[a]`, '-map', '[a]', '-f', 'null', '-'], { quiet: true, nothrow: true });
+    if (r.exitCode !== 0) throw new Error(`ffmpeg (measuring the mix): ${r.stderr.slice(-1200)}`);
+    tail = `[mixed]${loudnormFilter(target, parseLoudnorm(r.stderr))}[a]`;
   } else if (!g.silent) tail = '[mixed]alimiter=limit=0.955:level=false[a]';
   const subs = o.subtitles ? ['-i', o.subtitles] : [];
   const box = containerOf(output);
   const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', box.subtitles, '-metadata:s:s:0', 'language=eng'] : [];
-  const r = await $`ffmpeg ${det} -loglevel error -y ${ins} ${subs} -filter_complex ${`${g.filter};${tail}`} -map 0:v -c:v copy -map [a] ${box.audio} -ar 48000 ${subMap} -fflags +bitexact -flags:a +bitexact ${box.flags} ${output}`.quiet().nothrow();
-  if (r.exitCode !== 0) throw new Error(`ffmpeg (the mix): ${r.stderr.toString().slice(-1200)}`);
+  const r = await run(['ffmpeg', ...det, '-loglevel', 'error', '-y', ...ins, ...subs, '-filter_complex', `${g.filter};${tail}`, '-map', '0:v', '-c:v', 'copy', '-map', '[a]', ...box.audio, '-ar', '48000', ...subMap, '-fflags', '+bitexact', '-flags:a', '+bitexact', ...box.flags, output], { quiet: true, nothrow: true });
+  if (r.exitCode !== 0) throw new Error(`ffmpeg (the mix): ${r.stderr.slice(-1200)}`);
   const loud = g.silent ? null : await measure(output);
   const what = [track ? `the track (${path.basename(track)})` : 'no track', `${g.segments} music segment${g.segments === 1 ? '' : 's'}`, ...g.counts].join(', ');
   return {

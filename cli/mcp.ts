@@ -6,6 +6,7 @@ import { readFileSync } from 'node:fs';
 import path from 'node:path';
 import { z } from 'zod';
 import { pageOf, samplesOf, UsageError, type Values } from './args';
+import { run, spawnChild } from './children';
 import { call } from './daemon';
 import { runDiff } from './diff';
 import { type Op, type Req, type Result } from './ops';
@@ -65,7 +66,7 @@ async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
 let pending = 0;
 
 // ---- video jobs: `reel video` in a child process, polled and cancellable ----
-interface Job { id: string; project: string; out: string; state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'; queue?: { running: string | null; ahead: number }; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof Bun.spawn> }
+interface Job { id: string; project: string; out: string; state: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'; queue?: { running: string | null; ahead: number }; progress: { frames: number; total: number; fps: number; eta: number } | null; started: number; result?: unknown; output: string; proc: ReturnType<typeof spawnChild> }
 const jobs = new Map<string, Job>();
 
 /**
@@ -86,7 +87,7 @@ function startVideo(a: Record<string, any>): Job {
   const proj = projectDir(a.project);
   const out = a.out ? path.resolve(a.out) : '(the format\'s default under out/; the result names the file)';
   const args = videoArgs(a, proj);
-  const proc = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
+  const proc = spawnChild(['bun', path.join(ENGINE, 'cli/reel.ts'), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
   const job: Job = { id: `video-${jobs.size + 1}-${Date.now().toString(36)}`, project: proj, out, state: a.wait ? 'queued' : 'running', progress: null, started: Date.now(), output: '', proc };
   jobs.set(job.id, job);
   void (async () => {
@@ -120,8 +121,8 @@ const jobView = (j: Job) => ({ job: j.id, state: j.state, out: j.out, ...(j.stat
 
 /** A project tool (narrate, align, analyze, mix) run to completion: its output and exit code. */
 async function tool(name: string, proj: string, args: string[]): Promise<ToolResult> {
-  const p = Bun.spawn(['bun', path.join(ENGINE, 'cli/reel.ts'), name, '--project', projectDir(proj), ...args], { stdout: 'pipe', stderr: 'pipe', env: process.env });
-  const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
+  const r = await run(['bun', path.join(ENGINE, 'cli/reel.ts'), name, '--project', projectDir(proj), ...args], { quiet: true, nothrow: true });
+  const out = r.text(), err = r.stderr, code = r.exitCode;
   return { content: [text(`exit ${code}\n${(out + (err ? `\n${err}` : '')).trim().slice(-6000)}`)], isError: code !== 0 };
 }
 
