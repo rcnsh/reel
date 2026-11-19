@@ -447,6 +447,6 @@ finish(res, (x) => {
   } else if (mode === 'sheet' || mode === 'strip') say(String(x.file));
   else if (mode === 'check') printCheck(x);
   else if (mode === 'events') say(`${x.file}: ${x.clips} clips, ${x.cues} cues, ${x.sounds} sounds on the timeline`);
-  else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms (render ${(x.render as number).toFixed(1)}, readback ${(x.readback as number).toFixed(1)})  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
+  else if (mode === 'perf') say(`frames ${x.frames}  avg ${(x.avg as number).toFixed(1)}ms (render ${(x.render as number).toFixed(1)}${x.adaptive ? ' with the GPU waits of --samples auto' : ''}, gpu ${(x.gpu as number).toFixed(1)}, readback ${(x.readback as number).toFixed(1)})  p50 ${(x.p50 as number).toFixed(1)}  p95 ${(x.p95 as number).toFixed(1)}  max ${(x.max as number).toFixed(1)}  sub-frames ${hist(x.subFrames as Record<string, number>)}`);
   else if (mode === 'gpu') say(`${x.gpu}\nGL backend: ${x.gl}${x.software ? ' (software rendering: no GPU)' : ''}`);
 });

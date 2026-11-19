@@ -215,11 +215,24 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
       await p.browser.close().catch(() => {});
     }
   };
+  // the extra workers' launches: the first page renders at once, the others take chunks as soon as they are ready
+  const launches: Promise<unknown>[] = [];
   try {
-    const opened = await Promise.allSettled(Array.from({ length: workers - 1 }, () => browserOf()));
-    for (const r of opened) if (r.status === 'fulfilled') pages.push(r.value);
-    for (const r of opened) if (r.status === 'rejected') throw r.reason;
-    const rendering = Promise.all(pages.map(async ({ page }, k) => {
+    const rendering = Promise.all(Array.from({ length: workers }, async (_, k) => {
+      let p = first;
+      if (k > 0) {
+        const launch = browserOf();
+        launches.push(launch.catch(() => {}));
+        try { p = await launch; } catch (e) {
+          // (the pages that came up render every chunk: one that did not start costs speed, not the export)
+          logs.push(`worker ${k}: its Chrome did not start (${String((e as Error)?.message ?? e).split('\n')[0]}); the other workers rendered its share`);
+          return;
+        }
+        // (closePages closes the pages it finds; one that comes up after the render stopped is closed here)
+        if (ending || failure) { await p.browser.close().catch(() => {}); return; }
+        pages.push(p);
+      }
+      const { page } = p;
       for (let r = take(); r && !failure; r = take()) {
         for (let n = r[0]; n < r[1]; n++) queue[k]!.push(n);
         const h: Record<string, number> = await page.evaluate((x) => (window as any).__reel.stream(x), {
@@ -252,6 +265,8 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     // (killed, ffmpeg stops writing at once; what it wrote is the partial's, removed with the rest of the scratch)
     if (!ok) ff.kill(9);
     await closePages();
+    // (a Chrome still launching closes itself once it is up: wait for that, so none outlives the export)
+    await Promise.all(launches);
     server.stop(true);
     scratch();
     offAbort();

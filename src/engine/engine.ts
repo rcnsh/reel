@@ -65,6 +65,16 @@ function yieldTask() {
   });
 }
 
+/** Wait for a fence to signal. A sync object's status only changes between tasks: yield to the event loop between polls. */
+async function waitFence(gl: WebGL2RenderingContext, sync: WebGLSync, label: string) {
+  for (;;) {
+    const s = gl.clientWaitSync(sync, 0, 0);
+    if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) return;
+    if (s === gl.WAIT_FAILED) throw new Error(`${label}: fence wait failed`);
+    await yieldTask();
+  }
+}
+
 export class Engine {
   renderer: THREE.WebGLRenderer;
   ctx!: Omit<SceneCtx, 'capSamples'>;
@@ -965,17 +975,19 @@ export class Engine {
     gl.flush();
   }
 
+  /** Resolve once the GPU has done everything queued so far. For `reel perf`. */
+  async gpuIdle() {
+    const gl = this.renderer.getContext() as WebGL2RenderingContext, s = gl.fenceSync(gl.SYNC_GPU_COMMANDS_COMPLETE, 0);
+    if (!s) throw new Error('gpuIdle: no fence (the WebGL context was lost)');
+    gl.flush();
+    try { await waitFence(gl, s, 'gpuIdle'); } finally { gl.deleteSync(s); }
+  }
+
   /** Wait for readStart(slot)'s copy and copy it into `out` (Engine.bytes of its mode). */
   async readFinish(slot: number, out: Uint8Array) {
     const gl = this.renderer.getContext() as WebGL2RenderingContext, p = this.packs[slot];
     if (!p) throw new Error(`readFinish: nothing queued in slot ${slot}`);
-    // (a sync object's status only changes between tasks: yield to the event loop between polls)
-    for (;;) {
-      const s = gl.clientWaitSync(p.sync, 0, 0);
-      if (s === gl.ALREADY_SIGNALED || s === gl.CONDITION_SATISFIED) break;
-      if (s === gl.WAIT_FAILED) throw new Error('readFinish: fence wait failed');
-      await yieldTask();
-    }
+    await waitFence(gl, p.sync, 'readFinish');
     this.packs[slot] = undefined;
     gl.deleteSync(p.sync);
     gl.bindBuffer(gl.PIXEL_PACK_BUFFER, p.buf);
