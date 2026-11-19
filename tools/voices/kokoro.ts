@@ -13,13 +13,14 @@ export const kokoro: VoiceSource = {
     if (!/^[ab][fm]_[a-z]+$/.test(voice)) throw new Error(`kokoro:${voice}: expected an English Kokoro voice such as af_heart, am_michael, bf_emma or bm_george`);
     return {
       id: `kokoro:${voice}`,
-      async synth(reqs, work) {
+      async synth(reqs, work, each) {
         const items = reqs.map((r, i) => ({ text: r.text, speed: r.speed, out: path.join(work, `kokoro${i}.wav`) }));
         const jf = path.join(work, 'kokoro.json');
         await Bun.write(jf, JSON.stringify({ voice, items }));
         const r = await $`uv run -q ${path.join(import.meta.dir, 'kokoro_tts.py')} ${jf}`.nothrow();
         if (r.exitCode !== 0) throw new Error(`kokoro failed:\n${r.stderr.toString().slice(-1500)}`);
-        return items.map((it) => ({ file: it.out, words: JSON.parse(readFileSync(`${it.out}.json`, 'utf8')) }));
+        // (one process voices every passage, so its model loads once; they are handed on when it ends)
+        for (const [i, it] of items.entries()) await each(i, { file: it.out, words: JSON.parse(readFileSync(`${it.out}.json`, 'utf8')) });
       },
     };
   },

@@ -5,7 +5,7 @@ import type * as THREE from 'three';
 import { HtmlLayer, type HtmlUpdate } from '../engine/html';
 import { H, W } from '../engine/gl';
 import { LOADING, type Frame } from '../engine/scene';
-import { clamp, ease } from '../engine/util';
+import { clamp, ease, prog } from '../engine/util';
 
 /** A value, or a function of the frame giving it (evaluated once per output frame for content, per sub-frame for motion). */
 export type Anim<T> = T | ((f: Frame) => T);
@@ -22,6 +22,8 @@ export function safeBox(inset = SAFE + 0.03): Box {
 }
 /** The frame's short side: sizes scale with it, so a layout holds in 16:9, vertical and square. */
 export const UNIT = Math.min(W, H);
+/** The kit's line width (a chart's line, a drawn path, an arrow): 0.5% of the short side, at least 3 px. */
+export const lineWidth = () => Math.max(3, Math.round(UNIT * 0.005));
 
 /**
  * An entrance and an exit: over `in` seconds from the start of the component's window it fades (and moves from
@@ -107,11 +109,29 @@ export interface ComponentOptions {
   label?: string;
 }
 
+/** A text's graphemes: what a reader counts as one character (an emoji, a letter and its accent). */
+export const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
+
+/** Options of a component that grows, draws or counts as a progress value runs from 0 to 1. */
+export interface ProgressOptions extends ComponentOptions {
+  /** 0 to 1: how far it has grown (default: over the first 1.4 s of its window, eased out). */
+  progress?: Anim<number>;
+}
+
+/**
+ * A component's progress at f: its own, or by default 0 to 1 over 1.4 s from 0.2 s into its window (which starts at
+ * w0, in clip seconds: the component's `window(f)[0]`), eased out.
+ */
+export function progressOf(o: ProgressOptions, f: Frame, w0: number) {
+  if (o.progress !== undefined) return clamp(val(o.progress, f));
+  return prog(f.lt, w0 + 0.2, w0 + 1.6, ease.outCubic);
+}
+
 /** HTML-escaped text. */
 export const esc = (s: string) => s.replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' })[c]!);
 
 /** A CSS colour from a palette key ('accent', 'accentHi') or any CSS colour. */
-export const cssColor = (c: string) => (/^[a-z][A-Za-z0-9]*$/.test(c) && !['transparent', 'white', 'black', 'currentcolor', 'inherit'].includes(c.toLowerCase()) ? `var(--${c.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()})` : c);
+export const cssColor = (c: string) => (/^[a-z][A-Za-z0-9]*$/.test(c) && !['transparent', 'white', 'black', 'currentcolor', 'inherit', 'none'].includes(c.toLowerCase()) ? `var(--${c.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase()})` : c);
 
 /**
  * A component drawn from an HTML layer the size of its box. Subclasses give the markup, the CSS and what to
@@ -124,12 +144,17 @@ export abstract class HtmlComponent {
   /** `at` in clip seconds (undefined: the whole clip). */
   protected at: [number, number] | undefined;
 
-  constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string }) {
+  /** Px the layer reaches past the box on each side (for strokes and caps drawn on the box's edge). */
+  protected readonly pad: number;
+
+  /** `pad`: the layer is that many px larger than the box on each side, the box at its origin (its markup laid out from `pad`). */
+  constructor(o: ComponentOptions, defaults: { box: Box; html: string; css: string; label: string; pad?: number }) {
     this.opts = o;
     this.at = windowOf(o.at, o.label ?? defaults.label);
     this.box = o.box ?? defaults.box;
+    this.pad = Math.ceil(defaults.pad ?? 0);
     const update: HtmlUpdate = (f) => this.update(f);
-    this.layer = new HtmlLayer({ html: defaults.html, css: defaults.css + (o.css ?? ''), width: Math.ceil(this.box.w), height: Math.ceil(this.box.h), update, label: o.label ?? defaults.label });
+    this.layer = new HtmlLayer({ html: defaults.html, css: defaults.css + (o.css ?? ''), width: Math.ceil(this.box.w) + 2 * this.pad, height: Math.ceil(this.box.h) + 2 * this.pad, update, label: o.label ?? defaults.label });
   }
 
   /** Once per output frame while the clip shows: bring the markup up to date for f. */
@@ -143,6 +168,6 @@ export abstract class HtmlComponent {
     const [w0, w1] = this.window(f);
     const m = motionAt(this.opts.motion, f.lt, w0, w1);
     if (!m) return;
-    this.layer.draw(renderer, out, { x: this.box.x + m.dx, y: this.box.y + m.dy, scale: m.scale, opacity: m.opacity * (o.opacity ?? 1) });
+    this.layer.draw(renderer, out, { x: this.box.x - this.pad + m.dx, y: this.box.y - this.pad + m.dy, scale: m.scale, opacity: m.opacity * (o.opacity ?? 1) });
   }
 }

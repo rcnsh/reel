@@ -44,6 +44,11 @@ test('sampling and page options', () => {
   expect(() => samplesOf({ samples: 'lots' })).toThrow(UsageError);
   expect(() => samplesOf({ refine: 'tiles' })).toThrow('goes with --samples auto');
   expect(() => samplesOf({ samples: 'auto', refine: 'pixels' })).toThrow('tiles or frame');
+  expect(samplesOf({ samples: 'auto' }, { REEL_TILE_MASK: 'merge' })).toEqual({ min: 4, max: 324, tol: 3, refine: 'tiles', mask: 'merge' });
+  expect(samplesOf({ samples: 'auto' }, {})).toEqual({ min: 4, max: 324, tol: 3, refine: 'tiles' });
+  expect(samplesOf({ samples: '4' }, { REEL_TILE_MASK: 'subs' })).toBe(4);
+  expect(() => samplesOf({ samples: 'auto' }, { REEL_TILE_MASK: 'tiles' })).toThrow('expected subs or merge');
+  expect(() => samplesOf({ samples: '4' }, { REEL_TILE_MASK: 'tiles' })).toThrow('expected subs or merge');
   expect(pageOf({})).toEqual({ scale: 1 });
   expect(pageOf({ size: '1080x1920', fps: '30', scale: '2', only: 'a,b', theme: 'film' })).toEqual({ w: 1080, h: 1920, fps: 30, scale: 2, only: 'a,b', theme: 'film' });
   expect(() => pageOf({ scale: '5' })).toThrow('1 to 4');

@@ -2,6 +2,7 @@
 import { expect, test } from 'bun:test';
 import { glArgs, glBackend, parseMissingLibs } from '../cli/chrome';
 import { chromeArgs } from '../cli/renderer';
+import { maskSubFrames } from '../src/engine/tilemask';
 
 test('Metal on macOS; on Linux EGL with a GPU render node, else SwiftShader; REEL_GL overrides', () => {
   expect(glBackend({}, 'darwin', () => false)).toBe('metal');
@@ -34,4 +35,11 @@ test('ldd output gives the libraries Chrome lacks', () => {
   ].join('\n');
   expect(parseMissingLibs(ldd)).toEqual(['libnss3.so', 'libgbm.so.1']);
   expect(parseMissingLibs('\tlibc.so.6 => /lib/libc.so.6 (0x1)')).toEqual([]);
+});
+
+test('per-tile sampling masks every sub-frame on a software rasteriser, only the merge on a GPU', () => {
+  expect(maskSubFrames('ANGLE (Google, Vulkan 1.3.0 (SwiftShader Device (Subzero) (0x0000C0DE)), SwiftShader driver)')).toBe(true);
+  expect(maskSubFrames('ANGLE (Mesa, llvmpipe (LLVM 19.1.7 256 bits), OpenGL ES 3.2)')).toBe(true);
+  expect(maskSubFrames('ANGLE (Apple, ANGLE Metal Renderer: Apple M3 Pro, Unspecified Version)')).toBe(false);
+  expect(maskSubFrames('ANGLE (NVIDIA Corporation, NVIDIA GeForce RTX 4090/PCIe/SSE2, OpenGL ES 3.2)')).toBe(false);
 });

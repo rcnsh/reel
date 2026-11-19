@@ -116,11 +116,17 @@ export function kenBurnsAt(kb: boolean | { from?: Framing; to?: Framing } | unde
   return { zoom: from.zoom + (to.zoom - from.zoom) * k, x: from.x + (to.x - from.x) * k, y: from.y + (to.y - from.y) * k };
 }
 
-/** An SVG's size in its own units: width and height when absolute, else its viewBox, else 300 x 150 as in HTML. */
+/** A length in an SVG's width or height in px, for the absolute units (none, px, pt, pc, mm, cm, in); else NaN. */
+export function svgLength(v: string | null | undefined): number {
+  const m = /^\s*([\d.]+)\s*(px|pt|pc|mm|cm|in)?\s*$/.exec(v ?? '');
+  return m ? parseFloat(m[1]!) * { px: 1, pt: 4 / 3, pc: 16, mm: 96 / 25.4, cm: 96 / 2.54, in: 96 }[(m[2] ?? 'px') as 'px'] : NaN;
+}
+
+/** An SVG's size in its own units: width and height when absolute (in px), else its viewBox, else 300 x 150 as in HTML. */
 export function svgSize(text: string): [number, number] {
   const tag = /<svg\b[^>]*>/i.exec(text)?.[0] ?? '';
   const attr = (n: string) => new RegExp(`\\s${n}\\s*=\\s*["']([^"']*)["']`, 'i').exec(tag)?.[1];
-  const abs = (v?: string) => (v && /^\s*[\d.]+\s*(px)?\s*$/.test(v) ? parseFloat(v) : NaN);
+  const abs = svgLength;
   const vb = attr('viewBox')?.trim().split(/[\s,]+/).map(Number);
   let w = abs(attr('width')), h = abs(attr('height'));
   const vw = vb?.length === 4 ? vb[2]! : NaN, vh = vb?.length === 4 ? vb[3]! : NaN;

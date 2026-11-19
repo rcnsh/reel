@@ -1,7 +1,7 @@
 // Narration: the script parser, the timing files, settings and cache keys, word refinement, the assembly of the
 // track, and the hosted voices' requests and responses (against fixtures: no request leaves the machine).
 import { afterAll, describe, expect, test } from 'bun:test';
-import { readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { snapToPauses, timeScript } from '../tools/align-words';
 import { joinFigures } from '../tools/align';
@@ -10,8 +10,10 @@ import { narrationAudioJSON, parseScript, plateText, plateWords, timing } from '
 import { plateKey, resolveSettings } from '../tools/settings';
 import { charsToWords, elevenlabs, request as elRequest } from '../tools/voices/elevenlabs';
 import { fish, request as fishRequest } from '../tools/voices/fish';
-import { voiceOf } from '../tools/voices';
-import { removeTempDirs, tempDir } from './helpers';
+import { voiceOf, type Speech } from '../tools/voices';
+import { fetchRetry, retryAfter } from '../tools/http';
+import { narrate } from '../tools/narrate';
+import { fixture, removeTempDirs, tempDir } from './helpers';
 
 afterAll(removeTempDirs);
 
@@ -132,7 +134,9 @@ describe('voices', () => {
     const f = (async (url: string, init: RequestInit) => { seen.push({ url, init }); return new Response(fx, { headers: { 'content-type': 'application/json' } }); }) as unknown as typeof fetch;
     const v = elevenlabs.create('abc', { env: { ELEVENLABS_API_KEY: 'secret' }, fetch: f });
     const work = tempDir('reel-el-');
-    const [sp] = await v.synth([{ text: 'Hi, there. 3.5', speed: 1 }], work);
+    const got: Speech[] = [];
+    await v.synth([{ text: 'Hi, there. 3.5', speed: 1 }], work, async (_, sp) => { got.push(sp); });
+    const sp = got[0];
     expect((seen[0]!.init.headers as Record<string, string>)['xi-api-key']).toBe('secret');
     expect(readFileSync(sp!.file).subarray(0, 4).toString()).toBe('RIFF');
     expect(sp!.words!.map((w) => w.w)).toEqual(['Hi,', 'there.', '3.5']);
@@ -141,8 +145,9 @@ describe('voices', () => {
   test('ElevenLabs and Fish: an HTTP error is one line with the service and its message', async () => {
     const f = (async () => new Response('{"detail":"quota exceeded"}', { status: 401 })) as unknown as typeof fetch;
     const work = tempDir('reel-err-');
-    await expect(elevenlabs.create('abc', { env: { ELEVENLABS_API_KEY: 'k' }, fetch: f }).synth([{ text: 'x', speed: 1 }], work)).rejects.toThrow('elevenlabs: HTTP 401: {"detail":"quota exceeded"}');
-    await expect(fish.create('abc', { env: { FISH_API_KEY: 'k' }, fetch: f }).synth([{ text: 'x', speed: 1 }], work)).rejects.toThrow('fish: HTTP 401');
+    const none = async () => {};
+    await expect(elevenlabs.create('abc', { env: { ELEVENLABS_API_KEY: 'k' }, fetch: f }).synth([{ text: 'x', speed: 1 }], work, none)).rejects.toThrow('elevenlabs: HTTP 401: {"detail":"quota exceeded"}');
+    await expect(fish.create('abc', { env: { FISH_API_KEY: 'k' }, fetch: f }).synth([{ text: 'x', speed: 1 }], work, none)).rejects.toThrow('fish: HTTP 401');
   });
 
   test('Fish: the request names the voice model and asks for WAV', async () => {
@@ -152,8 +157,160 @@ describe('voices', () => {
     const wav = Buffer.from('UklGRiQAAABXQVZFZm10IBAAAAABAAEAwF0AAIC7AAACABAAZGF0YQAAAAA=', 'base64');
     let auth = '';
     const f = (async (_: string, init: RequestInit) => { auth = (init.headers as Record<string, string>).authorization!; return new Response(wav); }) as unknown as typeof fetch;
-    const [sp] = await fish.create('ref1', { env: { FISH_API_KEY: 'fk' }, fetch: f }).synth([{ text: 'Hello.', speed: 1 }], tempDir('reel-fish-'));
+    let sp: Speech | undefined;
+    await fish.create('ref1', { env: { FISH_API_KEY: 'fk' }, fetch: f }).synth([{ text: 'Hello.', speed: 1 }], tempDir('reel-fish-'), async (_, x) => { sp = x; });
     expect(auth).toBe('Bearer fk');
     expect(sp!.words).toBeUndefined(); // timed by the forced aligner
+  });
+});
+
+describe('hosted requests retry', () => {
+  /** A fetch answering from a list of answers (each makes a Response or throws; the last repeats), counting its calls. */
+  const scripted = (answers: (() => Response)[]) => {
+    let n = 0;
+    const f = (async () => answers[Math.min(n++, answers.length - 1)]!()) as unknown as typeof fetch;
+    return { f, calls: () => n };
+  };
+  const ok = () => new Response('{"ok":true}');
+  const fail = (status: number, body = '', headers: Record<string, string> = {}) => () => new Response(body, { status, headers });
+  const offline = (msg: string) => () => { throw new TypeError(msg); };
+  const cutOff = () => new Response(new ReadableStream({ start(c) { c.enqueue(new TextEncoder().encode('{"audio')); c.error(new Error('socket closed')); } }));
+  const json = (r: Response) => r.json();
+
+  test('429, 5xx and network errors are retried, after Retry-After when sent, else backing off', async () => {
+    const waits: number[] = [];
+    const s = scripted([fail(429, 'slow down', { 'retry-after': '2' }), fail(503), offline('connection reset'), ok]);
+    expect(await fetchRetry('svc', { fetch: s.f, sleep: async (ms: number) => { waits.push(ms); } }, 'https://x', {}, json)).toEqual({ ok: true });
+    expect(s.calls()).toBe(4);
+    expect(waits).toEqual([2000, 2000, 4000]);
+  });
+
+  test('a request that succeeded is not sent again, even when its body cannot be read (it was billed)', async () => {
+    const s = scripted([cutOff, ok]);
+    await expect(fetchRetry('svc', { fetch: s.f, sleep: async () => {} }, 'https://x', {}, json)).rejects.toThrow('svc: the response could not be read: socket closed');
+    expect(s.calls()).toBe(1);
+  });
+
+  test('a client error is not retried; a lasting failure gives up with the last error; a long Retry-After fails at once', async () => {
+    const sleep = async () => {};
+    const a = scripted([fail(401, 'bad key')]);
+    await expect(fetchRetry('svc', { fetch: a.f, sleep }, 'https://x', {}, json)).rejects.toThrow('svc: HTTP 401: bad key');
+    expect(a.calls()).toBe(1);
+    const b = scripted([fail(502, 'down')]);
+    await expect(fetchRetry('svc', { fetch: b.f, sleep }, 'https://x', {}, json)).rejects.toThrow('svc: HTTP 502: down');
+    expect(b.calls()).toBe(5);
+    const c = scripted([offline('offline')]);
+    await expect(fetchRetry('svc', { fetch: c.f, sleep }, 'https://x', {}, json)).rejects.toThrow('svc: offline (after 5 attempts)');
+    const d = scripted([fail(429, 'quota', { 'retry-after': '3600' })]);
+    await expect(fetchRetry('svc', { fetch: d.f, sleep }, 'https://x', {}, json)).rejects.toThrow('svc: HTTP 429: quota (it asks to wait 3600 s: try again later)');
+    expect(d.calls()).toBe(1);
+  });
+
+  test('Retry-After: seconds or a date', () => {
+    const now = Date.parse('2026-01-01T00:00:00Z');
+    expect(retryAfter('3', now)).toBe(3000);
+    expect(retryAfter('Thu, 01 Jan 2026 00:00:10 GMT', now)).toBe(10_000);
+    expect(retryAfter('Wed, 31 Dec 2025 00:00:10 GMT', now)).toBe(0);
+    expect(retryAfter('soon', now)).toBeUndefined();
+    expect(retryAfter(null, now)).toBeUndefined();
+  });
+});
+
+describe('narrate: the plate cache with a hosted voice', () => {
+  // A fake ElevenLabs: each word of the text becomes a 0.25 s tone, 0.1 s apart, with its characters' times.
+  const voiced: string[] = [];
+  let failOn = -1, throttleOnce = false;
+  const speech = (text: string) => {
+    const SR = 24000, words = text.split(' '), chars: string[] = [], starts: number[] = [], ends: number[] = [];
+    const pcm = new Int16Array(Math.round((0.1 + words.length * 0.35) * SR));
+    words.forEach((w, i) => {
+      const t0 = 0.1 + i * 0.35;
+      for (let n = Math.round(t0 * SR); n < Math.round((t0 + 0.25) * SR); n++) pcm[n] = Math.round(8000 * Math.sin((2 * Math.PI * 220 * n) / SR));
+      if (i) { chars.push(' '); starts.push(t0 - 0.1); ends.push(t0); }
+      [...w].forEach((c, j) => { chars.push(c); starts.push(t0 + (0.25 * j) / w.length); ends.push(t0 + (0.25 * (j + 1)) / w.length); });
+    });
+    const head = Buffer.alloc(44);
+    head.write('RIFF', 0); head.writeUInt32LE(36 + pcm.byteLength, 4); head.write('WAVEfmt ', 8); head.writeUInt32LE(16, 16);
+    head.writeUInt16LE(1, 20); head.writeUInt16LE(1, 22); head.writeUInt32LE(SR, 24); head.writeUInt32LE(SR * 2, 28); head.writeUInt16LE(2, 32); head.writeUInt16LE(16, 34);
+    head.write('data', 36); head.writeUInt32LE(pcm.byteLength, 40);
+    const audio = Buffer.concat([head, Buffer.from(pcm.buffer)]).toString('base64');
+    return JSON.stringify({ audio_base64: audio, alignment: { characters: chars, character_start_times_seconds: starts, character_end_times_seconds: ends } });
+  };
+  const waits: number[] = [];
+  const ctx = {
+    env: { ELEVENLABS_API_KEY: 'k' },
+    sleep: async (ms: number) => { waits.push(ms); },
+    fetch: (async (_: string, init: RequestInit) => {
+      const text = JSON.parse(String(init.body)).text as string;
+      if (throttleOnce) { throttleOnce = false; return new Response('busy', { status: 429, headers: { 'retry-after': '1' } }); }
+      if (voiced.length === failOn) return new Response('{"detail":"quota exceeded"}', { status: 401 });
+      voiced.push(text);
+      return new Response(speech(text));
+    }) as unknown as typeof fetch,
+  };
+  const project = () => {
+    const p = fixture('narrate', {
+      'reel.config.ts': "import { defineVideo } from 'reel/config';\nexport default defineVideo({ narration: { voice: 'elevenlabs:test' }, timeline: () => [] });\n",
+      'narration.txt': '# a\nOne two.\n# b\nThree four.\n# c\nFive six.\n',
+    });
+    afterAll(p.cleanup);
+    return p.dir;
+  };
+  const cached = (root: string) => readdirSync(path.join(root, 'audio/.narration')).filter((f) => f !== 'work').sort();
+  const reset = () => { voiced.length = 0; waits.length = 0; failOn = -1; throttleOnce = false; };
+
+  test('voiced once; a re-run is all hits; an edited plate is voiced again and its old files removed', async () => {
+    const root = project();
+    reset();
+    expect(await narrate(root, {}, ctx)).toContain('3 of 3 plates voiced (elevenlabs:test), 0 from the cache');
+    expect(voiced).toEqual(['One two.', 'Three four.', 'Five six.']);
+    const first = cached(root);
+    expect(first.map((f) => f.replace(/-[^.]+/, ''))).toEqual(['a.flac', 'a.json', 'b.flac', 'b.json', 'c.flac', 'c.json']);
+    expect(JSON.parse(readFileSync(path.join(root, 'data/words.json'), 'utf8')).lines.map((l: { text: string }) => l.text)).toEqual(['One two.', 'Three four.', 'Five six.']);
+
+    reset();
+    expect(await narrate(root, {}, ctx)).toContain('0 of 3 plates voiced (elevenlabs:test), 3 from the cache');
+    expect(voiced).toEqual([]);
+
+    writeFileSync(path.join(root, 'narration.txt'), '# a\nOne two.\n# b\nThree five.\n# c\nFive six.\n');
+    reset();
+    expect(await narrate(root, {}, ctx)).toContain('1 of 3 plates voiced');
+    expect(voiced).toEqual(['Three five.']);
+    const now = cached(root);
+    expect(now.length).toBe(6);
+    expect(now.filter((f) => f.startsWith('b-'))).not.toEqual(first.filter((f) => f.startsWith('b-')));
+    for (const f of first.filter((f) => f.startsWith('b-'))) expect(existsSync(path.join(root, 'audio/.narration', f))).toBe(false);
+  });
+
+  test('a failure on plate 3 keeps plates 1 and 2; the re-run voices only plate 3', async () => {
+    const root = project();
+    reset(); failOn = 2;
+    await expect(narrate(root, {}, ctx)).rejects.toThrow('elevenlabs: HTTP 401');
+    expect(voiced).toEqual(['One two.', 'Three four.']);
+    expect(cached(root).map((f) => f.replace(/-[^.]+/, ''))).toEqual(['a.flac', 'a.json', 'b.flac', 'b.json']);
+    expect(existsSync(path.join(root, 'data/words.json'))).toBe(false);
+
+    reset();
+    expect(await narrate(root, {}, ctx)).toContain('1 of 3 plates voiced (elevenlabs:test), 2 from the cache');
+    expect(voiced).toEqual(['Five six.']);
+  });
+
+  test('a plate whose audio is missing (a run stopped between its two files) is voiced again', async () => {
+    const root = project();
+    reset();
+    await narrate(root, {}, ctx);
+    for (const f of cached(root).filter((f) => f.startsWith('b-') && f.endsWith('.flac'))) rmSync(path.join(root, 'audio/.narration', f));
+    reset();
+    expect(await narrate(root, {}, ctx)).toContain('1 of 3 plates voiced');
+    expect(voiced).toEqual(['Three four.']);
+    expect(cached(root).length).toBe(6);
+  });
+
+  test('a 429 is waited out and retried', async () => {
+    const root = project();
+    reset(); throttleOnce = true;
+    expect(await narrate(root, {}, ctx)).toContain('3 of 3 plates voiced');
+    expect(voiced).toEqual(['One two.', 'Three four.', 'Five six.']);
+    expect(waits).toEqual([1000]);
   });
 });

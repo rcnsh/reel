@@ -1,6 +1,6 @@
 # The component kit
 
-Ready-made pieces, imported from `reel`: text blocks, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer and a code block. Each is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
+Ready-made pieces, imported from `reel`: text blocks, kinetic text, a title card, a lower third, captions, an image, a video clip, a Lottie animation, charts, a counter, a progress bar, a timer, a code block, and drawn-on paths and arrows; and layout helpers that cut boxes from a box. Each component is built on an HTML layer (the image, video and Lottie on GL), so it is in the theme's colours, sharp at every `--scale`, reported to `reel check`, and a pure function of time.
 
 ## How every component works
 
@@ -19,8 +19,8 @@ export default class Point extends Scene {
 
 - Make components as fields of a scene (they belong to its clip) and call `draw(renderer, out, f, { opacity? })` in `render()`, in back-to-front order. On a track above 0, clear to transparent first.
 - Options every component takes:
-  - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side.
-  - `at: [from, to]`: the seconds of the clip it shows in, counted from the clip's start (default the whole clip). Either end may be a line or word of the timed words instead, in video time, and the component takes the clip's start off itself: `at: [this.ctx.words.get('the tide'), 9]` comes in as 'the tide' line starts; `at: this.ctx.words.get('the tide')` shows for the line, from its start to its end; at the end of `[from, to]` a span closes the window at its end. Anything with a `start` and an `end` in video seconds works. A component timed by words is made while its scene is (as a field, or in `init()`), else it throws; so does one whose words are said wholly before or after its clip (a line found in another plate). `Infinity` as the end runs to the end of the clip.
+  - `box: { x, y, w, h }` in logical px. Each has a default laid out from `W` and `H` inside the safe margin (`safeBox(inset)` makes one), so it holds in 16:9, vertical and square. Sizes default to shares of `UNIT`, the frame's short side. To lay out several, cut their boxes from one with the [layout helpers](#layout).
+  - `at: [from, to]`: the seconds of the clip it shows in, counted from the clip's start (default the whole clip). Word times are video seconds, so take the clip's start off: `at: [this.ctx.words.get('the tide').start - this.ctx.start, 9]`.
   - `motion`: its entrance and exit, `{ from: 'up' | 'down' | 'left' | 'right' | 'fade' | 'scale' | 'none', in: 0.6, out: 0.4, delay: 0, distance }`, or `false` for none. Motion is drawn in GL per sub-frame, so it gets motion blur under `--samples auto`.
   - `css`: CSS added to its layer, to restyle it (each component lists its classes below).
   - `label`: its name in `reel check` findings.
@@ -43,6 +43,32 @@ body = new TextBlock({
 ```
 
 `text` or `html` (*Anim*), `size` (largest, default 7% of the short side), `minSize` (default 2.6%), `fit` (default true), `maxLines`, `align`, `valign`, `font` (a CSS family, default Archivo), `weight` (700), `lineHeight` (1.15), `color` (fg). Text that cannot fit even at `minSize` runs out of the box and `reel check` reports it. To reveal text as it is spoken without it reflowing, keep the unsaid part laid out but hidden: `html: (f) => esc(said) + '<span style="visibility: hidden">' + esc(rest) + '</span>'`. Class: `.tb`.
+
+### KineticText
+
+Text that enters a piece at a time: its words or letters fade, rise, scale, unblur or slide up from behind their baseline, one after another, or each word as it is said.
+
+```ts
+title = new KineticText({ text: 'Every frame is a function of time', by: 'word', enter: 'rise', each: 0.08, at: [0.3, 5] });
+letters = new KineticText({ text: 'LOUD', by: 'letter', enter: 'scale', order: 'center', size: 160 });
+line = new KineticText({ words: this.ctx.words.get('the tide turns'), enter: 'blur', highlight: true });   // each word as it is said
+```
+
+- `text` (*Anim*: the pieces are made again when it changes), `by`: `'word'` (default) or `'letter'` (graphemes; a word's letters stay together, so lines wrap between words only). Words break at ASCII white space only (a no-break space joins two), and a word never wraps inside, so text without spaces (CJK) needs spaces or shorter lines.
+- `enter`: `'rise'` (default), `'drop'`, `'fade'`, `'scale'`, `'blur'`, `'clip'` (up from behind its word's baseline, at full opacity), or a function of the piece's progress giving its inline style: ``(k) => ({ opacity: k, transform: `rotate(${(1 - k) * 12}deg)` })``. `distance` (em) is how far `rise` and `drop` travel (0.6); `room` (em) is the room around the box pieces may move through on their way in (default what the entrance needs; 1 for a function).
+- Timing, from the start of its window plus `delay`: `each` (seconds between pieces: 0.08 a word, 0.03 a letter) or `total` (the spread from first to last), `dur` (0.5 a word, 0.35 a letter), `ease` (`ease.outCubic`), `order` (`'start'`, `'end'`, `'center'`, `'edges'`, `'random'` with `seed`). This is `stagger()` (below) per piece. `kt.progress(f, i)` is piece i's progress, `kt.endAt(f)` the clip second the last is in (any frame of the clip will do, even one not yet drawn).
+- `words`: a line of timed words (`this.ctx.words.get('…')`) or its `words`: each word enters at its start, its letters spread over its time, and the stagger options other than `dur` and `ease` are ignored. `text` defaults to the words and must have as many. `highlight`: the word being said in the accent (`true`) or a colour.
+- Lays out as a TextBlock: `size`, `minSize`, `fit`, `maxLines`, `align` (`center`), `valign`, `font`, `weight`, `lineHeight`, `color`. It fits with every piece at rest; text that does not fit even so is cut off at the box, and `reel check` says so.
+- The pieces move in the HTML layer, so their motion changes once per output frame and is not motion blurred; `motion` (default: no entrance of its own, a 0.4 s fade out) is drawn in GL as for any component.
+- `reel check` sees each piece as part of one run of text (no overlaps between pieces) and measures a piece's contrast and margins once it is in. Classes: `.kt`, `.w` (a word), `.p` (a piece), `.now`, `.said` (with `highlight`).
+
+### Staggering anything
+
+`stagger(t, i, n, { at, each, total, dur, ease, order, seed })` is item i of n's eased progress at t, for any group: tiles of a grid, points of a chart, your own spans. `staggerStart(i, n, o)` is when item i starts.
+
+```ts
+tiles.forEach((tile, i) => { const k = stagger(f.lt, i, tiles.length, { at: 0.4, each: 0.05, order: 'center' }); /* draw tile at k */ });
+```
 
 ### TitleCard
 
@@ -156,6 +182,41 @@ timer = new Timer({ format: 'm:ss', from: 30, to: 0 });                         
 
 ProgressBar: `progress` (*Anim*, default `f.p`), `text` (*Anim*, beside the bar), `color`; along the bottom of the safe area by default. Timer: `from` and `to` (seconds shown at the start and end of the window; default counts up from 0), `format` (`'m:ss'`, `'mm:ss'`, `'ss'`, `'m:ss.t'`), `size`, `color`; top right of the safe area by default. Neither moves in or out unless given `motion`. `clock(s, format)` and `formatNumber(x, digits)` are the formatting they use. Classes: `.track`, `.fill`, `.label`; `.clock`.
 
+## Drawn lines
+
+### SvgDraw
+
+```ts
+wave = new SvgDraw({
+  paths: ['M0 50 C50 0 100 0 150 50 S250 100 300 50', { d: 'M120 10 h40 v40 h-40 Z', color: 'fg', fill: 'accentHi' }],
+  viewBox: [0, 0, 300, 100], box: { x: W * 0.3, y: H * 0.2, w: W * 0.4, h: H * 0.2 }, width: 6,
+});
+logo = new SvgDraw({ src: 'assets/logo.svg', box: center(safeBox(), 600, 400), progress: (f) => prog(f.lt, 0.5, 3) });
+```
+
+Strokes drawn on along their length as `progress` runs 0 to 1 (*Anim*; by default from 0.2 s to 1.6 s into the window, eased out), one after another with each overlapping the next (`stagger: false`: all together); a fill fades in as its stroke finishes.
+
+- `paths`: path data (`d` strings, or `{ d, color, width, fill }`) in `viewBox` units (default the box's own px); `color` (accent), `width` (logical px whatever the viewBox, default 0.5% of the short side; with `fit: 'stretch'`, along the narrower scale), `fill` (none; `fill: 'none'` on one path turns the drawing's fill off for it). Round caps and joins.
+- `src`: an SVG file in the project instead, put in the layer as markup: its shapes (paths, lines, polylines, polygons, rects, circles, ellipses; not those in `defs`, clip paths, masks, markers or symbols) draw on in document order with the file's own strokes (a non-scaling stroke scales with the drawing); their fills fade in, and their own dashes and markers show once they are drawn. A shape with no stroke only fades in, as `<use>`, `<text>` and `<image>` elements do in their turn; what the file hides (itself, or a group of it) stays hidden and takes no turn. Loaded before the first frame with the images it names (relative to the file); a missing or malformed file is an error of the clip (no placeholder for a declared asset not made yet, as ImageBox has). Scripts, event handlers, `foreignObject` and SMIL animation (`<animate>`, `<set>` and the like, which would run on the wall clock) are dropped; the files it names (`href`s) are relative to it, as in a browser, but `url()`s in its styles are relative to the project. Its text needs its fonts loaded, as any layer's does. Give it a `viewBox` (without one, its width and height in absolute units stand in).
+- `fit`: `contain` (default), `cover` (cropped at the box), `stretch`, as `preserveAspectRatio`.
+- Its layer reaches a little past its box, so strokes on the box's edge keep their caps. Default motion: it cuts in (drawing on is its entrance) and fades out over 0.3 s. Reported to `reel check` as a picture named by its `label` (default its `src`). Markup: `.host` > `svg.art` > the shapes (`.stroke` for `paths`).
+
+### Arrow
+
+```ts
+a = new TextBlock({ text: 'Scene', box: cells[0] });
+b = new TextBlock({ text: 'Engine', box: cells[1] });
+link = new Arrow({ from: this.a.box, to: this.b.box, curve: 0.2, at: [1, 6] });     // met at the sides facing each other
+point = new Arrow({ from: { x: W * 0.7, y: H * 0.8 }, to: this.b.box, toSide: 'bottom', heads: 'both', color: 'fg' });
+```
+
+An arrow drawn on from `from` to `to` as `progress` runs 0 to 1 (as SvgDraw), its head riding the end of the drawn line.
+
+- `from`, `to`: points `{ x, y }` or boxes (a component's `box`). A box is met at `fromSide` / `toSide`: `'top' | 'right' | 'bottom' | 'left' | 'center'`, or `'auto'` (default), the side facing the other end (its side's point when that is fixed, else its centre). `gap`: px left clear of a box's side (default 12; 0 for a point).
+- `curve`: a bow as a share of its length, positive bending left of the way it runs (on screen), negative right (default 0, straight). `heads`: `'end'` (default), `'start'`, `'both'`, `'none'`. `color` (accent), `width` (default 0.5% of the short side), `head` (its length, default 4.5 widths).
+- Its `box` is the line's bounds (its layer reaches past them for the heads, and `reel check` sees the line's bounds); it is fixed when made, so make an arrow between boxes that do not move (an arrow to a moving component: draw it at the component's final place, or make it per layout). Same default motion as SvgDraw. Classes: `.art`, `.line`, `.head`, `.tail` (the start's head).
+- `anchor(box, side, toward?)`, `arrowTrack(a, b, curve)` and `pointAlong(track, px)` are the geometry it uses, for drawings of your own.
+
 ## CodeBlock
 
 ```ts
@@ -168,9 +229,27 @@ code = new CodeBlock({
 
 `code`, `lang` (one of `CODE_LANGUAGES`: bash, cpp, css, diff, glsl, go, javascript, json, python, rust, sql, typescript, xml, yaml, and their aliases ts, js, py, sh, html, c, rs, yml; an unknown language is an error), `size` (largest; the font shrinks so the longest line and every line fit, no line wraps), `lineNumbers`, `highlight` (1-based lines, *Anim*), `reveal` (how many lines show, *Anim*), `title` (a file name bar), `panel`. Highlighted by highlight.js in the theme's colours: keywords in the accent, strings between the accent and fg, comments dimmed. Classes: `.code`, `.ln`, `.no`, `.on`, `.hljs-*`.
 
+## Layout
+
+Boxes cut from a box, so a scene lays out in shares of the frame instead of sums. Each returns plain `Box`es, to give any component (or an `Arrow`, or your own drawing):
+
+```ts
+const area = safeBox(0.1);
+const [left, right] = split(area, 'h', [2, 1], 60);          // a row: left twice as wide as right, 60 px between
+const cells = grid(inset(left, 20), 3, 2, [24, 32]);          // 3 across, 2 down, row by row: cells[r * 3 + c]
+const badge = center(right, 300, 300);                        // a 300 x 300 box in the middle of right
+const corner = align(right, 200, 80, 'end', 'start');         // top right of right
+const stacked = split(area, H > W ? 'v' : 'h', 2, 40);        // side by side, or one above the other in a vertical cut
+```
+
+- `split(box, 'h' | 'v', shares, gap = 0)`: `'h'` a row of parts left to right, `'v'` a column top to bottom; `shares` are relative (`[2, 1]`, `[0.56, 0.26]`), or a count of equal parts. Gaps go between parts only, so the parts fill the box.
+- `grid(box, cols, rows, gap = 0)`: equal cells, `gap` one number or `[across, down]`. Gaps wider than the box can hold shrink, so parts never leave it.
+- `inset(box, px)`: shrunk on every side, or per side `{ top, right, bottom, left }` (`x` and `y` set two at once); negative grows it.
+- `align(box, w, h, x = 'center', y = 'center')` with `'start' | 'center' | 'end'`, and `center(box, w, h)`: a box of a size placed in another.
+
 ## Your own component
 
-`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`. The defaults passed to `super` must include a `box` (the layer is made that size):
+`HtmlComponent` is the base the kit's HTML components share: subclass it with the markup, the CSS and an `update(f)` that brings the markup up to date, and it gets `box`, `at`, `motion` and `draw()`. The defaults passed to `super` must include a `box` (the layer is made that size; `pad: px` makes it larger by that much on each side, for strokes on the box's edge, with the box at `pad` px in):
 
 ```ts
 import { HtmlComponent, type ComponentOptions, safeBox, type Frame } from 'reel';

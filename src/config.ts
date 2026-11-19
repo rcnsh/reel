@@ -10,7 +10,7 @@ import type { BlendMode } from './engine/gl';
 import type { Theme, ThemeName } from './themes';
 import type { CheckRule } from './engine/report';
 import type { Transition, TransitionKind } from './engine/transitions';
-export type { Transition, TransitionKind, TransitionDirection } from './engine/transitions';
+export type { Transition, TransitionKind, TransitionDirection, TransitionUniform, CustomTransition, EaseName } from './engine/transitions';
 
 export { themes, extendTheme, resolveTheme } from './themes';
 export type { Theme, ThemeName, HudParams, ResolvedTheme } from './themes';
@@ -31,11 +31,10 @@ export interface Clip {
    */
   track?: number;
   /**
-   * How the clip comes in over the clip before it on its track while they overlap (default a crossfade):
-   * 'crossfade', 'wipe', 'slide', 'zoom', 'dip', or { kind, direction?: 'left' | 'right' | 'up' | 'down',
-   * softness?: share of the frame (a wipe's edge), color?: palette key or '#rrggbb' (a dip's; default bg, or
-   * transparent on a track above 0) }. A scene with
-   * handlesTransition draws the transition itself instead.
+   * How the clip comes in over the clip before it on its track while they overlap (default a crossfade): a kind
+   * ('crossfade', 'wipe', 'slide', 'zoom', 'dip', 'iris', 'clock', 'whip', 'flash'), { kind, ease?, … } with
+   * that kind's options (see each Transition type), or { glsl, uniforms?, ease? } for a shader of your own. It
+   * lasts as long as the overlap. A scene with handlesTransition draws the transition itself instead.
    */
   transition?: TransitionKind | Transition;
   /**
