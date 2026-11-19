@@ -15,6 +15,7 @@ import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
 import { TransitionPass, transitionOf, transitionWeights } from './transitions';
+import { maskSubFrames } from './tilemask';
 import { BUNDLED_SOUNDS, type Clip, type SoundClip, type VideoConfig } from '../config';
 
 /** A clip on the engine's timeline (see Clip in config.ts). */
@@ -36,8 +37,11 @@ interface Loaded { entry: TimelineEntry; scene: Scene | null; error?: string; re
  * 4, 12, 36, 108, 324 … from `min` up to at most `max` (both rounded to that series) until the
  * estimated remaining sampling error is below `tol` 8-bit levels (worst 2x2-logical-px block).
  * `refine: 'tiles'` (the default) decides that per 32x32-logical-px tile, `'frame'` for the whole frame.
+ * `mask` (tiles only): where stopped tiles are masked, `'subs'` in every later sub-frame or `'merge'` only where
+ * the sub-frames are added to the sums; both give the same frame. Default: maskSubFrames(the GL renderer).
  */
-export interface AdaptiveSampling { min: number; max: number; tol: number; refine?: 'tiles' | 'frame' }
+export interface AdaptiveSampling { min: number; max: number; tol: number; refine?: 'tiles' | 'frame'; mask?: 'subs' | 'merge' }
+
 
 /**
  * Shutter offsets (-0.5..0.5) of an adaptive run's sub-frames in rendering order: 4 evenly spread, then
@@ -123,6 +127,8 @@ export class Engine {
   lastErrors: number[] = [];
   /** Share of the last frame's extra sub-frames (beyond the first set) actually shaded (1 = every tile). */
   lastShaded = 1;
+  /** maskSubFrames for this page's GL renderer. */
+  private maskSubsDefault: boolean;
   // (a float target when the output keeps more than 8 bits: the final pass's dither is then at that depth)
   private finalRT = new THREE.WebGLRenderTarget(PW, PH, { type: BITS > 8 ? THREE.FloatType : THREE.UnsignedByteType, depthBuffer: false });
   /** The last frame before post: linear HDR, premultiplied (what the 'linear' readback reads). */
@@ -271,6 +277,10 @@ export class Engine {
     nm.colorWrite = false; nm.depthTest = true; nm.depthWrite = true; nm.depthFunc = THREE.AlwaysDepth;
     for (const rt of [this.stackRT, this.newRT, this.sumRT]) this.maskedRTs.set(rt, { margin: 0 });
     this.hookDepthState();
+    {
+      const gl = this.renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
+      this.maskSubsDefault = maskSubFrames(String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)));
+    }
     // errPass with the error of tiles no longer refining forced to 0 (their sums hold nothing new)
     this.errTilePass = new FSPass(/* glsl */ `
       uniform sampler2D a; uniform sampler2D b; uniform float invA, invB; uniform sampler2D tiles;
@@ -374,6 +384,12 @@ export class Engine {
     if (was) this.setMasking(true);
   }
 
+  /** Write tileOn into sumRT's depth buffer only: the merge is masked, the sub-frames are drawn whole. */
+  private writeSumMask() {
+    this.tileTex.needsUpdate = true;
+    this.drawMask(this.sumRT, 0, new THREE.Vector4(PW / this.sumRT.width, PH / this.sumRT.height, 0, 0));
+  }
+
   /** Write the tile mask into rt's depth buffer, through `map` (rt px -> output px); null: all of rt on. */
   private drawMask(rt: THREE.WebGLRenderTarget, margin: number, map: THREE.Vector4 | null) {
     const r = this.renderer, d = r.state.buffers.depth;
@@ -385,6 +401,8 @@ export class Engine {
     this.maskPass.u.tiles!.value = margin ? this.tileTexWide : this.tileTex;
     (this.maskPass.u.map!.value as THREE.Vector4).copy(map);
     this.maskPass.render(r, rt);
+    // (three's clear() does not set the colour mask: left off, the next colour clear of rt would do nothing)
+    r.state.buffers.color.setMask(true);
   }
 
   private nearPass: FSPass;
@@ -398,6 +416,8 @@ export class Engine {
     if (!this.masking || this.displaced.size) return;
     (this.nearPass.u.map!.value as THREE.Vector4).set(PW / rt.width, PH / rt.height, 0, 0);
     this.nearPass.render(r, rt);
+    // (left off, the colour mask would turn the scene's next colour clear into nothing, see drawMask)
+    r.state.buffers.color.setMask(true);
     r.setRenderTarget(rt);
   }
 
@@ -674,27 +694,29 @@ export class Engine {
           }
         } else {
           // Per-tile refinement: after each set, a tile goes on to the next only while it or one of its 8
-          // neighbours is still at or over `tol`; a tile that stopped never restarts. Later sub-frames are
-          // drawn with converged tiles masked out by the depth test (rejected before shading), only the tiles
-          // still refining are added to the sums, and each tile is averaged over its own count. So every
+          // neighbours is still at or over `tol`; a tile that stopped never restarts. Only the tiles still
+          // refining are added to the sums (and, where it pays, see maskSubFrames, later sub-frames are drawn
+          // with converged tiles masked out by the depth test, rejected before shading), and each tile is
+          // averaged over its own count. So every
           // tile is exactly the whole-frame sampler's frame had it stopped at that tile's count.
           const on = this.tileOn, tw = this.maxRT.width, th = this.maxRT.height, T = on.length;
           on.fill(255); // (an R8 texture: 255 reads as 1.0)
           const tileN = this.gainBuf; // count per tile, turned into the gain at the end
           tileN.fill(0);
           let live = T, shaded = 0, full = 0;
+          const maskSubs = samples.mask ? samples.mask === 'subs' : this.maskSubsDefault;
           for (let l = lo; l < hi && live > 0; l++) {
             const masked = live < T;
             clearRT(r, this.newRT, [0, 0, 0], 0);
-            if (masked) { this.writeTileMask(); this.setMasking(true); }
+            if (masked) { if (maskSubs) { this.writeTileMask(); this.setMasking(true); } else this.writeSumMask(); }
             for (let k = n; k < 3 * n; k++) sub(k, u[k]!, this.newRT, dt / (3 * n));
-            if (masked) this.setMasking(false);
+            if (masked && maskSubs) this.setMasking(false);
             const err = this.sampleError(n, masked) / 2;
             this.lastErrors.push(err);
             if (masked) this.setMasking(true);
             this.addSum();
             if (masked) this.setMasking(false);
-            shaded += 2 * n * live; full += 2 * n * T;
+            shaded += 2 * n * (maskSubs ? live : T); full += 2 * n * T;
             n *= 3;
             // tiles whose neighbourhood is converged stop at this count
             const e = this.errBuf, next = new Uint8Array(T);

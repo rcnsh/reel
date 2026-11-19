@@ -123,6 +123,8 @@ Flags for every command that renders
                        check judges only these clips' frames)
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
+                       (REEL_TILE_MASK=subs|merge: mask stopped tiles out of every sub-frame, or only
+                       out of the sums; the same frame either way, chosen by GL backend by default)
   --shutter 0.5        the share of the frame time the sub-frames span
   --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project; 0.5 = half size,
                        for a width that is a multiple of 8 and a height of 4, else refused with exit 2)
@@ -247,10 +249,22 @@ export function checkScale(w: number, h: number, scale: number) {
   throw new UsageError(`--scale ${scale}: a ${w}x${h} frame would be ${w * scale}x${h * scale}, and the readback needs a width that is a multiple of 4 and an even height; ${fw}x${fh} (--size ${fw}x${fh}) renders at --scale ${scale}, or leave out --scale for full size`);
 }
 
+/**
+ * REEL_TILE_MASK=subs|merge: where per-tile refinement masks stopped tiles, overriding the GL backend's choice
+ * (the frame is the same; for measuring which is faster).
+ */
+export function tileMaskOf(env: Record<string, string | undefined> = process.env): { mask?: 'subs' | 'merge' } {
+  const m = env.REEL_TILE_MASK;
+  if (!m) return {};
+  if (m !== 'subs' && m !== 'merge') throw new UsageError(`REEL_TILE_MASK=${m}: expected subs or merge`);
+  return { mask: m };
+}
+
 /** The motion-blur sampling flags: a fixed count, or adaptive. */
-export function samplesOf(v: Values): number | AdaptiveSampling {
+export function samplesOf(v: Values, env: Record<string, string | undefined> = process.env): number | AdaptiveSampling {
+  const mask = tileMaskOf(env);
   if (v.refine !== undefined && v.refine !== 'tiles' && v.refine !== 'frame') throw new UsageError(`--refine ${v.refine}: expected tiles or frame`);
-  if (v.samples === 'auto') return { min: int(v, 'min-samples', 4), max: int(v, 'max-samples', 324), tol: num(v, 'tol', 3), refine: (v.refine ?? 'tiles') as 'tiles' | 'frame' };
+  if (v.samples === 'auto') return { min: int(v, 'min-samples', 4), max: int(v, 'max-samples', 324), tol: num(v, 'tol', 3), refine: (v.refine ?? 'tiles') as 'tiles' | 'frame', ...mask };
   for (const k of ['min-samples', 'max-samples', 'refine']) if (v[k] !== undefined) throw new UsageError(`--${k} goes with --samples auto`);
   return int(v, 'samples', 1);
 }

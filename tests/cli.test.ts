@@ -128,6 +128,16 @@ test.skipIf(!hasChrome)('diff: identical renders exit 0, a different frame exits
   expect(existsSync(other.json().file)).toBe(true);
 }, 120_000);
 
+test.skipIf(!hasChrome)('adaptive sampling gives the same frame masking stopped tiles out of every sub-frame or only the merge', async () => {
+  // (at 5 s some of the layers' tiles stop at 12 sub-frames and others go on: the next step is masked)
+  const sub = await reel(['still', '--t', '5', '--samples', 'auto', '--json', '--project', layers.dir], ENGINE, { REEL_TILE_MASK: 'subs' });
+  expect(sub.json().frames[0].subFrames).toBeGreaterThan(12);
+  const merge = await reel(['diff', '--t', '5', sub.json().files[0], '--samples', 'auto', '--json', '--project', layers.dir], ENGINE, { REEL_TILE_MASK: 'merge' });
+  expect(merge.json().changed).toBe(0);
+  const bad = await reel(['still', '--t', '5', '--samples', 'auto', '--project', layers.dir], ENGINE, { REEL_TILE_MASK: 'some' });
+  expect(bad.code).toBe(2);
+}, 120_000);
+
 test.skipIf(!hasChrome)("adaptive sampling stops at the lowest cap a clip's scene asks for while it is made, unless the clip sets its own", async () => {
   const sub = async (t: number) => {
     const r = await reel(['still', '--t', String(t), '--samples', 'auto', '--json', '--project', capped.dir]);
