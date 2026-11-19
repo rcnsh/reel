@@ -24,10 +24,11 @@
 // Sounds on the timeline (the config's `sounds` and a scene's sound(), also in data/cues.json) are laid as they say:
 // from their file's `from`, at their `at`, for their `duration`, looped, at their speed, gain and fades.
 import { $ } from 'bun';
-import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
 import { durationOf, measure } from './audio-io';
+import { commit, destOf, onAbort, partialOf } from '../cli/scratch';
 import { loudnessTarget, loudnormFilter, parseLoudnorm } from './loudness';
 import { buildMix, type Events, type MixConfig } from './mix-graph';
 
@@ -144,8 +145,16 @@ export async function mixVideo(o: MixOptions) {
   const subs = o.subtitles ? ['-i', o.subtitles] : [];
   const box = containerOf(output);
   const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', box.subtitles, '-metadata:s:s:0', 'language=eng'] : [];
-  const r = await $`ffmpeg ${det} -loglevel error -y ${ins} ${subs} -filter_complex ${`${g.filter};${tail}`} -map 0:v -c:v copy -map [a] ${box.audio} -ar 48000 ${subMap} -fflags +bitexact -flags:a +bitexact ${box.flags} ${output}`.quiet().nothrow();
-  if (r.exitCode !== 0) throw new Error(`ffmpeg (the mix): ${r.stderr.toString().slice(-1200)}`);
+  // (written beside the output and put in place once finished: a failed or stopped mix leaves the previous file)
+  // (spawned rather than through the shell: a stopped mix kills its ffmpeg before removing the partial)
+  const dest = destOf(output), partial = partialOf(dest);
+  const ff = Bun.spawn(['ffmpeg', ...det, '-loglevel', 'error', '-y', ...ins, ...subs, '-filter_complex', `${g.filter};${tail}`, '-map', '0:v', '-c:v', 'copy', '-map', '[a]', ...box.audio, '-ar', '48000', ...subMap, '-fflags', '+bitexact', '-flags:a', '+bitexact', ...box.flags, partial], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
+  const offAbort = onAbort(() => { ff.kill(9); rmSync(partial, { force: true }); });
+  try {
+    const [err, code] = await Promise.all([new Response(ff.stderr).text(), ff.exited]);
+    if (code !== 0) throw new Error(`ffmpeg (the mix): ${err.slice(-1200)}`);
+    commit(partial, dest);
+  } finally { rmSync(partial, { force: true }); offAbort(); }
   const loud = g.silent ? null : await measure(output);
   const what = [track ? `the track (${path.basename(track)})` : 'no track', `${g.segments} music segment${g.segments === 1 ? '' : 's'}`, ...g.counts].join(', ');
   return {

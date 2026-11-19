@@ -6,6 +6,8 @@ import type { AdaptiveSampling } from '../src/engine/engine';
 import { PIXELS } from '../src/engine/pixels';
 import { ffmpegArgs, ffmpegDeepGain, ffmpegHasAlphaModes, hasFfmpegEncoder as hasEncoder, sequencePattern, webpArgs, type EncodeOpts, type Plan } from './formats';
 import { launchChrome, openPage, pageUrl, type Format } from './renderer';
+import { commit, commitFrames, destOf, onAbort, partialOf, scratchDir, sweep } from './scratch';
+import { ENGINE } from './server';
 
 export interface VideoOpts {
   url: string;
@@ -27,11 +29,14 @@ export interface VideoOpts {
   memGb: number;
   spoolGb: number;
   headed?: boolean;
+  /** `out` is itself scratch (the picture `--mix` is made from): written straight, not through a partial of its own. */
+  direct?: boolean;
   /** Called as frames are written (about every 1% of them), and once at the end. */
   onProgress?: (p: { frames: number; total: number; fps: number; eta: number }) => void;
 }
 
-export interface VideoResult { encoder?: string; file: string; frames: number; seconds: number; workers: number; subFrames: Record<string, number>; spoolPeak: number; errors: string[]; logs: string[]; events: { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[] } }
+/** `file`: null when scene errors stopped it replacing the previous output. */
+export interface VideoResult { encoder?: string; file: string | null; frames: number; seconds: number; workers: number; subFrames: Record<string, number>; spoolPeak: number; errors: string[]; logs: string[]; events: { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[] } }
 
 /**
  * Render [from, to) into one encoder. `workers` headless Chromes (each its own GPU process) take chunks of
@@ -42,6 +47,10 @@ export interface VideoResult { encoder?: string; file: string; frames: number; s
  * Throws when the range is empty or something fails; scene errors come back in `errors`.
  */
 export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
+  const seq = o.plan.format.kind === 'sequence';
+  const outDir = path.dirname(seq ? sequencePattern(o.out, o.plan.format) : o.out);
+  // what dead exports left: partials beside the output, spool and frame folders, Vite's stale optimizer folders
+  sweep([tmpdir(), outDir], path.join(ENGINE, 'node_modules/.vite'));
   if (o.enc.draft === 'webcodecs') {
     const d = await exportEncoded(o);
     if (d) return d;
@@ -58,7 +67,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     } catch (e) { await browser.close().catch(() => {}); throw e; }
   };
   // (an ffmpeg without libwebp: PNG frames into a folder, assembled by img2webp at the end)
-  const webpFrames = o.plan.format.id === 'webp' && !hasEncoder('libwebp_anim') ? path.join(tmpdir(), `reel-webp-${process.pid}-${Date.now()}`) : undefined;
+  const webpFrames = o.plan.format.id === 'webp' && !hasEncoder('libwebp_anim') ? scratchDir(tmpdir(), 'reel-webp') : undefined;
   if (webpFrames && !Bun.which('img2webp')) throw new Error('webp: this ffmpeg has no libwebp encoder and img2webp (libwebp\'s tools: brew install webp, apt install webp) is not installed');
   // (the duration and the track come from the project's data, the same in every page; the first page then renders
   // as worker 0, which saves a browser start)
@@ -71,15 +80,29 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   if (!(to > from)) { await first.browser.close().catch(() => {}); throw new Error(`--from ${from} --to ${to}: nothing to render`); }
 
   const fps = fmt.fps, OW = Math.round(fmt.w * fmt.scale), OH = Math.round(fmt.h * fmt.scale);
-  const seq = o.plan.format.kind === 'sequence';
-  mkdirSync(path.dirname(seq ? sequencePattern(o.out, o.plan.format) : o.out), { recursive: true });
+  mkdirSync(outDir, { recursive: true });
+  // everything is written to a partial beside the output (frames: to a folder beside theirs) and put in place once
+  // finished, so a failed or killed export leaves the previous output as it was (cli/scratch.ts)
+  const dest = seq || o.direct ? o.out : destOf(o.out);
+  const partial = seq ? partialOf(path.join(outDir, 'frames')) : o.direct ? o.out : partialOf(dest);
+  const spoolDir = scratchDir(tmpdir(), 'reel-spool');
+  let ok = false;
+  // (the partial is kept only when it is the output itself and finished)
+  const scratch = () => { for (const d of [spoolDir, webpFrames, ok && partial === o.out ? null : partial]) if (d) rmSync(d, { recursive: true, force: true }); };
+  let killEncoder = () => {};
+  const offAbort = onAbort(() => { killEncoder(); scratch(); });
   // the sound the project's audio analysis names, if the file is there (a silent video has none)
   const audio = m.track && existsSync(path.join(o.project, m.track)) ? path.join(o.project, m.track) : null;
   const mux = !!audio && !o.noaudio;
   const f0 = Math.round(from * fps), f1 = Math.round(to * fps), total = f1 - f0;
-  if (webpFrames) mkdirSync(webpFrames, { recursive: true });
-  const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: o.out, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames, alphaModes: o.plan.format.id !== 'exr' || ffmpegHasAlphaModes(), deepGain: o.plan.pixels === 'rgb16' || o.plan.pixels === 'rgba16' ? ffmpegDeepGain() : 1 });
-  const ff = Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
+  const ff = (() => {
+    try {
+      for (const d of [seq ? partial : null, spoolDir, webpFrames]) if (d) mkdirSync(d, { recursive: true });
+      const args = ffmpegArgs(o.plan, o.enc, { width: OW, height: OH, fps, out: seq ? path.join(partial, path.basename(o.out)) : partial, audio: mux ? { file: audio!, from, duration: to - from } : null, startNumber: f0, webpFrames, alphaModes: o.plan.format.id !== 'exr' || ffmpegHasAlphaModes(), deepGain: o.plan.pixels === 'rgb16' || o.plan.pixels === 'rgba16' ? ffmpegDeepGain() : 1 });
+      return Bun.spawn(args, { stdin: 'pipe', stdout: 'inherit', stderr: 'inherit' });
+    } catch (e) { offAbort(); scratch(); void first.browser.close().catch(() => {}); throw e; }
+  })();
+  killEncoder = () => ff.kill(9);
 
   const chunk = Math.max(1, o.chunk);
   // (a scene with simulation state needs its frames in order from one renderer)
@@ -90,10 +113,6 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
   const frameBytes = OW * OH * PIXELS[o.plan.pixels].perPixel;
   const cap = Math.max(4, Math.floor((o.memGb * 1e9) / frameBytes));
   const spoolCap = Math.floor((o.spoolGb * 1e9) / frameBytes);
-  const spoolDir = path.join(tmpdir(), `reel-spool-${process.pid}-${Date.now()}`);
-  mkdirSync(spoolDir, { recursive: true });
-  const onSignal = () => { ff.kill(9); rmSync(spoolDir, { recursive: true, force: true }); process.exit(130); };
-  for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, onSignal);
   const spooled = new Set<number>();
   let spoolPeak = 0;
   const spoolFile = (n: number) => path.join(spoolDir, `${n}.rgb`);
@@ -162,7 +181,9 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
       }
     } catch (e) { fail(e); } finally { draining = false; }
   };
-  const server = Bun.serve<{ k: number }>({
+  let server: ReturnType<typeof Bun.serve<{ k: number }>>;
+  try {
+    server = Bun.serve<{ k: number }>({
     port: 0,
     fetch(req, srv) { return srv.upgrade(req, { data: { k: +(new URL(req.url).searchParams.get('w') ?? 0) } }) ? undefined : new Response('ws only', { status: 400 }); },
     websocket: {
@@ -182,6 +203,7 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
       },
     },
   });
+  } catch (e) { ff.kill(9); scratch(); offAbort(); void first.browser.close().catch(() => {}); throw e; }
   // chunks in order from a shared cursor
   const take = () => { if (cursor >= f1) return null; const a = cursor; cursor = Math.min(f1, a + chunk); return [a, cursor] as const; };
   const pages: Awaited<ReturnType<typeof browserOf>>[] = [first];
@@ -193,7 +215,6 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
       await p.browser.close().catch(() => {});
     }
   };
-  let ok = false;
   // the extra workers' launches: the first page renders at once, the others take chunks as soon as they are ready
   const launches: Promise<unknown>[] = [];
   try {
@@ -230,23 +251,27 @@ export async function exportVideo(o: VideoOpts): Promise<VideoResult> {
     const code = await ff.exited;
     if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`);
     if (webpFrames) {
-      const w = Bun.spawnSync(webpArgs(webpFrames, total, fps, o.enc, o.out), { stdout: 'pipe', stderr: 'pipe' });
+      const w = Bun.spawnSync(webpArgs(webpFrames, total, fps, o.enc, partial), { stdout: 'pipe', stderr: 'pipe' });
       if (w.exitCode !== 0) throw new Error(`img2webp failed: ${w.stderr.toString().trim().slice(-800)}`);
+    }
+    // (a render with scene errors has failed: the previous output stays)
+    if (!sceneErrors.size) {
+      if (seq) commitFrames(partial, outDir);
+      else if (partial !== o.out) commit(partial, dest);
     }
     ok = true;
   } finally {
     ending = true;
-    // (killed, ffmpeg leaves an unplayable file rather than a finished-looking truncated one)
+    // (killed, ffmpeg stops writing at once; what it wrote is the partial's, removed with the rest of the scratch)
     if (!ok) ff.kill(9);
     await closePages();
     // (a Chrome still launching closes itself once it is up: wait for that, so none outlives the export)
     await Promise.all(launches);
     server.stop(true);
-    rmSync(spoolDir, { recursive: true, force: true });
-    if (webpFrames) rmSync(webpFrames, { recursive: true, force: true });
-    for (const sig of ['SIGINT', 'SIGTERM'] as const) process.off(sig, onSignal);
+    scratch();
+    offAbort();
   }
-  return { file: o.out, frames: written, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers, subFrames: used, spoolPeak, errors: [...sceneErrors], logs, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
+  return { file: sceneErrors.size ? null : o.out, frames: written, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers, subFrames: used, spoolPeak, errors: [...sceneErrors], logs, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
 }
 
 
@@ -260,6 +285,10 @@ async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
   const fmt: Format = { ...o.fmt, fps: o.plan.fps };
   const browser = await launchChrome(o.headed);
   let ff: ReturnType<typeof Bun.spawn> | null = null, server: ReturnType<typeof Bun.serve> | null = null, ok = false;
+  let pic: string | null = null, muxed: string | null = null;
+  // (the output itself, when written straight, is kept once finished)
+  const scratch = () => { for (const f of [pic, muxed]) if (f && !(ok && f === o.out)) rmSync(f, { force: true }); };
+  const offAbort = onAbort(() => { ff?.kill(9); scratch(); });
   try {
     const page = await openPage(browser, pageUrl(o.url, fmt, o), fmt, o, (l) => logs.push(l));
     const m: { duration: number; track: string | null; timeline: VideoResult['events']['timeline']; cues: VideoResult['events']['cues']; sounds: VideoResult['events']['sounds'] } = await page.evaluate(() => { const P = (window as any).__reel; return { duration: P.duration, track: P.track, timeline: P.timeline, cues: P.cues, sounds: P.sounds }; });
@@ -270,7 +299,10 @@ async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
     const audio = m.track && existsSync(path.join(o.project, m.track)) && !o.noaudio ? path.join(o.project, m.track) : null;
     // (the Annex B stream has no timestamps: muxed alone at the frame rate first, then with the sound, which ffmpeg
     // drops when it is muxed with an untimed stream in one pass)
-    const pic = audio ? `${o.out}.picture.mp4` : o.out;
+    // (both written as partials beside the output, the output put in place once finished: cli/scratch.ts)
+    const dest = o.direct ? o.out : destOf(o.out), scratchOf = () => (o.direct ? o.out : partialOf(dest));
+    pic = audio ? partialOf(dest) : scratchOf();
+    if (audio) muxed = scratchOf();
     // (the browser tags the stream with the canvas's sRGB transfer: retagged BT.709, as every other YUV stream reel writes,
     // in the bitstream and in the container's colr box, which is written from the input's tags otherwise)
     const args = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'h264', '-r', String(fps), '-i', 'pipe:0', '-c:v', 'copy', '-bsf:v', 'h264_metadata=transfer_characteristics=1', '-color_trc', 'bt709', ...(o.enc.comment ? ['-metadata', `comment=${o.enc.comment}`] : []), '-movflags', '+faststart', '-f', 'mp4', pic];
@@ -303,14 +335,17 @@ async function exportEncoded(o: VideoOpts): Promise<VideoResult | null> {
     const code = await proc.exited;
     if (code !== 0) throw new Error(`ffmpeg exited with code ${code}`);
     if (audio) {
-      const mux = Bun.spawnSync(['ffmpeg', '-y', '-loglevel', 'error', '-i', pic, '-ss', String(from), '-t', String(to - from), '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-shortest', '-map_metadata', '0', '-movflags', '+faststart', o.out], { stderr: 'pipe' });
-      rmSync(pic, { force: true });
+      const mux = Bun.spawnSync(['ffmpeg', '-y', '-loglevel', 'error', '-i', pic, '-ss', String(from), '-t', String(to - from), '-i', audio, '-map', '0:v', '-map', '1:a', '-c:v', 'copy', '-c:a', 'aac', '-b:a', '320k', '-shortest', '-map_metadata', '0', '-movflags', '+faststart', muxed!], { stderr: 'pipe' });
       if (mux.exitCode !== 0) throw new Error(`ffmpeg (muxing the sound): ${mux.stderr.toString().slice(-800)}`);
     }
+    const done = muxed ?? pic;
+    if (!errors.length && done !== o.out) commit(done, dest);
     ok = true;
-    return { file: o.out, frames: r.frames!, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers: 1, subFrames: { 1: r.frames! }, spoolPeak: 0, errors, logs, encoder: `WebCodecs H.264 in the page (${r.encoder})`, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
+    return { file: errors.length ? null : o.out, frames: r.frames!, seconds: +((performance.now() - t0) / 1000).toFixed(1), workers: 1, subFrames: { 1: r.frames! }, spoolPeak: 0, errors, logs, encoder: `WebCodecs H.264 in the page (${r.encoder})`, events: { duration: m.duration, timeline: m.timeline, cues: m.cues, sounds: m.sounds } };
   } finally {
     if (!ok) ff?.kill(9);
+    scratch();
+    offAbort();
     server?.stop(true);
     await browser.close().catch(() => {});
   }

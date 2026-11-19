@@ -25,6 +25,10 @@ describe('util', () => {
     expect(prog(5, 0, 10)).toBe(0.5);
     expect(prog(-5, 0, 10)).toBe(0);
     expect(prog(5, 0, 10, ease.inQuad)).toBe(0.25);
+    // an empty range is a step at a
+    expect(prog(1.9, 2, 2)).toBe(0);
+    expect(prog(2, 2, 2)).toBe(1);
+    expect(prog(3, 2, 2, ease.outCubic)).toBe(1);
     expect(window01(0, 1, 3)).toBe(0);
     expect(window01(2, 1, 3)).toBe(1);
     expect(window01(3, 1, 3)).toBe(0);
@@ -34,6 +38,11 @@ describe('util', () => {
     expect(keys(1.5, k)).toBe(5); // inOutCubic at the midpoint
     expect(keys(9, k)).toBe(0);
     expect(keys(1, [])).toBe(0);
+    // two keys at one time: a step; out of order: an error naming the keys
+    expect(keys(0.99, [[0, 0], [1, 0], [1, 10], [2, 10]])).toBe(0);
+    expect(keys(1.01, [[0, 0], [1, 0], [1, 10], [2, 10]])).toBe(10);
+    expect(() => keys(3, [[0, 0], [2, 1], [1, 5]])).toThrow('keys: key 2 at 1 comes before key 1 at 2');
+    expect(() => keys(3, [[0, 0], [NaN, 1]])).toThrow('keys: key 1 has no time (NaN)');
   });
 
   test('springStep and pulse', () => {

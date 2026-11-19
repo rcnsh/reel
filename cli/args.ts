@@ -97,7 +97,9 @@ Working on a project
                              folder (used whenever CHROME_PATH is unset)
   chrome path                the Chrome binary renders would use, and its version
   daemon status              the warm renderers running, per project
-  daemon stop                stop the project's warm renderer          [--all: every project's]
+  daemon stop                stop the project's warm renderer          [--all: every project's, and sweep
+                                                                       dead exports' spools and Vite's
+                                                                       stale optimizer folders]
   golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
@@ -117,7 +119,8 @@ Working on a project
 
 Flags for every command that renders
   --project <folder>   the project (default: the current folder)
-  --only a,b           load only these clips (faster; other clips render as nothing)
+  --only a,b           load only these clips (faster; other clips render as nothing, and
+                       check judges only these clips' frames)
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
   --shutter 0.5        the share of the frame time the sub-frames span
