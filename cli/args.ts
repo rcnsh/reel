@@ -115,7 +115,8 @@ Working on a project
 
 Flags for every command that renders
   --project <folder>   the project (default: the current folder)
-  --only a,b           load only these clips (faster; other clips render as nothing)
+  --only a,b           load only these clips (faster; other clips render as nothing, and
+                       check judges only these clips' frames)
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
   --shutter 0.5        the share of the frame time the sub-frames span
