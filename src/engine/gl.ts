@@ -192,6 +192,17 @@ export function scaleContext2D(c: CanvasRenderingContext2D, s: number) {
  * The backing canvas is SCALE times larger (`canvas.width` = w*SCALE); the context is pre-scaled
  * (see scaleContext2D), so drawing code works in logical px at every output scale.
  */
+let cpuCanvases = false;
+/** Set by the engine from its GL renderer, before any scene is made: whether 2D canvases stay on the CPU. */
+export function setCpuCanvases(on: boolean) { cpuCanvases = on; }
+/**
+ * The 2D context of a canvas that is drawn again and uploaded as a texture every frame. Under a software GL
+ * (SwiftShader) the canvas is kept on the CPU: a GPU-backed one there hands texImage2D the picture it had before
+ * its latest drawing, so a frame showed what the page rendered before it, and a frame rendered out of order
+ * (`reel check`, adaptive sampling) came out different.
+ */
+export function context2D(canvas: HTMLCanvasElement) { return canvas.getContext('2d', cpuCanvases ? { willReadFrequently: true } : undefined)!; }
+
 export class Layer2D {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
@@ -201,7 +212,7 @@ export class Layer2D {
     this.canvas = document.createElement('canvas');
     this.canvas.width = Math.round(w * scale);
     this.canvas.height = Math.round(h * scale);
-    this.ctx = scaleContext2D(this.canvas.getContext('2d')!, scale);
+    this.ctx = scaleContext2D(context2D(this.canvas), scale);
     this.texture = new THREE.CanvasTexture(this.canvas);
     this.texture.colorSpace = THREE.SRGBColorSpace;
     this.texture.minFilter = THREE.LinearFilter;

@@ -5,4 +5,7 @@
  * pass loads the depth attachment again), so only the merge is masked; on a software rasteriser (SwiftShader,
  * llvmpipe) shading is the cost, and masking pays.
  */
-export function maskSubFrames(renderer: string) { return /swiftshader|llvmpipe|lavapipe|softpipe/i.test(renderer); }
+export function maskSubFrames(renderer: string) { return softwareGL(renderer); }
+
+/** Whether a WebGL RENDERER string names a software rasteriser. */
+export function softwareGL(renderer: string) { return /swiftshader|llvmpipe|lavapipe|softpipe/i.test(renderer); }

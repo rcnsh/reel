@@ -6,7 +6,7 @@
 // one drawn before it; its other builds are not.
 import * as THREE from 'three';
 import type { AnimationItem } from 'lottie-web';
-import { SCALE } from '../engine/gl';
+import { SCALE, context2D } from '../engine/gl';
 import { awaitBeforeFirstFrame, notLate } from '../engine/html';
 import type { Frame } from '../engine/scene';
 import { drawPicture } from './image';
@@ -79,7 +79,7 @@ export class LottieBox {
     const anim = lottie.loadAnimation({
       container: undefined as unknown as Element, renderer: 'canvas', loop: false, autoplay: false, animationData: data,
       assetsPath: o.src.replace(/[^/]*$/, ''),
-      rendererSettings: { context: this.canvas.getContext('2d')!, clearCanvas: true, preserveAspectRatio: 'xMidYMid meet', dpr: 1 },
+      rendererSettings: { context: context2D(this.canvas), clearCanvas: true, preserveAspectRatio: 'xMidYMid meet', dpr: 1 },
     });
     await new Promise<void>((res, rej) => {
       // (with its data inline and no images to fetch, it can be ready before loadAnimation returns)

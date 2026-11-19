@@ -3,7 +3,7 @@
 import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Words } from './words';
-import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT } from './gl';
+import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT, setCpuCanvases } from './gl';
 import { ALPHA, BITS } from './format';
 import { PIXELS, yuvFits, type Pixels } from './pixels';
 export { PIXELS, type Pixels };
@@ -15,7 +15,7 @@ import { loadStrokeFonts } from './stroke';
 import { boxes, CHECK_RULES, type ReportedBox } from './report';
 import { htmlLayers } from './html';
 import { idleTransitions, TransitionPass, transitionDisplaces, transitionOf, transitionWeights, type Transition } from './transitions';
-import { maskSubFrames } from './tilemask';
+import { maskSubFrames, softwareGL } from './tilemask';
 import { clipTime, sceneRate, sceneTime, statefulBlocker, type ClipTime } from './cliptime';
 import { BUNDLED_SOUNDS, parseProps, resolveProps, type Clip, type Props, type SoundClip, type VideoConfig } from '../config';
 import { BlendPass, TrackFx, blendOf, gradeOf, isIdentityGrade, isShaderBlend, lerpGrade, matteOf, matteSource, opacityOf, resolveGrade, trackSettingsOf, type Grade, type GradeValues, type MatteMode, type TrackBlend, type TrackSettings } from './tracks';
@@ -347,7 +347,9 @@ export class Engine {
     this.hookDepthState();
     {
       const gl = this.renderer.getContext(), ext = gl.getExtension('WEBGL_debug_renderer_info');
-      this.maskSubsDefault = maskSubFrames(String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER)));
+      const name = String(gl.getParameter(ext ? ext.UNMASKED_RENDERER_WEBGL : gl.RENDERER));
+      this.maskSubsDefault = maskSubFrames(name);
+      setCpuCanvases(softwareGL(name));
     }
     // errPass with the error of tiles no longer refining forced to 0 (their sums hold nothing new)
     this.errTilePass = new FSPass(/* glsl */ `
