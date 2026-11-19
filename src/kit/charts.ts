@@ -1,20 +1,8 @@
 // Data components animated by a progress value from 0 to 1 (by default the first 1.4 s of their window, eased):
 // a bar chart, a line chart, a number counter, a progress bar and a timer.
 import type { Frame } from '../engine/scene';
-import { clamp, ease, prog } from '../engine/util';
-import { cssColor, esc, HtmlComponent, safeBox, UNIT, val, type Anim, type ComponentOptions } from './common';
-
-export interface ProgressOptions extends ComponentOptions {
-  /** 0 to 1: how far the chart has grown (default: over the first 1.4 s of its window, eased out). */
-  progress?: Anim<number>;
-}
-
-/** The default progress: grows over the first 1.4 s of the window (after a 0.2 s beat), eased out. */
-function progressOf(o: ProgressOptions, f: Frame) {
-  if (o.progress !== undefined) return clamp(val(o.progress, f));
-  const w0 = o.at?.[0] ?? 0;
-  return prog(f.lt, w0 + 0.2, w0 + 1.6, ease.outCubic);
-}
+import { clamp, ease } from '../engine/util';
+import { cssColor, esc, HtmlComponent, lineWidth, progressOf, safeBox, UNIT, val, type Anim, type ComponentOptions, type ProgressOptions } from './common';
 
 /** Numbers as text: `en-US` grouping (the same on every machine), at most `digits` decimals. */
 export const formatNumber = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
@@ -62,7 +50,7 @@ export class BarChart extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const o = this.o, p = progressOf(o, f), n = o.data.length, max = o.max ?? Math.max(...o.data.map((d) => d.value), 1e-9);
+    const o = this.o, p = progressOf(o, f, this.window(f)[0]), n = o.data.length, max = o.max ?? Math.max(...o.data.map((d) => d.value), 1e-9);
     this.layer.$$('.bar').forEach((e, i) => {
       // bar i grows over its own share of the progress, overlapping its neighbours
       const k = o.stagger === false ? p : ease.outCubic(clamp((p * (n + 2) - i) / 3)), v = o.data[i]!.value;
@@ -112,7 +100,7 @@ export class LineChart extends HtmlComponent {
         svg { display: block; overflow: visible; }
         .base { stroke: color-mix(in srgb, var(--fg) 35%, transparent); stroke-width: 2; }
         .lines { clip-path: inset(-${fs}px calc(${pw}px - var(--x, 0px)) -${fs}px -${fs}px); }
-        .line { fill: none; stroke-width: ${Math.max(3, Math.round(UNIT * 0.005))}; stroke-linecap: round; stroke-linejoin: round; }
+        .line { fill: none; stroke-width: ${lineWidth()}; stroke-linecap: round; stroke-linejoin: round; }
         .head { position: absolute; width: ${r * 2}px; height: ${r * 2}px; margin: -${r}px 0 0 -${r}px; border-radius: 50%; background: ${series[0]?.color ?? 'var(--accent)'}; }
         .value { position: absolute; font: 600 ${fs}px Archivo; font-variant-numeric: tabular-nums; white-space: nowrap; }
         .axis { display: flex; justify-content: space-between; width: ${pw}px; margin-top: ${Math.round(fs * 0.5)}px; font: 400 ${fs}px Archivo; color: color-mix(in srgb, var(--fg) 75%, var(--bg)); }`,
@@ -129,7 +117,7 @@ export class LineChart extends HtmlComponent {
   }
 
   protected update(f: Frame) {
-    const p = progressOf(this.o, f), h = this.head(p), on = p > 0 && !Number.isNaN(h.v);
+    const p = progressOf(this.o, f, this.window(f)[0]), h = this.head(p), on = p > 0 && !Number.isNaN(h.v);
     this.layer.vars({ x: `${h.x.toFixed(2)}px` });
     this.layer.set('.head', { style: { left: `${h.x.toFixed(2)}px`, top: `${h.y.toFixed(2)}px`, display: on ? '' : 'none' } });
     // (the value's label slides from left aligned at the start to right aligned at the end, so it stays in the box)
@@ -171,7 +159,7 @@ export class Counter extends HtmlComponent {
     this.o = o;
   }
   protected update(f: Frame) {
-    const o = this.o, v = (o.from ?? 0) + (o.to - (o.from ?? 0)) * progressOf(o, f);
+    const o = this.o, v = (o.from ?? 0) + (o.to - (o.from ?? 0)) * progressOf(o, f, this.window(f)[0]);
     this.layer.text('.num', `${o.prefix ?? ''}${o.format ? o.format(v) : formatNumber(v, o.digits ?? 0)}${o.suffix ?? ''}`);
   }
 }

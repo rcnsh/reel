@@ -2,7 +2,7 @@
 import { H, W } from '../engine/gl';
 import type { Frame } from '../engine/scene';
 import type { Word, Words } from '../engine/words';
-import { cssColor, esc, HtmlComponent, UNIT, type ComponentOptions } from './common';
+import { cssColor, esc, graphemes, HtmlComponent, UNIT, type ComponentOptions } from './common';
 
 export interface CaptionsOptions extends ComponentOptions {
   /** The timed words: `this.ctx.words` (narration), or `Words.timed([...])` for a video without a voice. */
@@ -36,7 +36,6 @@ export interface CaptionPage { text: string; words: Word[]; joined: boolean[]; s
 
 /** East Asian wide and fullwidth characters and emoji: about twice the width of a Latin letter. */
 const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
-const graphemes = (s: string) => [...new Intl.Segmenter(undefined, { granularity: 'grapheme' }).segment(s)].map((g) => g.segment);
 /** A text's width in Latin characters: wide characters (CJK, Hangul, fullwidth forms, emoji) count twice. */
 export const textWidth = (s: string) => graphemes(s).reduce((a, g) => a + (WIDE.test(g) ? 2 : 1), 0);
 

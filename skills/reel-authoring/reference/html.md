@@ -29,7 +29,7 @@ export default class Card extends Scene {
 
 ## How it runs
 
-- Make layers as fields (or in the constructor) of a scene: a layer belongs to the clip whose scene made it, shows while that clip is on screen and is hidden otherwise.
+- Make layers as fields of a scene (or in its constructor or `init()`): a layer belongs to the clip whose scene made it, shows while that clip is on screen and is hidden otherwise. One made anywhere else (a module's top level, lazily in `prepare()` or `render()`) belongs to no clip, so making it throws.
 - **Content changes once per output frame**, before the frame's sub-frames render: the layer's `update(f, layer)`, or the scene's `prepare(f)` (optional, may be async). A DOM change needs a browser paint before it can be uploaded; the engine waits for one paint per frame for all layers that changed, and skips it when none did. A layer that never changes uploads once.
 - **Motion that should blur comes from `draw()`**: `layer.draw(renderer, out, { x, y, scale, rotate, anchor, opacity, blend })` is evaluated per sub-frame, so a slide, zoom or fade drawn there gets motion blur under `--samples auto`. A CSS animation of position changes once per frame: fine for slow motion, stepped for fast motion.
 - Everything is a pure function of time. `update` and `prepare` compute what to show from `f` (`f.t`, `f.lt`, words, audio), never from what they showed last frame.
@@ -62,6 +62,8 @@ Every element with text of its own is reported with the box of its text, its com
 - `clipped` (warning): an ancestor with `overflow: hidden`, or the edge of the layer itself, cuts it off; with `text-overflow: ellipsis` or a line clamp it is a note (`info`), since that is deliberate. A clipped element's box is its visible part.
 
 The parts of one run of text (a `<span>` in a paragraph, the words of a caption) are reported separately, so each keeps its own colour, and never count as overlapping each other.
+
+Pieces of text moved one by one as `inline-block`s (each its own run otherwise) are one run under an ancestor marked `data-flow`, so a word rising through the line below is not an overlap.
 
 `data-label="title"` names an element in findings; `data-exempt="offFrame safeArea"` (or `data-exempt` alone: every rule) marks rules it is meant to break, on the element or an ancestor. The layer's draw transform and opacity apply to the boxes.
 

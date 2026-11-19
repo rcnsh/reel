@@ -14,7 +14,7 @@ reel.config.ts      the edit: format, theme, every clip on the timeline
 scenes/<name>.ts    one Scene class per file (default export); shared helpers as scenes/_<name>.ts
 narration.txt       (narrated) plates: "# name" then its lines
 data/words.json     (generated) every word with its time      audio/narration.flac (generated)
-data/audio.json     (generated) beats, envelopes, sections, the track to mux
+data/audio.json     (generated) beats, envelopes, waveform, spectrum, sections, the track to mux
 mix.json            music beds, cue sounds and loudness for the mix
 assets.json         images and sounds to generate (`reel assets`)
 out/                renders (not committed)
@@ -33,7 +33,8 @@ export default defineVideo({
   theme: 'print',              // 'print' | 'film' | 'neutral' (default) | a theme object
   // duration: 12,             // default: the audio's length, else the last clip's end
   // export: { crf: 22, noaudio: true },  // this project's reel video defaults (crf, preset, noaudio, samples); flags override
-  timeline: (src) => [         // src.words, src.audio: the project's timing (empty when it has none)
+  // props: { title: 'Hello' } as Props,  // defaults for --props (variants of one project): src.props, ctx.props
+  timeline: (src) => [         // src.words, src.audio: the project's timing (empty when it has none); src.props
     { id: 'bg', scene: () => import('./scenes/wash'), start: 0, end: 12, params: { from: 'bg', to: 'accentLo' } },
     { id: 'title', scene: () => import('./scenes/title'), start: 0.5, end: 4, track: 1, params: { text: 'Hello' } },
     { id: 'fig', scene: () => import('reel/scenes/hud'), start: 6, end: 10, track: 2, params: { caption: { fig: 'FIG. 1', text: 'Population over 65' } } },
@@ -42,14 +43,46 @@ export default defineVideo({
 ```
 
 - The config's top level is plain data (the CLI reads it outside the browser). Scenes are lazy imports; anything that touches the engine goes inside `timeline()`.
-- A **clip** places a scene: `id` (unique; `--only` and findings use it), `scene`, `start`/`end` in seconds, `track` (default 0), `params` (handed to the scene as `ctx.params`, so one module serves many clips), `transition` (how it comes in over the clip before it on its track: `'crossfade'` (default), `'wipe'`, `'slide'`, `'zoom'`, `'dip'`, or `{ kind, direction: 'left'|'right'|'up'|'down', softness, color }`), `blend` (`normal`, `add`, `screen`, `multiply`, `max`), `opacity`, `post` (post-processing defaults while it shows), `maxSamples` (cap adaptive motion blur), `check: { exempt: [...] }`.
-- **Tracks** stack in number order. Clips that overlap on one track make a transition over the overlap (the incoming clip's `transition`, a crossfade by default; or the incoming scene composites it itself); clips that touch cut. A scene on a track above 0 must clear to transparent and draw over it.
-- Narrated video: `timeline: (src) => clipsFromSections(src, import.meta.glob('./scenes/*.ts'))` makes one clip per plate of `narration.txt` that has a scene of the same name.
+- A **clip** places a scene: `id` (unique; `--only` and findings use it), `scene`, `start`/`end` in seconds, `track` (default 0), `params` (handed to the scene as `ctx.params`, so one module serves many clips), `transition` (how it comes in over the clip before it on its track: `'crossfade'` (default), `'wipe'`, `'slide'`, `'zoom'`, `'dip'`, `'iris'`, `'clock'`, `'whip'`, `'flash'`, `{ kind, ease, …that kind's options }`, or `{ glsl, uniforms }` for a shader of your own; reference/sampling.md, "Transitions"), `blend` and `opacity` (how its track is drawn over the tracks below), `grade` and `matte` ("Tracks" below), `post` (post-processing defaults for the whole frame while it shows), `maxSamples` (cap adaptive motion blur), `check: { exempt: [...] }`.
+- **Tracks** stack in number order. Clips that overlap on one track make a transition over the overlap (the incoming clip's `transition`, a crossfade by default; or the incoming scene composites it itself); clips that touch cut, and a `transition` set on a clip that overlaps nothing is a `timeline` warning in `reel check`. A scene on a track above 0 must clear to transparent and draw over it.
+- A **track's own settings**: the config's `tracks: { 1: { blend, opacity, grade, matte } }` sets a track's defaults; a clip's own values go over them while it is the top clip of its track.
+- Clips back to back: `sequence([{ id, scene, dur, transition?, overlap? }, …], { start?, track?, transition?, overlap? })` from `reel/config` places each clip where the one before ends, so the edit is written as lengths. A clip with a transition overlaps the one before by its `overlap` (default the sequence's, else 0.5 s), and the transition plays over it; one without cuts (or crossfades, given an `overlap`). No clip may overlap two before it. The rest of a clip's fields (`params`, `post`, `blend` …) pass through:
+
+  ```ts
+  timeline: () => {
+    const story = sequence([
+      { id: 'title', scene: () => import('./scenes/title'), dur: 4 },
+      { id: 'chart', scene: () => import('./scenes/chart'), dur: 6, transition: 'slide' },                 // 3.6 to 9.6
+      { id: 'close', scene: () => import('./scenes/close'), dur: 5, transition: { kind: 'dip', color: 'bg' }, overlap: 0.8 },
+    ], { overlap: 0.4 });
+    return [...story, { id: 'hud', scene: () => import('reel/scenes/hud'), start: 0, end: story.at(-1)!.end, track: 1 }];
+  },
+  ```
+- Narrated video: `timeline: (src) => clipsFromSections(src, import.meta.glob('./scenes/*.ts'))` makes one clip per plate of `narration.txt` that has a scene of the same name, cutting at each plate. `clipsFromSections(src, glob, { transition: 'crossfade', overlap: 0.6, params })` overlaps neighbouring clips by `overlap` (default 0.5 s with a transition) centred on the cut; `transition` and `params` may be functions of the plate's name (`(name) => name === 'outro' ? 'dip' : undefined`: a dip into the outro, cuts elsewhere).
 - Music: snap starts with `src.audio.beatBefore(t)` or `src.audio.nearestDownbeat(t)`.
+- **Props** make one project render as variants (a title, a colour, a list of items, a length). Give defaults in `props` and export their type (`export interface Props { title: string; seconds: number }`, `props: { … } as Props`); a render replaces them with `--props '{"title":"Q3"}'` or `--props variant.json` (MCP tools: `props: {…}`). `timeline()` reads `src.props` (typed from the defaults) to choose clips, lengths and params; a scene reads `this.ctx.props as Props` (`import type { Props } from '../reel.config'`). A key the defaults lack, or a value of another kind, fails the render; an optional prop gets a default of `undefined` or `null`, which takes anything. Props are fixed for the whole render, so scenes stay a function of `f.t`. Look at each variant: `reel still --props …`, `reel check --props …`.
+
+## Tracks: grades, mattes, blends
+
+Each track is composited on its own (its clips and their transitions), then graded and matted, then drawn over the tracks below:
+
+- **`grade`** changes only its track: `{ exposure: 1.5, saturation: 0.2, contrast: 1.3, tint: 'accent' | '#rrggbb' | [r, g, b], fade: 0..1, flash: 0..1+, blur: σ in logical px }`. `fade` goes to transparent (to black on track 0), `flash` adds the theme's light colour only where the track has coverage, `contrast` pivots on mid-grey. Set it on the track, on the clip (data, or `(f) => ({ fade: f.p })` of the clip's `t`, `lt`, `p`), or return `{ grade }` from `render()` for one that follows the scene; each goes over the one before, field by field, and it moves from clip to clip across a transition. A clip's `post` (and what render() returns besides `grade`) still grades the whole frame.
+- **`matte`**: `'alpha'` shows the track only where the next track above has coverage, `'luma'` where it is bright (as displayed: sRGB mid-grey keeps half), `'alpha-inverted'`/`'luma-inverted'` the opposite; `{ mode, from: 'below' }` reads the track below. The matte track is not drawn (nor its `post`): for the whole video when the matte is the track's (`tracks`), while the clip is on top when it is a clip's. Mattes may chain (a matte track matted in turn), not go round in a circle. `reel check` ignores a matte track's text; a matted track's text is reported whole, so where the matte cuts it check may measure what shows through instead (mark it `data-exempt="contrast"` if so). A clip cannot opt out of its track's matte or grade: put it on another track. `tracks` may only name tracks that have clips.
+- **`blend`**: `normal`, `add`, `screen`, `multiply`, `max`, and reading the tracks below `overlay`, `soft-light`, `hard-light`, `difference`, `color-dodge`. Frames are linear HDR: overlay, soft-light and hard-light work on display values (sRGB mid-grey is neutral as in an image editor, and light above 1 is cut to 1, so a glow under them loses its bloom); `difference` is linear and keeps HDR; `color-dodge` is linear and capped at 16.
+
+```ts
+tracks: { 1: { matte: 'alpha' }, 3: { blend: 'overlay', opacity: 0.6 } },
+timeline: () => [
+  { id: 'bg', scene: () => import('./scenes/sky'), start: 0, end: 8, grade: { saturation: 0.3, blur: 6 } },
+  { id: 'fill', scene: () => import('./scenes/stripes'), start: 0, end: 8, track: 1 },   // shows only inside…
+  { id: 'word', scene: () => import('./scenes/word'), start: 0, end: 8, track: 2 },      // …this word's letters
+  { id: 'grain', scene: () => import('./scenes/paper'), start: 0, end: 8, track: 3 },
+],
+```
 
 ## A scene
 
-Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer and a code block, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time (reference/kit.md):
+Common pieces come ready-made from the **component kit**: a title card, text fitted to a box, kinetic text (words or letters entering one after another, or as they are said), captions from timed words, a lower third, an image with a Ken Burns move, a video clip decoded frame by frame, a Lottie animation, bar and line charts, a counter, a progress bar, a timer, a code block, and SVG paths and arrows drawn on over time, a waveform and spectrum of the song, each in the theme's colours, laid out from the frame, reported to `reel check` and pure in time; and layout helpers (`split`, `grid`, `inset`, `center`) that cut boxes from a box (reference/kit.md):
 
 ```ts
 import type * as THREE from 'three';
@@ -127,8 +160,8 @@ A video exported with alpha (`reel video --format prores4444`, `webm`, or `--alp
 
 What a scene gets:
 
-- `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `id`, `start`, `end`, `W`, `H`, and `clip(id)`: another clip's `{ start, end, track }` (throws when the id is gone), for a clip that follows another's timing.
-- `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt`, `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), `exposure` (the span of time the frame's sub-frames cover: 0 in previews and stills), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
+- `this.ctx`: `renderer`, `comp` (the compositor), `words`, `audio`, `params`, `props` (the render's, the same for every clip), `id`, `start`, `end`, `W`, `H`, and `clip(id)`: another clip's `{ start, end, track }` (throws when the id is gone), for a clip that follows another's timing.
+- `f` (Frame): `t` (video time), `lt` (time since the clip's start), `p` (0..1 through the clip), `start`, `end`, `dt` (the step since the last frame rendered, for stateful scenes only: 0 after a seek, which a stateless scene's export chunks start with), `beat`, `bar`, `beatPhase`, `barPhase`, `a` (audio features: `rms low mid high vocal drums bass other`, pulses `kick snare hat vonset`), `exposure` (the span of time the frame's sub-frames cover: 0 in previews and stills), and in a transition `under` (the outgoing clip's texture), `tin`, `tout`.
 - Lifecycle: `init()` once (async; load and precompute here), `prepare(f)` once per output frame before its sub-frames (optional, may be async; HTML layers update then), `render()` per frame and per motion-blur sub-frame (synchronous), `reset()` for stateful scenes, `dispose()`.
 - Flags: `stateful = true` for simulation state, `handlesTransition = true` to composite `f.under` with `f.tin` yourself, `tileMasked` (see reference/sampling.md).
 
@@ -138,8 +171,8 @@ What a scene gets:
 2. **Per-frame jitter uses `frameIdx(t)`**, constant over a frame's shutter; `Math.floor(t * FPS)` double-exposes two states. Step frames by `1 / FPS`, never `1 / 60`.
 3. **Anchor to words, not numbers.** `this.ctx.words.get('some words')` finds a line by its text (and throws if it is gone, so a script edit fails loudly); use its `start`, `end` and `words[i].start`. A typed time breaks when the voice is re-timed.
 4. **Lay out from `W` and `H`** (logical px). In HTML, use widths in % of the layer and sizes in `vmin` or `clamp()`; in Canvas2D, size text with `fitSize` to a width derived from `W`; never from 1920 or 1080. Check the layout at `--size 1080x1920` ("Two aspect ratios" below). Logical px hold at every output scale; `PW`/`PH`, `gl_FragCoord` and canvas backing sizes are physical (reference/sampling.md, "Output scale").
-5. **Colours from the theme**, linear: `C_<KEY>` in GLSL (`accentHi` is `C_ACCENT_HI`), `LIN.<key>` for GL uniforms, `rgba('<key>', alpha)` for Canvas2D. `bg`, `fg`, `accent`, `accentHi`, `accentLo` exist in every theme; a theme's own keys tie the scene to it. A missing key throws (and fails the command).
-6. **Report what you draw.** HTML layers report their text and images by themselves (`data-label`, `data-exempt` on elements). Text you draw yourself: after `fillText`, `reportText(c, text, x, y, { label })`; after `drawStrokeText`, `reportStrokeText(c, st, len, text, { label })`; for glyph atlases, images and shapes, `report({ kind, x, y, w, h, text?, size?, color?, alpha?, label? })` in logical frame px. Free outside `reel check`; guard extra work with `if (reporting())`. Mark intended rule breaks: `exempt: ['offFrame']` on a box, `check: { exempt: ['blank'] }` on a clip (rules: `blank frozen offFrame safeArea overlap minSize contrast overflow clipped tiny empty unreported`). A clip that calls `fillText` or `strokeText` in `render()` and reports no text at all gets an `unreported` warning; text drawn only on a scratch canvas (rasterised into particles, say) goes inside `uncounted(() => …)`..
+5. **Colours from the theme**, linear: `C_<KEY>` in GLSL (`accentHi` is `C_ACCENT_HI`), `LIN.<key>` for GL uniforms, `rgba('<key>', alpha)` for Canvas2D. `bg`, `fg`, `accent`, `accentHi`, `accentLo` exist in every theme; a theme's own keys tie the scene to it. A missing key throws (and fails the command), in `LIN`, `rgba()` and the kit's `color` options alike; in your own HTML layer CSS the theme's colours are `var(--accent-hi)` and so on, and a `var()` the theme lacks is not caught.
+6. **Report what you draw.** HTML layers report their text and images by themselves (`data-label`, `data-exempt` on elements). Text you draw yourself: after `fillText`, `reportText(c, text, x, y, { label })`; after `drawStrokeText`, `reportStrokeText(c, st, len, text, { label })`; for glyph atlases, images and shapes, `report({ kind, x, y, w, h, text?, size?, color?, alpha?, label? })` in logical frame px. Free outside `reel check`; guard extra work with `if (reporting())`. Mark intended rule breaks: `exempt: ['offFrame']` on a box, `check: { exempt: ['blank'] }` on a clip (rules: `blank frozen offFrame safeArea overlap minSize contrast overflow clipped tiny empty unreported nondeterministic timeline`). A clip that calls `fillText` or `strokeText` in `render()` and reports no text at all gets an `unreported` warning; text drawn only on a scratch canvas (rasterised into particles, say) goes inside `uncounted(() => …)`. Check also renders some times a second time, out of order, and a frame that comes out different is a `nondeterministic` error (rule 1), naming any `Math.random()`, `Date.now()` or `performance.now()` the clip called while drawing.
 7. **Sound by cue.** `cue(kind, t)` in `init()` (from word times); `mix.json` maps kinds to files. Scenes never play audio.
 8. **Values over ~0.85 bloom** under themes with bloom (`film`). Keep text below that unless it should glow.
 
@@ -147,7 +180,7 @@ What a scene gets:
 
 Every render command takes `--size WxH` (and the MCP tools `size`), so a 16:9 project also delivers 9:16 or 1:1 without a second config: `reel video --size 1080x1920 --out out/vertical.mp4`. `W` and `H` are that size while it renders, so one scene lays out both:
 
-- Let proportions do most of it: boxes from `W`, `H` and `UNIT` (the short side), kit components' default boxes, HTML in % and `vmin`.
+- Let proportions do most of it: boxes from `W`, `H` and `UNIT` (the short side), cut with `split` and `grid` (`split(area, PORTRAIT ? 'v' : 'h', 2, 40)` stacks in a vertical cut), kit components' default boxes, HTML in % and `vmin`.
 - Where the composition must change (side by side becomes stacked, a 3D subject moves up to leave room for text), branch once at module level, `const PORTRAIT = H > W;`, and pick boxes, camera framing and font sizes from it. Keep the timing identical: both cuts share the narration.
 - Captions and lower thirds default to the safe area of whatever size is rendered; give a vertical cut more room at the bottom for a platform's own interface if it is going to one.
 - Check each: `reel check` and `reel check --size 1080x1920`, a `reel sheet` of both, and name the outputs yourself with `--out` (the default name is the same for every size).

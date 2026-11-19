@@ -4,7 +4,7 @@
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
-import { checkTimes, findingsOf, type Finding, type Sample } from '../src/check';
+import { checkTimes, findingsOf, judgeable, recheckOrder, type Finding, type Sample } from '../src/check';
 import { UsageError, type PageOpts } from './args';
 import { isGone, type PageHandle, type Renderer } from './renderer';
 import { glBackend } from './chrome';
@@ -22,12 +22,12 @@ export interface Req {
 /** What every command prints with --json; `errors` (scene, shader and page errors) make it exit 1, `usage` 2. */
 export interface Result { ok: boolean; errors: string[]; logs: string[]; warnings: string[]; usage?: boolean; [k: string]: unknown }
 
-export interface ClipInfo { id: string; start: number; end: number; track: number; exempt?: import('../src/engine/report').CheckRule[] | true }
-export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[]; track: string | null; theme: string; W: number; H: number; fps: number; scale: number }
+export type ClipInfo = import('../src/check').ClipSpan;
+export interface PageMeta { duration: number; timeline: ClipInfo[]; cues: { kind: string; t: number }[]; sounds: import('../src/config').SoundClip[]; track: string | null; theme: string; props: Record<string, unknown>; W: number; H: number; fps: number; scale: number }
 
 export const meta = (h: PageHandle): Promise<PageMeta> => h.page.evaluate(() => {
   const R = (window as any).__reel;
-  return { duration: R.duration, timeline: R.timeline, cues: R.cues, sounds: R.sounds, track: R.track, theme: R.theme, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
+  return { duration: R.duration, timeline: R.timeline, cues: R.cues, sounds: R.sounds, track: R.track, theme: R.theme, props: R.props, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
 });
 
 /** `dir/base.png`, or `dir/base-2.png`, `-3` … when that is taken: stills and sheets never overwrite each other. */
@@ -62,7 +62,7 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
   async info(h, ctx) {
     const m = await meta(h);
     const tracks = [...new Set(m.timeline.map((c) => c.track))].sort((a, b) => a - b);
-    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues, sounds: m.sounds };
+    return { project: ctx.req.project, size: [m.W, m.H], fps: m.fps, scale: m.scale, theme: m.theme, props: m.props, duration: m.duration, track: m.track, tracks, timeline: m.timeline, cues: m.cues, sounds: m.sounds };
   },
 
   async still(h, ctx) {
@@ -125,19 +125,30 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     const { req } = ctx, a = req.args as { from?: number; to?: number; step?: number; safe?: number; minText?: number; frozen?: number; out?: string; preview?: boolean; maxImages?: number };
     const m = await meta(h);
     const palette: Record<string, string> = await h.page.evaluate(() => (window as any).__reel.palette);
-    const times = checkTimes(m.timeline, m.duration, m.fps, a.from ?? 0, a.to ?? m.duration, a.step ?? 0.5);
-    if (!times.length) throw new UsageError(`check: no frames between ${a.from ?? 0} and ${a.to ?? m.duration} s`);
+    // --only: the clips not loaded draw nothing, so only the loaded clips' frames are checked
+    const only = req.page.only?.split(',');
+    const times = checkTimes(m.timeline, m.duration, m.fps, a.from ?? 0, a.to ?? m.duration, a.step ?? 0.5, only);
+    if (!times.length) throw new UsageError(`check: no frames between ${a.from ?? 0} and ${a.to ?? m.duration} s${only ? ` in --only ${only.join(',')}` : ''}`);
     // one session: every time rendered and measured in this page, errors attributed to the frame that raised them
     const samples: Sample[] = [], seen = new Set<string>();
+    const fresh = (errors: string[]) => { const f = errors.filter((e) => !seen.has(e)); for (const e of f) seen.add(e); return f; };
     for (const t of times) {
       const r: Omit<Sample, 't'> = await h.page.evaluate(([t, s, sh]) => (window as any).__reel.inspect(t, s, sh), [t, req.samples, req.shutter] as const);
-      const fresh = r.errors.filter((e) => !seen.has(e));
-      for (const e of fresh) seen.add(e);
-      samples.push({ ...r, t, errors: fresh });
+      samples.push({ ...r, t, errors: fresh(r.errors) });
+    }
+    // some of the times again, out of order: a frame that is a pure function of t comes out the same
+    // (a scene error raised only by the second render is that error, not a different frame)
+    for (const i of recheckOrder(samples.map((s) => (judgeable(s, m.timeline) ? s.clips : null)))) {
+      const s = samples[i]!;
+      const r: Pick<Sample, 'stats' | 'errors'> & { failed: boolean } = await h.page.evaluate(([t, sm, sh]) => (window as any).__reel.recheck(t, sm, sh), [s.t, req.samples, req.shutter] as const);
+      s.errors.push(...fresh(r.errors));
+      if (!r.failed) s.again = r.stats;
     }
     const minSide = Math.min(m.W, m.H);
+    // (timeline problems the page found while loading: a transition with no overlap to play over)
+    const warnings: { clip: string; message: string }[] = await h.page.evaluate(() => (window as any).__reel.warnings ?? []);
     const findings: Finding[] = findingsOf(samples, {
-      W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette,
+      W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette, warnings, only,
     });
     // a crop of the worst frame of each finding (the whole frame, small, for frame-wide ones)
     const dir = a.out ?? path.join(req.project, 'out/check');
@@ -178,27 +189,32 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
 
   async perf(h, ctx) {
     const { req } = ctx;
+    // render: renderFrame returning (the CPU side, and with --samples auto the GPU too: the sampler waits for each
+    // step's error); gpu: the GPU work still queued after that, waited for with a fence; readback: the copy out alone
     return h.page.evaluate(async ({ from, to, samples, shutter, pixels }) => {
       const P = (window as any).__reel, dt = 1 / P.fps, E = P.engine;
       const ms: number[] = [];
-      let render = 0, readback = 0;
+      let render = 0, gpu = 0, readback = 0;
       const buf = new Uint8Array(E.constructor.bytes(pixels));
       await P.still(from);
+      await E.gpuIdle();
       const used: Record<number, number> = {};
       for (let t = from; t < to; t += dt) {
         const a = performance.now();
         const k = await E.renderFrame(t, dt, false, samples, shutter);
         const b = performance.now();
+        await E.gpuIdle();
+        const c = performance.now();
         E.readStart(0, pixels);
         await E.readFinish(0, buf);
-        const c = performance.now();
+        const d = performance.now();
         used[k] = (used[k] ?? 0) + 1;
-        render += b - a; readback += c - b;
-        ms.push(c - a);
+        render += b - a; gpu += c - b; readback += d - c;
+        ms.push(d - a);
       }
       ms.sort((a, b) => a - b);
       const n = ms.length;
-      return { frames: n, pixels, avg: ms.reduce((a, b) => a + b, 0) / n, render: render / n, readback: readback / n, p50: ms[n >> 1]!, p95: ms[Math.floor(n * 0.95)]!, max: ms[n - 1]!, subFrames: used };
+      return { frames: n, pixels, avg: ms.reduce((a, b) => a + b, 0) / n, render: render / n, gpu: gpu / n, readback: readback / n, p50: ms[n >> 1]!, p95: ms[Math.floor(n * 0.95)]!, max: ms[n - 1]!, subFrames: used, adaptive: typeof samples !== 'number' };
     }, { from: req.args.from ?? 0, to: req.args.to ?? 5, samples: req.samples, shutter: req.shutter, pixels: req.args.pixels ?? 'rgb8' });
   },
 
@@ -240,6 +256,7 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       res.frame = `${h.fmt.w}x${h.fmt.h}${h.fmt.scale !== 1 ? ` at scale ${h.fmt.scale}` : ''}, ${h.fmt.fps} fps`;
       res.errors.push(...await h.errors());
       res.logs.push(...h.logs);
+      r.release(h);
       break;
     } catch (e) {
       if (attempt === 0 && (h?.dead || isGone(e) || (h && await h.lost()))) {
@@ -250,6 +267,7 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
       if (h && !h.dead) res.errors.push(...await h.errors());
       if (h) res.logs.push(...h.logs);
       if (h?.dead) await r.drop(h);
+      else if (h) r.release(h);
       if (e instanceof UsageError) res.usage = true;
       res.errors.push(String((e as Error)?.message ?? e));
       break;
