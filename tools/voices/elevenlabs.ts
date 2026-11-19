@@ -2,7 +2,8 @@
 // every character, which become word times. Only the passage's text (and its neighbours' as context) is sent.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { httpError, type SynthRequest, type VoiceSource } from './voice';
+import { fetchRetry } from '../http';
+import type { SynthRequest, VoiceSource } from './voice';
 
 export const API = 'https://api.elevenlabs.io/v1';
 export const DEFAULT_MODEL = 'eleven_multilingual_v2';
@@ -34,25 +35,22 @@ export function request(voiceId: string, r: SynthRequest): { url: string; body: 
 export const elevenlabs: VoiceSource = {
   about: 'elevenlabs:<voice-id> hosted (ELEVENLABS_API_KEY); word times from its character timestamps',
   hosted: true,
-  create(arg, { env, fetch }) {
+  create(arg, ctx) {
+    const { env } = ctx;
     if (!arg) throw new Error('elevenlabs needs a voice id: --voice elevenlabs:<voice-id> (the id from the ElevenLabs voice library)');
     const key = env.ELEVENLABS_API_KEY;
     if (!key) throw new Error('ELEVENLABS_API_KEY is not set: hosted voices are opt-in, so nothing is sent until it is (or use --voice kokoro)');
     return {
       id: `elevenlabs:${arg}`,
-      async synth(reqs, work) {
-        const out = [];
+      async synth(reqs, work, each) {
         for (const [i, r] of reqs.entries()) {
           const q = request(arg, r);
-          const res = await fetch(q.url, { method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify(q.body) });
-          if (!res.ok) throw await httpError('elevenlabs', res);
-          const j = await res.json() as { audio_base64: string; alignment: CharAlignment | null };
+          const j = await fetchRetry('elevenlabs', ctx, q.url, { method: 'POST', headers: { 'xi-api-key': key, 'content-type': 'application/json' }, body: JSON.stringify(q.body) }, (r) => r.json() as Promise<{ audio_base64: string; alignment: CharAlignment | null }>);
           if (!j.audio_base64) throw new Error('elevenlabs: the response had no audio');
           const file = path.join(work, `elevenlabs${i}.wav`);
           writeFileSync(file, Buffer.from(j.audio_base64, 'base64'));
-          out.push({ file, words: j.alignment ? charsToWords(j.alignment) : undefined });
+          await each(i, { file, words: j.alignment ? charsToWords(j.alignment) : undefined });
         }
-        return out;
       },
     };
   },

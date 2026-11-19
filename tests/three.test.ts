@@ -178,3 +178,68 @@ describe('projectPoint', () => {
     expect(projectPoint({ position: [0, 0, 5], target: [0, 0, 0] }, [0, 0, 9], 35, 1920, 1080).behind).toBe(true);
   });
 });
+
+describe('Stage3D', () => {
+  // a renderer and a clip's ctx with only what the stage calls, recording each soft light's shadow at draw time
+  const fakeStage = async () => {
+    const { Stage3D } = await import('../src/three/stage');
+    const drawn: { radius: number; position: THREE.Vector3 }[] = [];
+    let light: THREE.DirectionalLight | null = null;
+    const renderer = {
+      shadowMap: { enabled: false, type: 0 },
+      getDrawingBufferSize: (v: THREE.Vector2) => v.set(1920, 1080),
+      setRenderTarget() {}, clear() {}, setClearColor() {}, getClearAlpha: () => 0,
+      getClearColor: (c: THREE.Color) => c,
+      fail: false,
+      render() { if (renderer.fail) throw new Error('lost context'); drawn.push({ radius: light!.shadow.radius, position: light!.position.clone() }); },
+    };
+    const caps: number[] = [];
+    const ctx = { renderer, comp: { draw() {} }, maskDepth() {}, capSamples: (n: number) => caps.push(n) };
+    const stage = new Stage3D(ctx as never, { antialias: 'none' });
+    light = new THREE.DirectionalLight(0xffffff, 1);
+    light.position.set(-1, 3, 2);
+    light.castShadow = true;
+    light.shadow.radius = 9;
+    stage.scene.add(light, light.target);
+    stage.soft(light, 0.5);
+    stage.camera({ position: [0, 1, 4], target: [0, 0, 0] });
+    return { stage, light, drawn, caps, renderer };
+  };
+
+  test('asks its clip for at most 108 adaptive sub-frames', async () => {
+    const { caps } = await fakeStage();
+    expect(caps).toEqual([108]);
+  });
+
+  test("a soft light's shadow-map blur drops to a texel in sub-frames, where the moving light makes the penumbra", async () => {
+    const { SUB_FRAME } = await import('../src/engine/gl');
+    const { stage, light, drawn } = await fakeStage();
+    const out = new THREE.WebGLRenderTarget(4, 4);
+    try {
+      SUB_FRAME.index = -1;
+      stage.render(out);
+      for (let k = 0; k < 4; k++) { SUB_FRAME.index = k; stage.render(out); }
+    } finally { SUB_FRAME.index = -1; }
+    // one sample: the light stays put and the blur alone softens it
+    expect(drawn[0]!.radius).toBe(9);
+    expect(drawn[0]!.position.toArray()).toEqual([-1, 3, 2]);
+    // sub-frames: the light moves and its blur is a texel
+    for (const d of drawn.slice(1)) expect(d.radius).toBe(1);
+    expect(new Set(drawn.slice(1).map((d) => d.position.toArray().join())).size).toBe(4);
+    // and both are back as placed afterwards
+    expect(light.shadow.radius).toBe(9);
+    expect(light.position.toArray()).toEqual([-1, 3, 2]);
+  });
+
+  test('the light is put back when a sub-frame throws', async () => {
+    const { SUB_FRAME } = await import('../src/engine/gl');
+    const { stage, light, renderer } = await fakeStage();
+    renderer.fail = true;
+    try {
+      SUB_FRAME.index = 3;
+      expect(() => stage.render(new THREE.WebGLRenderTarget(4, 4))).toThrow('lost context');
+    } finally { SUB_FRAME.index = -1; }
+    expect(light.shadow.radius).toBe(9);
+    expect(light.position.toArray()).toEqual([-1, 3, 2]);
+  });
+});
