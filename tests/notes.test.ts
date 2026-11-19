@@ -110,7 +110,7 @@ test('the newest render under out/ is the default; drafts are known by name or c
   const p = tempDir('reel-notes-');
   expect(latestRender(p)).toBeNull();
   mkdirSync(path.join(p, 'out/stills'), { recursive: true });
-  for (const [f, age] of [['out/video.mp4', 30], ['out/a.picture.mp4', 0], ['out/stills/x.png', 0], ['out/video.draft.mp4', 10]] as const) {
+  for (const [f, age] of [['out/video.mp4', 30], ['out/a.picture.mp4', 0], [`out/video.partial-1-${Date.now()}.mp4`, 0], ['out/stills/x.png', 0], ['out/video.draft.mp4', 10]] as const) {
     writeFileSync(path.join(p, f), '');
     const t = new Date(Date.now() - age * 1000);
     utimesSync(path.join(p, f), t, t);

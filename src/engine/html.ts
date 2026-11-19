@@ -44,7 +44,8 @@ export interface HtmlDraw {
   blend?: 'normal' | 'add' | 'screen';
 }
 
-const kebab = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
+/** A palette key or camelCase property as a CSS name: accentHi -> accent-hi. */
+export const kebab = (k: string) => k.replace(/([a-z0-9])([A-Z])/g, '$1-$2').toLowerCase();
 /** The theme as CSS custom properties: `--bg`, `--fg`, `--accent-hi` … for every palette key. */
 export const THEME_CSS_VARS = Object.entries(HEX).map(([k, v]) => `--${kebab(k)}: ${v};`).join(' ');
 
@@ -63,6 +64,8 @@ img, svg, video, canvas { display: block; max-width: 100%; }
 
 // ---- the registry the engine drives ----
 let owner = '';
+/** Loads of scenes under way (init, hot reloads, which may overlap): a load a component starts then is awaited before the next frame. */
+let loading = 1;
 const layers = new Set<HtmlLayer>();
 const loads: { owner: string; p: Promise<unknown> }[] = [];
 let host: HTMLCanvasElement | null = null;
@@ -86,6 +89,8 @@ export const htmlLayers = {
   },
   /** Layers made from here on belong to clip `id` (the engine sets it while a clip's scene is made and initialised). */
   owner(id: string) { owner = id; },
+  /** Scenes are being loaded (modules imported, scenes made and initialised): the engine sets it around init and a reload. */
+  loading(on: boolean) { loading = Math.max(0, loading + (on ? 1 : -1)); },
   /** Await the loads components started (images) before the first frame. Returns the failures, by clip. */
   async settle(): Promise<Map<string, string>> {
     const errors = new Map<string, string>();
@@ -110,6 +115,7 @@ export const htmlLayers = {
       try { if (l.sync(f)) dirty.push(l); } catch (e) { if (!errors.has(l.owner)) errors.set(l.owner, `${l.label}: ${describe(e)}`); }
     }
     if (!dirty.length) return errors;
+    rebuild(dirty.filter((l) => l.stale), frames);
     for (const l of dirty) {
       try { await l.loadImages(); } catch (e) { if (!errors.has(l.owner)) errors.set(l.owner, `${l.label}: ${describe(e)}`); }
     }
@@ -121,11 +127,42 @@ export const htmlLayers = {
   },
 };
 
+/**
+ * Have layers laid out and painted from scratch: out of the render tree and back, all in one style recalc.
+ * Chrome keeps an element's paint state across DOM changes (text in an element that once had an opacity below 1
+ * rasterises a fraction of a pixel off from the same DOM painted fresh), so without this a layer's picture would
+ * depend on the frames painted before it, and a seek, or how an export is split between pages, would change it.
+ * The round trip restarts CSS animations, so they are set to the frame again (scroll offsets survive it).
+ */
+function rebuild(stale: HtmlLayer[], frames: Map<string, Frame>) {
+  for (const l of stale) l.el.style.display = 'none';
+  for (const l of stale) void getComputedStyle(l.el).display; // (the style recalc drops their layout and paint state)
+  for (const l of stale) { l.el.style.display = 'block'; l.retime(frames.get(l.owner)!); }
+}
+
 /** Keep a promise (an image a component loads) for the engine to await before the first frame. */
 export function awaitBeforeFirstFrame<T>(p: Promise<T>): Promise<T> {
+  if (!loading) { p.catch(() => {}); notLate('a kit component'); }
   loads.push({ owner, p });
   p.catch(() => {}); // (reported by settle)
   return p;
+}
+
+const PLACE = 'make it a field of the scene or create it in init(), not at a module\'s top level or in prepare() or render()';
+/**
+ * Throw unless a clip's scene is being made: an HTML layer made at a module's top level, or lazily in prepare() or
+ * render(), belongs to no clip, so it would never be shown.
+ */
+export function inClip(label: string) {
+  if (!owner) throw new Error(`${label}: an HTML layer or kit component was made outside a scene's construction, so it belongs to no clip and would never draw: ${PLACE}`);
+}
+/**
+ * Throw when scenes are no longer being loaded: a component that loads something (an image, a video, a Lottie)
+ * made lazily in prepare() or render() would draw nothing until its load lands, a different frame every run.
+ * (One made at a module's top level is loaded with the scenes, and fine.)
+ */
+export function notLate(label: string) {
+  if (!loading) throw new Error(`${label}: a kit component was made after the scenes loaded (lazily in prepare() or render()), so what it loads is not there for the frames before it lands: ${PLACE}`);
 }
 
 /** One rendering update of the page: what a DOM change needs before a layer can be uploaded. */
@@ -186,7 +223,7 @@ interface DomBox { kind: DrawnBox['kind']; x: number; y: number; w: number; h: n
 
 /**
  * An HTML layer: markup and CSS rendered into a texture at the output resolution. Make it in a scene's field
- * (or constructor) so it belongs to the scene's clip; change it in `update(f, layer)` (or the scene's
+ * (or constructor, or init()) so it belongs to the scene's clip (made anywhere else, it throws); change it in `update(f, layer)` (or the scene's
  * `prepare(f)`); draw it with `layer.draw(renderer, out, { x, y, scale, opacity })` in render().
  */
 export class HtmlLayer {
@@ -207,6 +244,8 @@ export class HtmlLayer {
   private uploaded = false;
   private boxCache: { key: string; boxes: DomBox[] } | null = null;
   private fontsOk = new Set<string>();
+  /** Set by sync: the layer changed while it was laid out, so it is to be laid out again from scratch (rebuild). */
+  stale = false;
 
   constructor(o: HtmlLayerOptions | string = {}, css?: string) {
     const opts: HtmlLayerOptions = typeof o === 'string' ? { html: o, css } : o;
@@ -214,6 +253,7 @@ export class HtmlLayer {
     this.height = opts.height ?? H;
     this.update = opts.update;
     this.label = opts.label ?? 'html';
+    inClip(this.label);
     this.owner = owner;
     this.el = document.createElement('div');
     this.el.setAttribute('drawable', '');
@@ -268,7 +308,8 @@ export class HtmlLayer {
 
   /** The engine's: show the layer for frame f and run its update; true when its picture changed since the last upload. */
   sync(f: Frame): boolean {
-    if (this.el.style.display === 'none') this.el.style.display = 'block';
+    const hidden = this.el.style.display === 'none';
+    if (hidden) this.el.style.display = 'block';
     this.update?.(f, this);
     this.timeAnimations(f);
     this.observer.takeRecords();
@@ -276,8 +317,13 @@ export class HtmlLayer {
     if (this.uploaded && now === this.shown) return false;
     this.checkFonts();
     this.shown = now;
+    // (a layer coming out of display: none is laid out from scratch already)
+    this.stale = !hidden;
     return true;
   }
+
+  /** The engine's: set the layer's animations to frame f again (after rebuild restarted them). */
+  retime(f: Frame) { this.timeAnimations(f); }
 
   hide() { if (this.el.style.display !== 'none') this.el.style.display = 'none'; }
 
@@ -323,12 +369,18 @@ export class HtmlLayer {
     }
   }
 
-  /** Images in the layer decoded before it is uploaded: <img> elements and CSS background images. */
+  /** Images in the layer decoded before it is uploaded: <img> elements, SVG <image> elements and CSS background images. */
   async loadImages() {
     const waits: Promise<unknown>[] = [];
     for (const img of this.root.querySelectorAll('img')) {
       if (img.complete && img.naturalWidth > 0) continue;
       waits.push(img.decode().catch(() => { throw new LayerError(`image '${img.getAttribute('src')}' did not load (a path in the project, served from its folder)`); }));
+    }
+    // (an SVG <image> has no `complete`: each is decoded once for the href it has; Chrome has its decode(), the DOM types not)
+    for (const img of this.root.querySelectorAll<SVGImageElement>('svg image')) {
+      const href = img.href.baseVal;
+      if (!href || svgImagesDone.get(img) === href) continue;
+      waits.push((img as SVGImageElement & { decode(): Promise<void> }).decode().then(() => { svgImagesDone.set(img, href); }, () => { throw new LayerError(`image '${href}' in an SVG did not load (a path in the project, served from its folder)`); }));
     }
     for (const e of this.root.querySelectorAll<HTMLElement>('*')) {
       const bg = getComputedStyle(e).backgroundImage;
@@ -442,6 +494,8 @@ export class HtmlLayer {
 }
 
 const images = new Map<string, Promise<void>>();
+/** SVG <image> elements decoded, and the href each was decoded for. */
+const svgImagesDone = new WeakMap<SVGImageElement, string>();
 function preload(url: string) {
   let p = images.get(url);
   if (!p) {
@@ -480,9 +534,12 @@ function exemptOf(e: Element): CheckRule[] | true | undefined {
  */
 const flowIds = new WeakMap<Element, string>();
 let flowCount = 0;
-/** The run of text an element's text belongs to: its nearest ancestor (or itself) that is not `display: inline`. */
+/**
+ * The run of text an element's text belongs to: its nearest ancestor (or itself) marked `data-flow` (pieces of
+ * text laid out as inline blocks and moved one by one), else its nearest ancestor (or itself) that is not `display: inline`.
+ */
 function flowOf(e: Element) {
-  let n: Element = e;
+  let n: Element = e.closest('[data-flow]') ?? e;
   while (n.parentElement && /^(inline|contents)$/.test(getComputedStyle(n).display)) n = n.parentElement;
   let id = flowIds.get(n);
   if (!id) flowIds.set(n, (id = `html${++flowCount}`));
@@ -502,7 +559,8 @@ function domBoxes(l: HtmlLayer): DomBox[] {
     const label = e.closest('[data-label]')?.getAttribute('data-label') ?? undefined, exempt = exemptOf(e);
     if (e instanceof HTMLImageElement || e instanceof SVGSVGElement || (cs.backgroundImage && cs.backgroundImage.includes('url('))) {
       const r = e.getBoundingClientRect();
-      if (r.width > 0 && r.height > 0) out.push({ kind: 'image', ...rel(r), alpha: opacityOf(e), label: label ?? e.getAttribute('alt') ?? undefined, exempt });
+      // (an svg inside another is part of its picture, not one of its own)
+      if (r.width > 0 && r.height > 0 && !(e instanceof SVGSVGElement && e.ownerSVGElement)) out.push({ kind: 'image', ...rel(r), alpha: opacityOf(e), label: label ?? e.getAttribute('alt') ?? undefined, exempt });
       if (e instanceof SVGSVGElement) continue;
     }
     if (!hasText(e)) continue;
