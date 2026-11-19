@@ -1,12 +1,12 @@
 // Media inputs: the 16-bit PNG decoder (every row filter, grey and alpha, sRGB, gamma and Display P3 by cICP, what it
-// leaves to the browser), an SVG's own size, and a video clip's time (trim, speed, loop, held and blended frames, its
-// sound).
+// leaves to the browser), an SVG's own size, a video clip's time (trim, speed, loop, held and blended frames, its
+// sound), and a Lottie frame that is the same whatever frame was drawn before it.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { deflateSync } from 'node:zlib';
 import { decodePng16, pngDepth } from '../src/engine/png16';
-import { hasChrome, reel, scratchCopy } from './helpers';
+import { fixture, hasChrome, reel, scratchCopy } from './helpers';
 import { svgSize, sourceTime, frameAt, framesAt, trimFrames, videoSounds, type FrameSpan, type VideoTiming } from '../src/kit';
 
 function crc32(b: Uint8Array) {
@@ -159,5 +159,53 @@ describe.skipIf(!hasChrome)('media rendered', () => {
       expect(r.code).toBe(1);
       expect(JSON.stringify(r.json())).toContain("video 'assets/nope.mp4' did not load");
     } finally { writeFileSync(shot, text); }
+  }, 120_000);
+});
+
+// A Lottie whose layer grows from 100% to 100.5% over its first second, its bar 40000 px from the anchor: a change of
+// scale too small for lottie-web's 1e-5 threshold still moves the bar's edge by a third of a pixel.
+const LEVER = {
+  v: '5.7.4', fr: 30, ip: 0, op: 60, w: 512, h: 512, ddd: 0, assets: [],
+  layers: [{
+    ddd: 0, ind: 1, ty: 4, nm: 'bar', sr: 1, ao: 0, ip: 0, op: 60, st: 0, bm: 0,
+    ks: {
+      o: { a: 0, k: 100 }, r: { a: 0, k: 0 }, p: { a: 0, k: [-39800, 256, 0] }, a: { a: 0, k: [0, 0, 0] },
+      s: { a: 1, k: [{ t: 0, s: [100, 100, 100], i: { x: [1, 1, 1], y: [1, 1, 1] }, o: { x: [0, 0, 0], y: [0, 0, 0] } }, { t: 30, s: [100.5, 100.5, 100] }] },
+    },
+    shapes: [{ ty: 'gr', it: [
+      { ty: 'rc', p: { a: 0, k: [40000, 0] }, s: { a: 0, k: [120, 300] }, r: { a: 0, k: 0 }, d: 1 },
+      { ty: 'fl', c: { a: 0, k: [1, 1, 1, 1] }, o: { a: 0, k: 100 }, r: 1 },
+      { ty: 'tr', p: { a: 0, k: [0, 0] }, a: { a: 0, k: [0, 0] }, s: { a: 0, k: [100, 100] }, r: { a: 0, k: 0 }, o: { a: 0, k: 100 }, sk: { a: 0, k: 0 }, sa: { a: 0, k: 0 } },
+    ] }],
+  }],
+};
+
+describe.skipIf(!hasChrome)('Lottie rendered', () => {
+  const p = fixture('lottie', {
+    'reel.config.ts': `import { defineVideo } from 'reel/config';
+export default defineVideo({ size: [512, 512], fps: 30, timeline: () => [{ id: 'bar', scene: () => import('./scenes/bar'), start: 0, end: 2 }] });
+`,
+    'scenes/bar.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, LottieBox, clearRT, W, H } from 'reel';
+export default class Bar extends Scene {
+  bar = new LottieBox({ src: 'lever.json', box: { x: 0, y: 0, w: W, h: H } });
+  render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, [0, 0, 0]); this.bar.draw(this.ctx.renderer, out, f); }
+}
+`,
+    'lever.json': JSON.stringify(LEVER),
+  });
+  afterAll(async () => { await reel(['daemon', 'stop', '--project', p.dir]); p.cleanup(); });
+
+  test('a Lottie frame is the same reached by a small step forward or by a jump, in one page', async () => {
+    // the step is 0.05 of the animation's frames: its scale moves by less than 1e-5
+    const t = 0.7, step = (t - 0.05 / 30).toFixed(6);
+    const still = async (ts: string[]) => {
+      const r = await reel(['still', '--t', ts.join(','), '--json', '--project', p.dir]);
+      expect(r.code).toBe(0);
+      return readFileSync((r.json().frames as { file: string }[]).at(-1)!.file);
+    };
+    const stepped = await still([step, t.toFixed(6)]);
+    const jumped = await still(['1.5', t.toFixed(6)]);
+    expect(Buffer.compare(stepped, jumped)).toBe(0);
   }, 120_000);
 });

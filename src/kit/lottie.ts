@@ -2,7 +2,8 @@
 // A Lottie animation (After Effects through Bodymovin, or any tool that writes Lottie JSON) in a box, drawn by
 // lottie-web's canvas renderer at the moment f.lt asks for, every sub-frame, so it is a pure function of time and
 // blurs with the engine's motion blur. The light player has no expressions: an animation that relies on them plays
-// without them.
+// without them. This build of lottie-web is patched (patches/lottie-web@5.13.0.patch) so a frame never depends on the
+// one drawn before it; its other builds are not.
 import * as THREE from 'three';
 import type { AnimationItem } from 'lottie-web';
 import { SCALE } from '../engine/gl';

@@ -35,7 +35,10 @@ export function engineVersion(): string {
   };
   walk(path.join(ENGINE, 'src'));
   walk(path.join(ENGINE, 'cli'));
-  for (const f of ['index.html', 'package.json', 'bun.lock']) if (existsSync(path.join(ENGINE, f))) { const s = statSync(path.join(ENGINE, f)); parts.push(`${f}:${s.mtimeMs}:${s.size}`); }
+  // (patches/: the patched dependencies, whose edits bun.lock does not record)
+  const patches = path.join(ENGINE, 'patches');
+  const patchFiles = existsSync(patches) ? readdirSync(patches).sort().map((f) => `patches/${f}`) : [];
+  for (const f of ['index.html', 'package.json', 'bun.lock', ...patchFiles]) if (existsSync(path.join(ENGINE, f))) { const s = statSync(path.join(ENGINE, f)); parts.push(`${f}:${s.mtimeMs}:${s.size}`); }
   return Bun.hash(parts.join('\n')).toString(36);
 }
 
