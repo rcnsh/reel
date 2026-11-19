@@ -20,6 +20,7 @@ reuses; each exits 1 on a scene error)
                              spaced from --from to --to (both included), or --frames N consecutive
                              frames from --from     [--cell 360] [--out <file.png>] [--max-size <px>]
   check                      sweep the video for problems and print findings: blank or frozen frames,
+                             frames that differ when rendered again, transitions with no overlap,
                              scene errors, and the text HTML layers and scenes report (report(),
                              reportText()): off the frame, in the safe margin, overlapping, too small,
                              low in contrast, overflowing or clipped; each with a cropped image.
@@ -32,7 +33,9 @@ reuses; each exits 1 on a scene error)
                              changed                    [--tol 0] [--threshold 0] [--out <diff.png>]
   events                     write the sound-mix cues (the timeline and every cue() of the scenes)
                              [--out data/cues.json]
-  perf    --from 0 --to 5    milliseconds per frame: rendering and the export's pixel readback, apart
+  perf    --from 0 --to 5    milliseconds per frame, apart: render (the CPU side; with --samples auto
+                             the GPU's too, as the sampler waits for it), gpu (the GPU work queued
+                             after that) and the export's pixel readback
                              [--pixels rgb8|yuv420|rgba8|rgb16|rgba16|linear: the readback to time]
   gpu                        the GPU Chrome renders with and the GL backend (software: SwiftShader)
 
@@ -96,7 +99,9 @@ Working on a project
                              folder (used whenever CHROME_PATH is unset)
   chrome path                the Chrome binary renders would use, and its version
   daemon status              the warm renderers running, per project
-  daemon stop                stop the project's warm renderer          [--all: every project's]
+  daemon stop                stop the project's warm renderer          [--all: every project's, and sweep
+                                                                       dead exports' spools and Vite's
+                                                                       stale optimizer folders]
   golden update              re-render the golden frames of this operating system (tests/golden/<platform>/)
   mcp                        a stdio MCP server over the warm renderer, for agents (README: registering
                              it with Claude Code and other clients)
@@ -117,9 +122,12 @@ Working on a project
 
 Flags for every command that renders
   --project <folder>   the project (default: the current folder)
-  --only a,b           load only these clips (faster; other clips render as nothing)
+  --only a,b           load only these clips (faster; other clips render as nothing, and
+                       check judges only these clips' frames)
   --samples N|auto     sub-frames averaged per frame for motion blur (default 1); auto picks per tile
                        [--min-samples 4] [--max-samples 324] [--tol 3] [--refine tiles|frame]
+                       (REEL_TILE_MASK=subs|merge: mask stopped tiles out of every sub-frame, or only
+                       out of the sums; the same frame either way, chosen by GL backend by default)
   --shutter 0.5        the share of the frame time the sub-frames span
   --scale N            render N x the pixels (2 = 3840x2160 from a 1920x1080 project; 0.5 = half size,
                        for a width that is a multiple of 8 and a height of 4, else refused with exit 2)
@@ -247,10 +255,22 @@ export function checkScale(w: number, h: number, scale: number) {
   throw new UsageError(`--scale ${scale}: a ${w}x${h} frame would be ${w * scale}x${h * scale}, and the readback needs a width that is a multiple of 4 and an even height; ${fw}x${fh} (--size ${fw}x${fh}) renders at --scale ${scale}, or leave out --scale for full size`);
 }
 
+/**
+ * REEL_TILE_MASK=subs|merge: where per-tile refinement masks stopped tiles, overriding the GL backend's choice
+ * (the frame is the same; for measuring which is faster).
+ */
+export function tileMaskOf(env: Record<string, string | undefined> = process.env): { mask?: 'subs' | 'merge' } {
+  const m = env.REEL_TILE_MASK;
+  if (!m) return {};
+  if (m !== 'subs' && m !== 'merge') throw new UsageError(`REEL_TILE_MASK=${m}: expected subs or merge`);
+  return { mask: m };
+}
+
 /** The motion-blur sampling flags: a fixed count, or adaptive. */
-export function samplesOf(v: Values): number | AdaptiveSampling {
+export function samplesOf(v: Values, env: Record<string, string | undefined> = process.env): number | AdaptiveSampling {
+  const mask = tileMaskOf(env);
   if (v.refine !== undefined && v.refine !== 'tiles' && v.refine !== 'frame') throw new UsageError(`--refine ${v.refine}: expected tiles or frame`);
-  if (v.samples === 'auto') return { min: int(v, 'min-samples', 4), max: int(v, 'max-samples', 324), tol: num(v, 'tol', 3), refine: (v.refine ?? 'tiles') as 'tiles' | 'frame' };
+  if (v.samples === 'auto') return { min: int(v, 'min-samples', 4), max: int(v, 'max-samples', 324), tol: num(v, 'tol', 3), refine: (v.refine ?? 'tiles') as 'tiles' | 'frame', ...mask };
   for (const k of ['min-samples', 'max-samples', 'refine']) if (v[k] !== undefined) throw new UsageError(`--${k} goes with --samples auto`);
   return int(v, 'samples', 1);
 }

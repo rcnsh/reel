@@ -1,7 +1,7 @@
 // A project's renderer: its dev server, a headless Chrome and pages opened on the project, one per format and
 // clip selection. A command run with --no-daemon makes one, uses it once and closes it; the warm renderer
 // (cli/daemon.ts) keeps one for a project and reuses its pages, reloading them when the project's files change.
-import { chromium, type Browser, type Page } from 'playwright-core';
+import { chromium, type Browser, type Page, type Request } from 'playwright-core';
 import { formatOf } from '../src/config';
 import { resolveTheme } from '../src/themes';
 import { existsSync, readdirSync, statSync } from 'node:fs';
@@ -54,6 +54,9 @@ export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'the
   return `${base}/?${q}`;
 }
 
+/** How many times openPage loads a page again whose modules did not arrive. */
+const RELOADS = 5;
+
 /**
  * Open the project's page and wait for it to be ready: checks that it renders the size asked for and that
  * every --only clip exists. The props (JSON text) are set as window.__REEL_PROPS__ before any of its modules runs,
@@ -62,30 +65,53 @@ export function pageUrl(base: string, f: Format, o: Pick<PageOpts, 'only' | 'the
 export async function openPage(browser: Browser, url: string, f: Format, o: Pick<PageOpts, 'only' | 'props'>, log: (line: string) => void) {
   const page = await browser.newPage({ viewport: { width: f.w, height: f.h }, deviceScaleFactor: 1 });
   if (o.props) await page.addInitScript((p) => { (window as any).__REEL_PROPS__ = p; }, o.props);
+  // (what the page says goes to `log` once a load is kept: a load thrown away for a module that did not arrive
+  // takes its errors with it)
   const logs: string[] = [];
-  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') { logs.push(`[${m.type()}] ${m.text()}`); log(logs.at(-1)!); } });
-  page.on('pageerror', (e) => { logs.push(`[pageerror] ${e.message}`); log(logs.at(-1)!); });
+  let kept = false;
+  const say = (line: string) => { if (kept) log(line); else logs.push(line); };
+  page.on('console', (m) => { if (m.type() === 'error' || m.type() === 'warning') say(`[${m.type()}] ${m.text()}`); });
+  page.on('pageerror', (e) => say(`[pageerror] ${e.message}`));
   // (modules the server refused: Renderer.explain puts Vite's reason in place of each)
   const refused: string[] = [];
-  // (504: Vite bundled a dependency again while the page was loading, and answers the old URLs with this until
-  // the page is loaded again, which its live reload would do and a render server has none)
-  let outdated = false;
+  // (a module that never arrived: a 504, which Vite answers the old URLs with after it bundled a dependency again
+  // while the page was loading, or a request that failed with no answer or with its body cut short. Either way the
+  // page is loaded again, which Vite's live reload would do and a render server has none. A 404 or a 500 is the
+  // project's own mistake and is reported instead. ERR_ABORTED is a request the page itself gave up, as a reload
+  // does to the old document's: never a reason to load again)
+  const origin = new URL(url).origin;
+  let lost: string[] = [];
+  // (Chrome also reports a script it refused to run, a 404 among them, as failed: that one is not lost, only one
+  // with no answer or whose body was cut short)
+  const refusedReq = new WeakSet<Request>();
+  // (a pre-bundled package that is not there, 404 under /node_modules/.vite/, went away as Vite bundled again)
   page.on('response', (r) => {
-    if (r.status() === 504) outdated = true;
-    else if (r.status() >= 400 && r.request().resourceType() === 'script') refused.push(`module did not load: ${r.url()}`);
+    if (r.status() < 400) return;
+    refusedReq.add(r.request());
+    const ours = r.url().startsWith(origin);
+    if (ours && (r.status() === 504 || (r.status() === 404 && new URL(r.url()).pathname.startsWith('/node_modules/.vite/')))) lost.push(`${r.url()} (${r.status()} ${r.statusText()})`);
+    else if (r.request().resourceType() === 'script') refused.push(`module did not load: ${r.url()}`);
+  });
+  page.on('requestfailed', (r) => {
+    const why = r.failure()?.errorText ?? 'failed';
+    if (r.resourceType() === 'script' && r.url().startsWith(origin) && !refusedReq.has(r) && !why.includes('ERR_ABORTED')) lost.push(`${r.url()} (${why})`);
   });
   const started = () => page.waitForFunction(() => (window as any).__reel?.ready || (window as any).__reel?.error, null, { timeout: 120000 })
     .catch(() => { throw new Error(`the page did not start:\n${[...refused, ...logs].join('\n')}`); });
   try {
-    await page.goto(url);
+    await page.goto(url, { waitUntil: 'commit' });
     await started();
-    for (let i = 0; outdated && i < 3; i++) {
-      outdated = false; logs.length = 0; refused.length = 0;
-      await page.reload();
+    for (let i = 1; lost.length && i <= RELOADS; i++) {
+      await new Promise((r) => setTimeout(r, 100 * i));
+      lost = []; logs.length = 0; refused.length = 0;
+      await page.reload({ waitUntil: 'commit' });
       await started();
     }
+    kept = true;
+    logs.forEach(log);
+    if (lost.length) log(`[warning] modules did not arrive after ${RELOADS} reloads: ${lost.join(', ')}`);
     const err = await page.evaluate(() => (window as any).__reel.error);
-    if (err) throw new Error(`the project failed to load:\n${refused.length ? refused.join('\n') : err}`);
+    if (err) throw new Error(`the project failed to load:\n${refused.length ? refused.join('\n') : lost.length ? `modules did not arrive after ${RELOADS} reloads:\n${lost.join('\n')}` : err}`);
     const size: [number, number] = await page.evaluate(() => [(window as any).__reel.width, (window as any).__reel.height]);
     if (size[0] !== f.w * f.scale || size[1] !== f.h * f.scale) throw new Error(`the page renders ${size[0]}x${size[1]}, expected ${f.w * f.scale}x${f.h * f.scale}`);
     if (o.only) {
@@ -93,6 +119,7 @@ export async function openPage(browser: Browser, url: string, f: Format, o: Pick
       for (const id of o.only.split(',')) if (!ids.includes(id)) throw new Error(`--only ${id}: no such clip (the project has ${ids.join(', ')})`);
     }
   } catch (e) {
+    if (!kept) logs.forEach(log);
     await page.close().catch(() => {});
     throw e;
   }
