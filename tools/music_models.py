@@ -20,6 +20,7 @@
 """The models behind `reel analyze` (tools/analyze.py runs this unless --fast):
 
     uv run tools/music_models.py <song> <out folder>
+    uv run tools/music_models.py --cached     (exits 0 when both models are on disk, so a run fetches nothing)
 
 Writes <out>/beats.json ({"beats", "downbeats"} in seconds, from Beat This!, Foscarin, Schlüter and Widmer,
 ISMIR 2024, checkpoint final0, without DBN post-processing) and <out>/{drums,bass,other,vocals}.wav, stems
@@ -50,13 +51,20 @@ CKPT_URLS = [
 ]
 
 
+def have_checkpoint() -> Path | None:
+    import torch
+
+    f = Path(torch.hub.get_dir()) / "checkpoints" / CKPT
+    return f if f.exists() and hashlib.md5(f.read_bytes()).hexdigest() == CKPT_MD5 else None
+
+
 def checkpoint() -> Path:
     import torch
 
+    if f := have_checkpoint():
+        return f
     d = Path(torch.hub.get_dir()) / "checkpoints"
     f = d / CKPT
-    if f.exists() and hashlib.md5(f.read_bytes()).hexdigest() == CKPT_MD5:
-        return f
     d.mkdir(parents=True, exist_ok=True)
     errors = []
     for url in CKPT_URLS:
@@ -74,9 +82,26 @@ def checkpoint() -> Path:
     sys.exit("music_models: could not fetch the Beat This! checkpoint:\n  " + "\n  ".join(errors) + "\n(reel analyze --fast works without it)")
 
 
+def mlx():
+    return sys.platform == "darwin" and platform.machine() == "arm64"
+
+
+def cached():
+    import torch
+
+    hub = Path(torch.hub.get_dir()) / "checkpoints"
+    if not have_checkpoint():
+        return False
+    if mlx():
+        from demucs_mlx.model_converter import get_mlx_cache_dir
+
+        return all((get_mlx_cache_dir() / f).exists() for f in ("htdemucs.safetensors", "htdemucs_config.json"))
+    return any(hub.glob("955717e8-*.th"))  # (htdemucs's one checkpoint, as demucs names it in torch hub's cache)
+
+
 def separate(song):
     """{stem: (channels, samples)} and the sample rate, from htdemucs."""
-    if sys.platform == "darwin" and platform.machine() == "arm64":
+    if mlx():
         from demucs_mlx import Separator
 
         sep = Separator(model="htdemucs", seed=0)
@@ -107,6 +132,10 @@ def separate(song):
 
 
 def main():
+    if sys.argv[1:] == ["--cached"]:
+        sys.exit(0 if cached() else 1)
+    if len(sys.argv) != 3:
+        sys.exit(__doc__)
     song, out = sys.argv[1], Path(sys.argv[2])
     out.mkdir(parents=True, exist_ok=True)
 

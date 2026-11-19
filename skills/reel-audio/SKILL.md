@@ -59,7 +59,8 @@ Sung lyrics: `reel align <vocal-stem-or-song> --method whisper`.
 Writes `data/audio.json` and copies the song to `audio/` as the track:
 
 - `beats`, `downbeats`, `bpm`, `time_signature` from Beat This! (a constant grid where the song keeps one tempo,
-  phase set on the kicks; the tracked beats where the tempo moves).
+  phase set on the kicks; where the tempo moves, beats that follow it, set on the drums; `--free-tempo` keeps the
+  tracker's beats as they are).
 - 100 fps envelopes (0..1): `rms low mid high` of the mix, `drums bass other vocal` of Demucs stems.
 - Onsets `[time, strength]`: `kick snare hat` from the drum stem, `vocal` from the vocal stem.
 - Sections: `--sections sections.json` (`[{ "name": "intro", "bar": 0 }, { "name": "drop", "start": 31.2 }]`, named
