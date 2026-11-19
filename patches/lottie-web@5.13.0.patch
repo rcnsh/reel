@@ -1,0 +1,39 @@
+diff --git a/build/player/esm/lottie_light_canvas.min.js b/build/player/esm/lottie_light_canvas.min.js
+index ebe31cd0148eaec01afa3530840e1ce5db5445f6..1b02b889ca3cc8bcef7c74f0573426b71ed06c83 100644
+--- a/build/player/esm/lottie_light_canvas.min.js
++++ b/build/player/esm/lottie_light_canvas.min.js
+@@ -2998,8 +2998,10 @@ function interpolateValue(frameNum, caching) {
+       var distanceInLine = bezierData.segmentLength * perc;
+ 
+       var segmentPerc;
+-      var addedLength = (caching.lastFrame < frameNum && caching._lastKeyframeIndex === i) ? caching._lastAddedLength : 0;
+-      j = (caching.lastFrame < frameNum && caching._lastKeyframeIndex === i) ? caching._lastPoint : 0;
++      // (reel: walked from the path's start every time, so the sum, and the point, never depend on the frame before;
++      // the cache written below is no longer read)
++      var addedLength = 0;
++      j = 0;
+       flag = true;
+       jLen = bezierData.points.length;
+       while (flag) {
+@@ -3197,7 +3199,8 @@ function setVValue(val) {
+   var multipliedValue;
+   if (this.propType === 'unidimensional') {
+     multipliedValue = val * this.mult;
+-    if (mathAbs(this.v - multipliedValue) > 0.00001) {
++    // (reel: kept exactly, not only when it moves by more than 1e-5, so a value never depends on the frames shown before it)
++    if (this.v !== multipliedValue) {
+       this.v = multipliedValue;
+       this._mdf = true;
+     }
+@@ -3206,8 +3209,9 @@ function setVValue(val) {
+     var len = this.v.length;
+     while (i < len) {
+       multipliedValue = val[i] * this.mult;
+-      if (mathAbs(this.v[i] - multipliedValue) > 0.00001) {
+-        this.v[i] = multipliedValue;
++      var previous = this.v[i];
++      this.v[i] = multipliedValue;
++      if (this.v[i] !== previous) {
+         this._mdf = true;
+       }
+       i += 1;

@@ -96,14 +96,15 @@ const head = (o: InitOptions) => `  size: [${o.size[0]}, ${o.size[1]}],
   theme: '${o.theme}',`;
 
 function silentConfig(o: InitOptions, title: string) {
-  return `// The edit: the format, the theme and every clip on the timeline (the video ends with its last clip).
-import { defineVideo } from 'reel/config';
+  return `// The edit: the format, the theme and every clip on the timeline (the video ends with its last clip). The clips
+// play back to back, each for its \`dur\`; one with a \`transition\` comes in over the end of the one before.
+import { defineVideo, sequence } from 'reel/config';
 
 export default defineVideo({
 ${head(o)}
-  timeline: () => [
-    { id: 'intro', scene: () => import('./scenes/intro'), start: 0, end: 4, params: { text: ${JSON.stringify(title)} } },
-  ],
+  timeline: () => sequence([
+    { id: 'intro', scene: () => import('./scenes/intro'), dur: 4, params: { text: ${JSON.stringify(title)} } },
+  ]),
 });
 `;
 }
@@ -111,6 +112,7 @@ ${head(o)}
 function narratedConfig(o: InitOptions) {
   return `// The edit: the format, the theme, and one clip per plate of narration.txt (a \`# name\` header) that has a
 // scene of the same name in scenes/. Re-time the script with \`reel narrate\` or \`reel align <recording>\`.
+// Plates cut from one to the next; \`clipsFromSections(src, glob, { transition: 'crossfade' })\` blends them instead.
 import { clipsFromSections, defineVideo } from 'reel/config';
 
 export default defineVideo({
