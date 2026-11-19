@@ -7,19 +7,42 @@ The export renders each frame as the average of sub-frames spread over the shutt
 What that asks of a scene:
 
 - Sub-frames are rendered out of time order and in any number: the output depends on `f.t` only. Nothing may count `render()` calls or carry state between them.
-- Per-frame flicker and jitter use `frameIdx(t)`, which is constant over the frame's shutter. `Math.floor(t * FPS)` switches at the frame's own time and double-exposes two states in every frame.
+- Per-frame flicker and jitter use `frameIdx(t)`, which is constant over the frame's shutter. On a clip that remaps time `f.t` runs at another rate and off the frame grid, so jitter that must hold for the output frame uses `frameIdx(f.vt)`. `Math.floor(t * FPS)` switches at the frame's own time and double-exposes two states in every frame.
 - Noise seeded by continuous `t` is resampled in every sub-frame: it averages out, slowly, and makes the sampler work harder (and the export slower). Seed it with `frameIdx(t)` unless it is meant to smooth out.
 - A particle emitter whose rate changes over time takes the rate as a function of each particle's birth time; a rate read at the current `t` re-times every particle between sub-frames.
 - Post parameters a scene returns (shake, flash, zoom, fades) are read at one point of the shutter, 1/8 of it after the frame's time; grain and dither are drawn once per frame.
-- A clip with slowly converging noise can cap its sub-frames: `maxSamples` on the clip.
+- A clip with slowly converging noise can cap its sub-frames: `maxSamples` on the clip. A scene can ask for a default cap itself with `this.ctx.capSamples(n)` from its constructor or `init()` (later calls are ignored; a `Stage3D` made there asks for 108); the clip's `maxSamples` wins.
 
 ## Stateful scenes
 
-Simulation (particles integrated over time, feedback buffers) sets `stateful = true`, resets in `reset()` and integrates with `f.dt`. After a seek the engine resets it and fast-forwards from up to `prerollMax` seconds (default 6) before `t` (`f.preroll` is true then: skip work that only matters on screen). Such a video exports with a fixed `--samples N`, never `auto`, and on one worker.
+Simulation (particles integrated over time, feedback buffers) sets `stateful = true`, resets in `reset()` and integrates with `f.dt`. After a seek the engine resets it and fast-forwards from up to `prerollMax` seconds (default 6) before `t` (`f.preroll` is true then: skip work that only matters on screen). Such a video exports with a fixed `--samples N`, never `auto`, and on one worker. Its clip may set `speed` (`f.dt` is then in scene seconds, and `prerollMax` counts scene seconds), not `offset`, `reverse`, `hold` or `freeze`: the scene fails to load with them.
 
 ## Transitions
 
-Clips overlapping on one track make a transition over the overlap, named by the incoming clip's `transition` in the config: `crossfade` (the default), `wipe` (an edge travels across, `softness` its blur as a share of the frame), `slide` (the incoming clip pushes the outgoing one off), `zoom` (the outgoing clip grows as it fades into the incoming one), `dip` (through `color`, a palette key or `#rrggbb`, default `bg` on track 0 and transparent on the tracks above, so a title dipping out does not cover what is below it); `direction` (`left`, the default, `right`, `up`, `down`) is the way a wipe's edge or a slide moves. Each is a pure function of the overlap's progress, so it gets motion blur. A scene with `handlesTransition = true` draws the transition itself: `f.under` is the outgoing clip's texture this frame and `f.tin` runs 0 to 1 over the overlap (`f.tout` likewise into the next clip). Most cuts should be hard cuts on a beat or a word: clips whose windows touch.
+Clips overlapping on one track make a transition over the overlap, named by the incoming clip's `transition` in the config. It lasts exactly as long as the overlap. The kinds, with the options each takes (any other key is an error):
+
+| kind | what it does | options |
+|---|---|---|
+| `crossfade` (default) | mixes the two | |
+| `wipe` | an edge travels across | `direction`, `softness` (share of the frame, default 0.08) |
+| `slide` | the incoming clip pushes the outgoing one off | `direction` |
+| `whip` | a slide with `inOutExpo` timing: almost all the motion in the middle few frames, which the export's motion blur turns into a streak (a preview or a 1-sample still shows a crisp push; keep the overlap short, 0.2 to 0.4 s, and do not cap the clip's `maxSamples`) | `direction` |
+| `zoom` | the outgoing clip grows as it fades into the incoming one | |
+| `dip` | through a colour and out | `color`: palette key or `#rrggbb` (default `bg` on track 0, transparent on the tracks above, so a title dipping out does not cover what is below it) |
+| `iris` | a circle opens from `center` onto the incoming clip | `center: [x, y]` (shares of the frame from its top left, default the middle), `softness` (share of the full radius, default 0.02), `close: true` (the outgoing clip shrinks into the circle instead) |
+| `clock` | a hand sweeps round `center` from 12 o'clock | `center`, `softness` (share of a turn, default 0.01), `clockwise: false` |
+| `flash` | cuts at the middle through the theme's light colour, overexposed so it burns to white and blooms | |
+
+`direction` (`left`, the default, `right`, `up`, `down`) is the way the edge or the clips move. Every kind takes `ease`, a name from the `ease` set (`'outQuad'`, `'inOutQuart'`, `'outBack'`, …) the overlap's progress runs through; the default is `linear` for crossfade, dip and flash, `inOutExpo` for whip, `inOutCubic` for the rest. Each is a pure function of the overlap's progress, so it gets motion blur.
+
+A transition of your own is `{ glsl, uniforms?, ease? }` (no `kind`). `glsl` is either a whole `vec4 transition(vec2 uv) { … }` (the [gl-transitions](https://gl-transitions.com) shape: theirs paste in, with their uniforms' values given in `uniforms`), or that function's body (with `return`), or one expression. In scope: `getFromColor(uv)` (the outgoing clip; transparent outside the frame), `getToColor(uv)` (the incoming one), `progress` (eased, 0 to 1; `p` in a body or expression), `ratio` (width over height), the palette's `C_<KEY>`, and each of `uniforms` (a number is a `float`, an array of 2 to 4 a `vec2`–`vec4`; declared for you unless the source declares it, when it may also be an `int`, `ivec`, `bool` or `bvec` of the same size). The engine's other GLSL helpers (`PI`, `luma`, `hash12`, …) are not in scope, so a pasted shader's own do not clash: define what you use. A uniform the source declares and `uniforms` leaves out is 0. Colours are linear and premultiplied. Each distinct source compiles once, when the video loads; one that does not compile is a load error naming the clip, `[<id>: its transition's glsl] shader failed to compile: …`, with the offending line.
+
+```ts
+{ id: 'next', scene: …, start: 9.4, end: 14, transition: { kind: 'iris', center: [0.7, 0.4], ease: 'outQuart' } },
+{ id: 'last', scene: …, start: 13.4, end: 18, transition: { glsl: 'mix(getFromColor(uv), getToColor(uv), step(fract(uv.x * n), p))', uniforms: { n: 8 } } },
+```
+
+A scene with `handlesTransition = true` draws the transition itself: `f.under` is the outgoing clip's texture this frame and `f.tin` runs 0 to 1 over the overlap (`f.tout` likewise into the next clip). Most cuts should be hard cuts on a beat or a word: clips whose windows touch.
 
 ## Jitter across sub-frames
 
@@ -31,7 +54,7 @@ A shader that supersamples with the 4 rotated-grid taps takes `ssTap: SS_TAP` in
 
 ## Tile masking (scene targets)
 
-With `--samples auto`, tiles that have converged are masked out of later sub-frames (rejected before shading). That covers `out` and the engine's targets. A scene's own render target is drawn in full unless the scene lists it in `tileMasked: [{ rt, margin: 0 | 1, moving? }]`: only for a target with a depth buffer whose texels are read back at their own screen position or within a few px (`margin: 1` widens the mask by a tile), or, with `moving: true`, through a zoom or pan the scene gives before each sub-frame's draws with `this.ctx.mapTileMask(rt, map)` (null while it is read through a warp). A target read through a warp or a wide blur must not be listed. A draw that depth-tests its own 3D into a masked target makes the engine draw that clip unmasked; draw 3D into a target of your own instead, call `this.ctx.maskDepth(rt)` in place of clearing its depth (converged tiles go to the near plane, so your depth test skips them), then composite it into `out`. The `Stage3D` of the `reel-3d` skill does all of this.
+With `--samples auto`, tiles that have converged stop taking sub-frames, and where it saves time (software rendering, such as Linux without a GPU) they are masked out of the later sub-frames themselves (rejected before shading). That covers `out` and the engine's targets. A scene's own render target is drawn in full unless the scene lists it in `tileMasked: [{ rt, margin: 0 | 1, moving? }]`: only for a target with a depth buffer whose texels are read back at their own screen position or within a few px (`margin: 1` widens the mask by a tile), or, with `moving: true`, through a zoom or pan the scene gives before each sub-frame's draws with `this.ctx.mapTileMask(rt, map)` (null while it is read through a warp). A target read through a warp or a wide blur must not be listed. A draw that depth-tests its own 3D into a masked target makes the engine draw that clip unmasked; draw 3D into a target of your own instead, call `this.ctx.maskDepth(rt)` in place of clearing its depth (converged tiles go to the near plane, so your depth test skips them), then composite it into `out`. The `Stage3D` of the `reel-3d` skill does all of this.
 
 ## Output scale (4K)
 

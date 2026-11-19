@@ -1,6 +1,6 @@
 // macOS `say`: an instant scratch voice with no download. Its word times come from the forced aligner.
-import { $ } from 'bun';
 import path from 'node:path';
+import { run } from '../../cli/children';
 import type { VoiceSource } from './voice';
 
 export const say: VoiceSource = {
@@ -11,15 +11,13 @@ export const say: VoiceSource = {
     const name = arg || 'Daniel';
     return {
       id: `say:${name}`,
-      async synth(reqs, work) {
-        const out = [];
+      async synth(reqs, work, each) {
         for (const [i, r] of reqs.entries()) {
           const file = path.join(work, `say${i}.aiff`);
-          const res = await $`say -v ${name} -r ${Math.round(175 * r.speed)} -o ${file} ${r.text}`.quiet().nothrow();
-          if (res.exitCode !== 0) throw new Error(`say -v ${name}: ${res.stderr.toString().trim() || 'failed'} (\`say -v '?'\` lists the voices)`);
-          out.push({ file });
+          const res = await run(['say', '-v', name, '-r', String(Math.round(175 * r.speed)), '-o', file, r.text], { quiet: true, nothrow: true });
+          if (res.exitCode !== 0) throw new Error(`say -v ${name}: ${res.stderr.trim() || 'failed'} (\`say -v '?'\` lists the voices)`);
+          await each(i, { file });
         }
-        return out;
       },
     };
   },

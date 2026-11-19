@@ -38,5 +38,8 @@
     ".": "./src/index.ts",
     "./config": "./src/config.ts",
     "./scenes/*": "./src/scenes/*.ts"
+  },
+  "patchedDependencies": {
+    "lottie-web@5.13.0": "patches/lottie-web@5.13.0.patch"
   }
 }
