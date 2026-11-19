@@ -35,6 +35,7 @@ names it as the `track` the preview plays and the export muxes. With --keep-sect
 sections stay as they were and --offset places the song's start on the video's timeline (where the mix lays it).
 """
 import argparse
+import fcntl
 import json
 import math
 import os
@@ -258,6 +259,22 @@ def load_on_timeline(path, lead, n_samples):
     return np.pad(x, (0, max(0, n_samples - len(x))))
 
 
+def take_turns():
+    """Holds a lock (in the user's own runtime or cache folder) until the process exits. librosa's numba functions
+    cache their compiled code beside the package (in the user's uv cache), and two processes compiling at once leave
+    a cache on which every later run segfaults, so a user's analyses take turns at the librosa work (a warm run
+    holds it a second or two)."""
+    d = Path(os.environ.get("XDG_RUNTIME_DIR") or Path.home() / ".cache" / "reel")
+    d.mkdir(parents=True, exist_ok=True)
+    f = open(d / "reel-analyze.lock", "a")
+    try:
+        fcntl.flock(f, fcntl.LOCK_EX | fcntl.LOCK_NB)
+    except BlockingIOError:
+        print("analyze: waiting for another analysis to finish", file=sys.stderr)
+        fcntl.flock(f, fcntl.LOCK_EX)
+    return f
+
+
 def run_models(song, work):
     """Beat This! beats and Demucs stems (tools/music_models.py in its own environment)."""
     script = Path(__file__).with_name("music_models.py")
@@ -331,6 +348,7 @@ def main():
     dk, ds, dh = (float(x) for x in a.onset_delta.split(","))
     meter = 4
     if a.fast:
+        turn = take_turns()
         harm, perc = hpss(y)
         bpm, beats = beat_grid(y, duration, a.free_tempo)
         # (a free-tempo grid from a shifted song starts at its first beat; a fitted one extends back to 0)
@@ -348,6 +366,7 @@ def main():
             tracked = run_models(song, work)
             n_samples = len(y)
             stems = {k: load_on_timeline(Path(work) / f"{f}.wav", lead, n_samples) for k, f in [("drums", "drums"), ("bass", "bass"), ("other", "other"), ("vocal", "vocals")]}
+        turn = take_turns()  # (after the models, which run for tens of seconds and need no turn)
         shift = lambda ts: [t + off for t in ts if 0 <= t + off < duration]
         beats, downbeats, meter, gridded = regularize(shift(tracked["beats"]), shift(tracked["downbeats"]), a.free_tempo, duration)
         bpm = 60.0 / float(np.median(np.diff(beats)))
