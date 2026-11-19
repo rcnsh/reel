@@ -2,9 +2,9 @@
 //   bun tools/make_sounds.ts
 // tick, click, pop, whoosh, swell, impact: 48 kHz mono WAV, peaks at -3 dBFS. mix.json names them like a project's
 // own files ("file": "whoosh"), and a cue kind with one of these names needs no entry at all.
-import { $ } from 'bun';
-import { mkdirSync } from 'node:fs';
+import { mkdirSync, rmSync } from 'node:fs';
 import path from 'node:path';
+import { run } from '../cli/children';
 
 const OUT = path.join(import.meta.dir, '..', 'sounds');
 
@@ -23,12 +23,12 @@ if (import.meta.main) {
   for (const [name, s] of Object.entries(SOUNDS)) {
     const raw = path.join(OUT, `.${name}.wav`), out = path.join(OUT, `${name}.wav`);
     const graph = s.filter.includes('[') ? `${s.filter}[x]` : `[0:a]${s.filter}[x]`;
-    await $`ffmpeg -nostdin -loglevel error -y ${s.input} -filter_complex ${graph} -map [x] -ac 1 -ar 48000 -c:a pcm_f32le ${raw}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', ...s.input, '-filter_complex', graph, '-map', '[x]', '-ac', '1', '-ar', '48000', '-c:a', 'pcm_f32le', raw]);
     // peak-normalise to -3 dBFS
-    const st = (await $`ffmpeg -nostdin -hide_banner -i ${raw} -af astats=measure_overall=Peak_level:measure_perchannel=none -f null -`.quiet().nothrow()).stderr.toString();
+    const st = (await run(['ffmpeg', '-nostdin', '-hide_banner', '-i', raw, '-af', 'astats=measure_overall=Peak_level:measure_perchannel=none', '-f', 'null', '-'], { quiet: true, nothrow: true })).stderr;
     const peak = Number(/Peak level dB:\s*(-?[\d.]+)/.exec(st)?.[1] ?? 0);
-    await $`ffmpeg -nostdin -loglevel error -y -i ${raw} -af volume=${(-3 - peak).toFixed(2)}dB -c:a pcm_s16le -fflags +bitexact -flags:a +bitexact -map_metadata -1 ${out}`;
-    await $`rm -f ${raw}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', raw, '-af', `volume=${(-3 - peak).toFixed(2)}dB`, '-c:a', 'pcm_s16le', '-fflags', '+bitexact', '-flags:a', '+bitexact', '-map_metadata', '-1', out]);
+    rmSync(raw, { force: true });
     console.log(`${out}: ${s.about}`);
   }
 }

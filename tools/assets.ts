@@ -2,11 +2,11 @@
 // it makes the missing ones (and those whose prompt changed), fitted to their size and format and recorded in
 // data/generated-assets.json; without one it lists what each needs, so a person can make the file elsewhere and
 // drop it in. A file reel assets did not make is never replaced.
-import { $ } from 'bun';
-import { existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
+import { run } from '../cli/children';
 import { assetKey, describe, loadAssets, RECORD, statusOf, type AssetEntry, type Status } from './asset-manifest';
 import { providerFor, type ProviderEnv } from './providers';
 
@@ -18,7 +18,8 @@ assets.json: { "assets": [ { "id": "ridge", "kind": "image", "prompt": "…", "s
 
 Generates the missing ones, and those whose prompt, size or duration changed, when the provider's key is set:
 images with OpenAI (OPENAI_API_KEY; REEL_IMAGE_MODEL, default gpt-image-1), sound effects and music with
-ElevenLabs (ELEVENLABS_API_KEY). Only the prompt and size or duration are sent. Without a key it prints what each
+ElevenLabs (ELEVENLABS_API_KEY). Only the prompt and size or duration are sent; a request is retried on HTTP 429,
+5xx and network errors. Without a key it prints what each
 missing asset needs and where it goes, and exits 1. Files it did not make are never replaced; --force makes the
 generated ones again. --list only lists. Renders show a labelled placeholder for a missing image, and reel check
 reports every missing asset.`;
@@ -57,9 +58,9 @@ async function fit(raw: string, a: AssetEntry, out: string) {
   mkdirSync(path.dirname(out), { recursive: true });
   if (a.kind === 'image') {
     const [w, h] = a.size!;
-    await $`ffmpeg -nostdin -loglevel error -y -i ${raw} -vf ${`scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h}`} -frames:v 1 ${out}`;
-  } else if (path.extname(out).toLowerCase() === path.extname(raw).toLowerCase()) await $`cp ${raw} ${out}`;
-  else await $`ffmpeg -nostdin -loglevel error -y -i ${raw} ${out}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', raw, '-vf', `scale=${w}:${h}:force_original_aspect_ratio=increase:flags=lanczos,crop=${w}:${h}`, '-frames:v', '1', out]);
+  } else if (path.extname(out).toLowerCase() === path.extname(raw).toLowerCase()) copyFileSync(raw, out);
+  else await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', raw, out]);
 }
 
 if (import.meta.main) {

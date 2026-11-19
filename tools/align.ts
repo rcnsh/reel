@@ -2,7 +2,6 @@
 // force-aligned to the audio (Qwen3-ForcedAligner) rather than transcribed; `--method whisper` transcribes
 // with Whisper and matches the words heard to the script instead, for a reading that departs from it. Writes the
 // same files as `reel narrate`: audio/narration.flac, data/words.json, data/audio.json.
-import { $ } from 'bun';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -12,6 +11,7 @@ import { decode, levels, normalize, SR, trimSilence, writeAudio } from './audio-
 import { report, writeNarration, type PlateAudio } from './narration-files';
 import { parseScript, plateWords, type Plate, type TimedWord } from './script';
 import { DEFAULTS, resolveSettings } from './settings';
+import { run } from '../cli/children';
 import { loadConfig } from '../cli/server';
 
 export const ALIGN_HELP = `reel align <recording | folder> [flags]: time narration.txt to a voice recording
@@ -68,18 +68,22 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
   // a recording, high-passed, at -16 LUFS, without the silence at its ends
   const load = async (f: string, k: string) => {
     const o = path.join(work, `${k}.f32.wav`);
-    await $`ffmpeg -nostdin -loglevel error -y -i ${f} -af ${CLEAN} -ac 1 -ar ${SR} -c:a pcm_f32le ${o}`;
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', f, '-af', CLEAN, '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', o]);
     return trimSilence(await normalize(await decode(o), LOUDNESS, path.join(work, k)), SR, -45, 0.05).pcm;
   };
 
   let parts: PlateAudio[];
   const warnings: string[] = [];
-  const verify = async (pcm: Float32Array, words: TimedWord[], k: number, ps: Plate[]) => {
+  // (every recording is transcribed by one Whisper process, so its model loads once)
+  const verify = async (checks: { pcm: Float32Array; words: TimedWord[]; ps: Plate[] }[]) => {
     if (method !== 'qwen' || flags['no-verify']) return;
-    const lines = ps.flatMap((p) => p.lines.map((_, li) => `${p.name}:${li}`));
-    const sw = ps.flatMap((p) => plateWords(p).map((w) => lines.indexOf(`${p.name}:${w.line}`)));
-    const bad = unheardLines(words.map((w, i) => ({ ...w, line: sw[i]! })), (await transcribe(pcm, work, `v${k}`, '')).map((h) => ({ w: h.w, s: h.start, e: h.end })));
-    for (const b of bad) warnings.push(`'${b.text}' (${b.start.toFixed(2)} to ${b.end.toFixed(2)} s${ps.length > 1 ? ' of the take' : ` of ${ps[0]!.name}`}): only ${Math.round(b.share * 100)}% of its words are heard there. The recording may skip, repeat or reword it; fix the recording or narration.txt and align again (--method whisper follows a reading that departs from the script)`);
+    const heard = await transcribe(checks.map((c) => ({ pcm: c.pcm, script: '' })), work, 'v');
+    for (const [k, { words, ps }] of checks.entries()) {
+      const lines = ps.flatMap((p) => p.lines.map((_, li) => `${p.name}:${li}`));
+      const sw = ps.flatMap((p) => plateWords(p).map((w) => lines.indexOf(`${p.name}:${w.line}`)));
+      const bad = unheardLines(words.map((w, i) => ({ ...w, line: sw[i]! })), heard[k]!.map((h) => ({ w: h.w, s: h.start, e: h.end })));
+      for (const b of bad) warnings.push(`'${b.text}' (${b.start.toFixed(2)} to ${b.end.toFixed(2)} s${ps.length > 1 ? ' of the take' : ` of ${ps[0]!.name}`}): only ${Math.round(b.share * 100)}% of its words are heard there. The recording may skip, repeat or reword it; fix the recording or narration.txt and align again (--method whisper follows a reading that departs from the script)`);
+    }
   };
   if (statSync(src).isDirectory()) {
     const files = readdirSync(src);
@@ -90,12 +94,12 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
     }));
     const timed = await timeWords(pcms.map((pcm, k) => ({ pcm, words: plateWords(plates[k]!) })), method, work, s.language);
     parts = pcms.map((pcm, k) => ({ pcm, words: timed[k]! }));
-    for (const [k, p] of parts.entries()) await verify(p.pcm, p.words, k, [plates[k]!]);
+    await verify(parts.map((p, k) => ({ ...p, ps: [plates[k]!] })));
   } else {
     const pcm = await load(src, 'take');
     const all = plates.flatMap((p) => plateWords(p));
     const [words] = await timeWords([{ pcm, words: all }], method, work, s.language);
-    await verify(pcm, words!, 0, plates);
+    await verify([{ pcm, words: words!, ps: plates }]);
     parts = splitPlates(plates, pcm, words!);
   }
   rmSync(work, { recursive: true, force: true });
@@ -107,17 +111,26 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
 /** Times of each passage's script words: force-aligned, or transcribed with Whisper and matched. */
 async function timeWords(passages: { pcm: Float32Array; words: { w: string }[] }[], method: 'qwen' | 'whisper', work: string, language: string): Promise<TimedWord[][]> {
   if (method === 'qwen') return forcedAlign(passages, path.join(work, 'fa'), language);
-  return Promise.all(passages.map(async (p, i) => refine(p.words, await transcribe(p.pcm, work, `wh${i}`, p.words.map((x) => x.w).join(' ')), p.pcm)));
+  const heard = await transcribe(passages.map((p) => ({ pcm: p.pcm, script: p.words.map((x) => x.w).join(' ') })), work, 'wh');
+  return passages.map((p, i) => refine(p.words, heard[i]!, p.pcm));
 }
 
-/** What faster-whisper (small.en) hears in the samples, figures joined; `script` primes its vocabulary. */
-async function transcribe(pcm: Float32Array, work: string, name: string, script: string): Promise<TimedWord[]> {
-  const w48 = path.join(work, `${name}.f32.wav`), w16 = path.join(work, `${name}.wav`), out = path.join(work, `${name}.json`);
-  await writeAudio(pcm, w48);
-  await $`ffmpeg -nostdin -loglevel error -y -i ${w48} -ar 16000 -ac 1 -c:a pcm_s16le ${w16}`;
-  const r = await $`uv run -q --with faster-whisper==1.2.1 --with numpy python ${path.join(import.meta.dir, 'whisper_words.py')} ${w16} ${out} ${script}`.nothrow();
-  if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.toString().slice(-1500)}`);
-  return joinFigures(JSON.parse(readFileSync(out, 'utf8')));
+/**
+ * What faster-whisper (small.en) hears in each recording, figures joined; a recording's `script` primes its
+ * vocabulary. One process for all of them, so the model loads once.
+ */
+async function transcribe(items: { pcm: Float32Array; script: string }[], work: string, name: string): Promise<TimedWord[][]> {
+  const jobs = await Promise.all(items.map(async (it, i) => {
+    const w48 = path.join(work, `${name}${i}.f32.wav`), w16 = path.join(work, `${name}${i}.wav`);
+    await writeAudio(it.pcm, w48);
+    await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', w48, '-ar', '16000', '-ac', '1', '-c:a', 'pcm_s16le', w16]);
+    return { audio: w16, out: path.join(work, `${name}${i}.json`), script: it.script };
+  }));
+  const jf = path.join(work, `${name}-jobs.json`);
+  await Bun.write(jf, JSON.stringify(jobs));
+  const r = await run(['uv', 'run', '-q', '--with', 'faster-whisper==1.2.1', '--with', 'numpy', 'python', path.join(import.meta.dir, 'whisper_words.py'), jf], { stdout: 'inherit', nothrow: true });
+  if (r.exitCode !== 0) throw new Error(`whisper failed:\n${r.stderr.slice(-1500)}`);
+  return jobs.map((j) => joinFigures(JSON.parse(readFileSync(j.out, 'utf8'))));
 }
 
 /** Whisper splits figures ("152" ",000", "2" ".06"): join them back into one word. */
@@ -135,7 +148,7 @@ export function joinFigures(heard: { w: string; s: number; e: number }[]): Timed
  * One take cut into plates: each cut at the quietest 20 ms in the gap between one plate's last word and the
  * next one's first, so it never falls in a breath or a word; each part's words re-timed from its start.
  */
-function splitPlates(plates: Plate[], pcm: Float32Array, words: TimedWord[]): PlateAudio[] {
+export function splitPlates(plates: Plate[], pcm: Float32Array, words: TimedWord[]): PlateAudio[] {
   const db = levels(pcm, SR, 0.005);
   const counts = plates.map((p) => plateWords(p).length);
   const cuts = [0];

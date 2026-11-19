@@ -19,3 +19,4 @@ export { GLSL_COMMON } from './engine/glsl/common';
 export { themes, extendTheme } from './themes';
 export type { Theme, ThemeName, HudParams } from './themes';
 export type { Clip, Sources, VideoConfig } from './config';
+export { BlendPass, type Grade, type Matte, type MatteMode, type TrackBlend, type TrackSettings } from './engine/tracks';

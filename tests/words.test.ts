@@ -21,6 +21,20 @@ test('get finds by text with straight or curly quotes, and throws when missing',
   expect(W.get('don’t').i).toBe(0);
   expect(W.get('PEN WR').i).toBe(1);
   expect(() => W.get('nowhere')).toThrow("no line of the words contains 'nowhere'");
+});
+
+test('get matches an ellipsis and dashes however they are typed', () => {
+  const T = new Words({ lines: [
+    { text: 'Wait... what', start: 0, end: 1, words: [{ w: 'Wait...', start: 0, end: 0.5 }, { w: 'what', start: 0.5, end: 1 }] },
+    { text: 'A pause — then 1–2', start: 1, end: 2, words: [] },
+  ] });
+  expect(T.lines[0]!.text).toBe('Wait… what');
+  expect(T.get('Wait...').i).toBe(0);
+  expect(T.get('wait… WHAT').i).toBe(0);
+  expect(T.get('pause - then 1-2').i).toBe(1);
+  expect(T.get('pause — then 1–2').i).toBe(1);
+  expect(T.get('pause—then 1 - 2').i).toBe(1);
+  expect(T.get('pause -- then').i).toBe(1);
   expect(W.find('t').length).toBe(2);
 });
 

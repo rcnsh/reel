@@ -6,14 +6,20 @@
 //
 // It listens on 127.0.0.1 with a random port and token, written with its pid and the engine's version to a
 // state file in the temp folder. A client whose engine version differs (the engine's code, the protocol or
-// the Chrome it would launch changed) stops it and starts a fresh one. Requests run one at a time, in arrival order.
+// the Chrome it would launch changed) stops it and starts a fresh one.
+//
+// Requests run in two lanes, each one at a time in arrival order: checks in one, everything else (stills, sheets,
+// strips, info, events) in the other, so a still does not wait behind a minutes-long check. perf, which times the
+// GPU, takes both lanes and runs alone.
+// The lanes share the dev server and Chrome; each request leases a page of its own (cli/renderer.ts), so the two
+// never draw into one page, and at most two pages render at once.
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { ENGINE } from './server';
 import { findChrome, glBackend } from './chrome';
-import type { Req, Result } from './ops';
+import type { Op, Req, Result } from './ops';
 
 /** Bumped when the request or state format changes. */
 const PROTOCOL = 1;
@@ -35,7 +41,10 @@ export function engineVersion(): string {
   };
   walk(path.join(ENGINE, 'src'));
   walk(path.join(ENGINE, 'cli'));
-  for (const f of ['index.html', 'package.json', 'bun.lock']) if (existsSync(path.join(ENGINE, f))) { const s = statSync(path.join(ENGINE, f)); parts.push(`${f}:${s.mtimeMs}:${s.size}`); }
+  // (patches/: the patched dependencies, whose edits bun.lock does not record)
+  const patches = path.join(ENGINE, 'patches');
+  const patchFiles = existsSync(patches) ? readdirSync(patches).sort().map((f) => `patches/${f}`) : [];
+  for (const f of ['index.html', 'package.json', 'bun.lock', ...patchFiles]) if (existsSync(path.join(ENGINE, f))) { const s = statSync(path.join(ENGINE, f)); parts.push(`${f}:${s.mtimeMs}:${s.size}`); }
   return Bun.hash(parts.join('\n')).toString(36);
 }
 
@@ -51,6 +60,9 @@ function readState(file: string): State | null {
   try { return JSON.parse(readFileSync(file, 'utf8')) as State; } catch { return null; }
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+
+/** The lane a request runs in: sweeps of many frames, everything quick, or (perf, which times the GPU) both at once. */
+export const laneOf = (op: Op): 'long' | 'quick' | 'both' => (op === 'check' ? 'long' : op === 'perf' ? 'both' : 'quick');
 
 /** HTTP to a daemon. Throws when it does not answer. */
 async function ask(s: State, route: string, body?: unknown): Promise<any> {
@@ -118,7 +130,7 @@ export async function call(req: Req): Promise<Result> {
   }
 }
 
-export interface DaemonStatus { project: string; pid: number; port: number; started: number; uptime: number; idle: number; requests: number; pages: number; busy: boolean; stale: boolean; log: string }
+export interface DaemonStatus { project: string; pid: number; port: number; started: number; uptime: number; idle: number; requests: number; pages: number; busy: boolean; running: number; stale: boolean; log: string }
 
 /** Every running daemon (dead entries are cleaned up). */
 export async function status(): Promise<DaemonStatus[]> {
@@ -129,7 +141,7 @@ export async function status(): Promise<DaemonStatus[]> {
     if (!s || !alive(s.pid)) { rmSync(file, { force: true }); continue; }
     const st = await ask(s, '/status').catch(() => null);
     if (!st) continue;
-    out.push({ project: s.project, pid: s.pid, port: s.port, started: s.started, uptime: st.uptime, idle: st.idle, requests: st.requests, pages: st.pages, busy: st.busy, stale: s.version !== version, log: files(s.project).log });
+    out.push({ project: s.project, pid: s.pid, port: s.port, started: s.started, uptime: st.uptime, idle: st.idle, requests: st.requests, pages: st.pages, busy: st.busy, running: st.running ?? (st.busy ? 1 : 0), stale: s.version !== version, log: files(s.project).log });
   }
   return out;
 }
@@ -164,14 +176,14 @@ export async function serve(project: string): Promise<boolean> {
   const r = new Renderer(project);
   const idleLimit = Number(process.env.REEL_DAEMON_IDLE ?? 900) * 1000;
   const started = Date.now(), version = engineVersion(), token = crypto.randomUUID();
-  let last = Date.now(), busy = false, requests = 0, closing = false;
-  let chain: Promise<unknown> = Promise.resolve();
+  let last = Date.now(), running = 0, requests = 0, closing = false;
+  const lanes: Record<'long' | 'quick', Promise<unknown>> = { long: Promise.resolve(), quick: Promise.resolve() };
   const shutdown = async (why: string) => {
     if (closing) return;
     closing = true;
     console.log(`stopping: ${why}`);
     server.stop(true);
-    await chain.catch(() => {});
+    await Promise.all(Object.values(lanes)).catch(() => {});
     await r.close().catch(() => {});
     if (readState(f.state)?.pid === process.pid) rmSync(f.state, { force: true });
     if (lockHeld(f.lock) && readFileSync(f.lock, 'utf8') === String(process.pid)) rmSync(f.lock, { force: true });
@@ -186,20 +198,21 @@ export async function serve(project: string): Promise<boolean> {
     async fetch(req) {
       if (req.headers.get('x-reel-token') !== token) return new Response('bad token', { status: 403 });
       const url = new URL(req.url);
-      if (url.pathname === '/status') return Response.json({ uptime: Date.now() - started, idle: busy ? 0 : Date.now() - last, requests, pages: r.pageCount, busy });
+      if (url.pathname === '/status') return Response.json({ uptime: Date.now() - started, idle: running ? 0 : Date.now() - last, requests, pages: r.pageCount, busy: running > 0, running });
       if (url.pathname === '/stop') { setTimeout(() => void shutdown('asked to stop'), 10); return Response.json({ ok: true }); }
       if (url.pathname === '/run') {
         if (closing) return new Response('stopping', { status: 503 });
-        const q = (await req.json()) as Req;
-        const job = chain.then(async () => {
-          busy = true; requests++;
+        const q = (await req.json()) as Req, lane = laneOf(q.op);
+        const job = (lane === 'both' ? Promise.all([lanes.long, lanes.quick]) : lanes[lane]).then(async () => {
+          running++; requests++;
           try {
             return await run(r, q, (file) => r.written.add(file));
           } catch (e) {
             return { ok: false, errors: [String((e as Error)?.message ?? e)], logs: [], warnings: [] } satisfies Result;
-          } finally { busy = false; last = Date.now(); }
+          } finally { running--; last = Date.now(); }
         });
-        chain = job.catch(() => {});
+        if (lane === 'both') lanes.long = lanes.quick = job.catch(() => {});
+        else lanes[lane] = job.catch(() => {});
         return Response.json(await job);
       }
       return new Response('not found', { status: 404 });
@@ -211,10 +224,10 @@ export async function serve(project: string): Promise<boolean> {
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () => void shutdown(sig));
   // idle: nothing asked for a while; gone: the project folder was removed
   setInterval(() => {
-    if (!busy && Date.now() - last > idleLimit) void shutdown(`idle for ${Math.round(idleLimit / 1000)} s`);
+    if (!running && Date.now() - last > idleLimit) void shutdown(`idle for ${Math.round(idleLimit / 1000)} s`);
     if (!existsSync(path.join(project, 'reel.config.ts'))) void shutdown('the project is gone');
   }, 5000).unref();
   // warm up while the first request is being written: the server, Chrome and a page at the project's format
-  chain = chain.then(() => r.page({ scale: 1 }).catch(() => {}));
+  lanes.quick = lanes.quick.then(() => r.page({ scale: 1 }).then((h) => r.release(h)).catch(() => {}));
   return true;
 }
