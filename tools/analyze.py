@@ -5,7 +5,7 @@
 """Music analysis -> data/audio.json, for videos cut to a song.
 
     uv run tools/analyze.py <song> [--fast] [--sections sections.json] [--keep-sections] [--offset 0]
-                                   [--free-tempo] [--onset-delta 0.5,0.4,0.25]
+                                   [--free-tempo] [--keep-octave] [--onset-delta 0.5,0.4,0.25]
 
 Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit, f.a, f.beat, ...):
 
@@ -13,8 +13,9 @@ Writes what the engine's audio helpers read (AudioData: beatAt, barAt, env, hit,
     tempo (produced music: a residual under 20 ms) a constant grid is fitted through them, which fills beats the
     tracker missed in breaks and puts every beat between its frames, then moved onto the drum stem's hits;
     otherwise (a drift, a live tempo) each beat sits on a line through its neighbours, which follows the tempo,
-    and moves onto a kick or snare within 30 ms (where drums mark the beats). --free-tempo keeps the tracked beats
-    as they are. The bar length and the downbeat's place in it are what most of the tracked downbeats agree on;
+    and moves onto a kick or snare within 30 ms (where drums mark the beats). Beats tracked at half the song's tempo
+    (a half-time feel, drum and bass at 87) are doubled from the drums between them (octave(), on both paths;
+    --keep-octave turns it off). --free-tempo keeps the tracked beats as they are, at the tracker's octave. The bar length and the downbeat's place in it are what most of the tracked downbeats agree on;
   * 100 fps envelopes, each normalised to 0..1 at its 99th percentile, with a fast-attack, slower-release
     follower: rms, low (<200 Hz), mid (200 Hz-2 kHz) and high (>2 kHz) of the mix, and drums, bass, other and
     vocal from stems separated by Demucs (htdemucs through demucs-mlx);
@@ -365,9 +366,9 @@ def smooth_beats(idx, b, n=7):
     return np.array(out)
 
 
-def bar_of(beats, downbeats):
+def bar_of(beats, downbeats, factor=1.0):
     """Downbeats and meter where most tracked downbeats fall on the beats: the bar length is the commonest step
-    between them, the phase the commonest place."""
+    between them (one over 7 halved after octave() doubled the beats), the phase the commonest place."""
     out = np.array(beats)
     on = [int(np.abs(out - t).argmin()) for t in downbeats if len(out) and np.abs(out - t).min() < 0.07]
     meter, ph = 4, 0
@@ -375,11 +376,20 @@ def bar_of(beats, downbeats):
         steps = []
         for x, y in zip(on, on[1:]):
             st = y - x
+            if factor > 1 and st > 7 and st % 2 == 0:
+                st //= 2
             if 2 <= st <= 7:
                 steps.append(st)
         meter = Counter(steps).most_common(1)[0][0] if steps else 4
         ph = Counter(i % meter for i in on).most_common(1)[0][0]
     return [float(x) for x in out[ph::meter]], meter
+
+
+# beats per minute: a doubled tempo stays at or under MAX_BPM; under SLOW_BPM a tracked beat may be half the song's
+MAX_BPM, SLOW_BPM = 200, 82
+# the share of the beats' percussion the midpoints between them must carry for the beats to be doubled: from a
+# backbeat, and (more, as a slow song with even hats carries up to 0.37) under SLOW_BPM
+DOUBLE_SHARE, SLOW_SHARE = 0.36, 0.42
 
 
 def percussion(bands, times, tol=0.035):
@@ -402,6 +412,50 @@ def drums_on(beats, bands):
     return percussion(bands, b).mean() > 1.5 * percussion(bands, np.r_[b - q, b + q]).mean()
 
 
+def octave(beats, kick, snare, hat, drums, whole, duration):
+    """The beats at the song's own beat level, the factor they were changed by (1, 2 or 0.5), and whether they were
+    doubled from a backbeat (the tracker's downbeats then sit on its snares, not on the one).
+
+    A tracker can lock on to every other beat, which leaves the drums of the beats it skipped between its beats.
+    Where drums mark the beats (drums_on(), passed as `drums`), they are doubled (to at most MAX_BPM) when the
+    beats hold snares (on 60% or more) but no kicks (on 10% or less) and the midpoints carry DOUBLE_SHARE of their
+    kick, snare and hat: the tracker has locked on to the backbeat, as --fast does on drum and bass at 87 BPM; or
+    when the beats are slower than SLOW_BPM and the midpoints carry SLOW_SHARE: a half-time feel tracked on its
+    kick and snare, at 70 for 140. Measured on synthesised songs, beats read at their own tempo leave 0.04 to 0.37
+    of their percussion between them (0.37: a slow song with even eighth-note hats), beats read at half 0.39 to
+    0.48: the backbeat locks 0.41 and 0.44, the half-time feels 0.46 and 0.48, and 0.39 for one at 160 read at 80,
+    which stays at 80. A song read at its own tempo under SLOW_BPM with as many drums between its beats (a slow
+    groove with syncopated kicks) is doubled too: the two cannot be told apart, and --keep-octave keeps it. Over MAX_BPM the
+    beats are halved (keeping the half with more kick and snare) when the dropped half carries less than
+    DOUBLE_SHARE of the kept half's percussion: a song that is that fast keeps its beats. Doubled beats extend
+    half a beat past the first and last where drums play there (a grid over the whole song, `whole`, always)."""
+    b = np.array(beats, dtype=float)
+    if len(b) < 8 or not drums:
+        return [float(x) for x in b], 1.0, False
+    every = [kick, snare, hat]
+    has = lambda band_: (at_beats(band_, b, 0.035) > 0).mean() if band_ else 0.0
+    period = float(np.median(np.diff(b)))
+    bpm = 60 / period
+    mid = (b[1:] + b[:-1]) / 2
+    share = percussion(every, mid).mean() / max(percussion(every, b).mean(), 1e-9)
+    lock = bool(has(snare) >= 0.6 and has(kick) <= 0.1 and share >= DOUBLE_SHARE)
+    if 2 * bpm <= MAX_BPM and share > 0 and (lock or (bpm < SLOW_BPM and share >= SLOW_SHARE)):
+        ends = np.array([b[0] - period / 2, b[-1] + period / 2])
+        ends = ends[(ends >= 0) & (ends < duration)]
+        ends = ends if whole else ends[percussion(every, ends) > 0]
+        return [float(x) for x in np.sort(np.r_[b, mid, ends])], 2.0, lock
+    if bpm > MAX_BPM:
+        s = percussion([kick, snare], b)
+        keep, drop = (b[0::2], b[1::2]) if s[0::2].mean() >= s[1::2].mean() else (b[1::2], b[0::2])
+        if percussion(every, drop).mean() < DOUBLE_SHARE * percussion(every, keep).mean():
+            return [float(x) for x in keep], 0.5, False
+    return [float(x) for x in b], 1.0, False
+
+
+def octave_note(factor):
+    return ", doubled" if factor > 1 else ", halved" if factor < 1 else ""
+
+
 def main():
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("song")
@@ -409,7 +463,8 @@ def main():
     ap.add_argument("--keep-sections", action="store_true", help="keep track, duration and sections of the existing data/audio.json")
     ap.add_argument("--offset", type=float, default=0.0, help="video time the song starts at (with --keep-sections)")
     ap.add_argument("--fast", action="store_true", help="no models: librosa beats and harmonic/percussive proxies for the stems")
-    ap.add_argument("--free-tempo", action="store_true", help="keep the tracked beats instead of fitting one tempo or, where it moves, smoothing them")
+    ap.add_argument("--free-tempo", action="store_true", help="keep the tracked beats (and their octave) instead of fitting one tempo or, where it moves, smoothing them")
+    ap.add_argument("--keep-octave", action="store_true", help="keep the tracker's tempo octave: no doubling of a tempo read at half")
     ap.add_argument("--onset-delta", default="0.5,0.4,0.25", help="kick,snare,hat peak-picking thresholds")
     a = ap.parse_args()
     if a.offset and not a.keep_sections:
@@ -443,10 +498,15 @@ def main():
         hat = onsets(band(perc, 6000, None), delta=dh, min_gap=0.05)
         vocal = onsets(band(harm, 300, 3400), delta=0.3, min_gap=0.12)
         beats = refine_phase(beats, kick, snare, a.free_tempo, duration)
+        if not a.free_tempo and not a.keep_octave:
+            beats, factor, _ = octave(beats, kick, snare, hat, drums_on(beats, [kick, snare, hat]), True, duration)
+            bpm *= factor
+        else:
+            factor = 1.0
         p = downbeat_phase(y, harm, beats, kick, snare)
         downbeats = beats[p::4]
         stems = {"drums": perc, "other": harm, "bass": band(harm, None, 200), "vocal": band(harm, 300, 3400)}
-        how = "librosa beats, harmonic/percussive proxies"
+        how = f"librosa beats{octave_note(factor)}, harmonic/percussive proxies"
     else:
         with tempfile.TemporaryDirectory(prefix="reel-analyze-") as work:
             tracked = run_models(song, work)
@@ -461,15 +521,22 @@ def main():
         vocal = onsets(stems["vocal"], delta=0.3, min_gap=0.12)
         # the tracker works in 20 ms frames and its beats come late by up to one: move them onto the drum stem's
         # hits (drum_shift), which measured more consistent on songs with known beats, where drums mark the beats
-        # (--free-tempo keeps the tracked beats where they are)
+        # (--free-tempo keeps the tracked beats where they are, at the tracked octave)
         drums = kind != "tracked" and drums_on(beats, [kick, snare, hat])
         sh = (drum_shift(beats, kick, snare) or 0.0) if drums else 0.0
         beats = shifted(beats, sh, duration)
+        factor, lock = 1.0, False
+        if not a.keep_octave:  # (drums is False for tracked beats, which octave() then leaves)
+            beats, factor, lock = octave(beats, kick, snare, hat, drums, False, duration)
         if kind == "followed" and drums:
             beats = [float(x) for x in snap(beats, kick + snare)]
-        downbeats, meter = bar_of(beats, [t + sh for t in shift(tracked["downbeats"])])
+        if lock or factor < 1:
+            # (the tracked downbeats sat on the backbeat, or on beats now dropped: the drums place the one, as --fast)
+            downbeats, meter = beats[downbeat_phase(y, stems["other"], beats, kick, snare)::4], 4
+        else:
+            downbeats, meter = bar_of(beats, [t + sh for t in shift(tracked["downbeats"])], factor)
         bpm = 60.0 / float(np.median(np.diff(beats)))
-        how = f"Beat This! beats ({ {'grid': 'one tempo', 'followed': 'following the tempo', 'tracked': 'as tracked'}[kind]}), Demucs stems"
+        how = f"Beat This! beats ({ {'grid': 'one tempo', 'followed': 'following the tempo', 'tracked': 'as tracked'}[kind]}{octave_note(factor)}), Demucs stems"
 
     if a.sections:
         starts = []
