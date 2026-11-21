@@ -1,0 +1,3 @@
+# cubicBezier extrapolates along its end tangents, as Chromium does
+
+`cubicBezier` in `src/engine/util.ts` turns a CSS `cubic-bezier(x1, y1, x2, y2)` into an easing that moves the same as in a browser. Inside 0..1 it solves for y at x the way browsers do: Newton's method, then bisection. Outside 0..1 a bezier has no value of its own, and the function continues along the curve's end tangents with the same slopes Chromium's `gfx::CubicBezier` uses: the start slope from the first control point that is off the start (y1 / x1, else y2 / x2, else 1 for a straight line), and likewise at the end. This keeps an `interpolate` with `'extend'` or an overshooting caller identical to CSS past the ends rather than clamping or extrapolating the polynomial.

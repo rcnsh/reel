@@ -1,0 +1,3 @@
+# A render's props are a deep-frozen copy
+
+`Engine.init` in `src/engine/engine.ts` stores the resolved props as `frozenCopy(resolveProps(…))`. Props are shared by every clip of the render and, on a warm page, by every request that page serves, so a scene that mutated them would change what later clips and requests see and break determinism. The copy (`structuredClone`) leaves the config's own default objects untouched, so freezing does not reach into the project's module. Typed arrays are copied but cannot be frozen; anything `structuredClone` refuses is reported as props that are not plain data.

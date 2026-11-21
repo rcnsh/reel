@@ -1,0 +1,3 @@
+# The 16-bit PNG decoder reads colour chunks in the PNG spec's order and leaves ICC to the browser
+
+`decodePng16` in `src/engine/png16.ts` picks the transfer function and primaries in the order the PNG specification gives them precedence: `cICP` first (BT.709 or Display P3 primaries, with a linear or sRGB transfer; anything else returns null), then `sRGB`, then an `iCCP` profile, then `gAMA`, and sRGB when no chunk says. An ICC profile is not interpreted here: the function returns null and the browser's own (8-bit) decode, which applies the profile, is used. Any layout it does not handle also returns null for the same fallback.
