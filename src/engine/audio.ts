@@ -60,7 +60,7 @@ export class AudioData {
     this.downbeats = j.downbeats;
     this.sections = j.sections;
     this.fps = j.fps || 100;
-    for (const k of FEATURES) this.feat[k] = Float32Array.from(j.features?.[k] ?? ((j as any)[k] as number[] | undefined) ?? []);
+    for (const k of FEATURES) this.feat[k] = Float32Array.from(j.features?.[k] ?? []);
     this.onsets = j.onsets ?? {};
     this.track = j.track ?? (j.duration > 0 ? 'audio/narration.flac' : null);
     this.waveFps = j.wave?.fps || 100;
