@@ -211,6 +211,7 @@ export default defineVideo({
     { id: 'numbers', scene: () => import('./scenes/timed'), start: 15, end: 17, check: { exempt: ['blank'] } },
     { id: 'data', scene: () => import('./scenes/data'), start: 17, end: 19 },
     { id: 'data2', scene: () => import('./scenes/data2'), start: 19, end: 20 },
+    { id: 'tables', scene: () => import('./scenes/tables'), start: 20, end: 23, check: { exempt: ['minSize', 'contrast'] } },
   ],
 });
 `,
@@ -326,6 +327,27 @@ export default class Data2 extends Scene {
   render(f: Frame, out: THREE.WebGLRenderTarget) { const r = this.ctx.renderer; clearRT(r, out, LIN.bg); this.stacked.draw(r, out, f); this.tall.draw(r, out, f); }
 }
 `,
+  'scenes/tables.ts': `import type * as THREE from 'three';
+import { Scene, type Frame, Table, clearRT, LIN, W, H } from 'reel';
+const rows = Array.from({ length: 12 }, (_, i) => ['Row ' + (i + 1), i * 137.5]);
+const columns = ['Name', { label: 'Value', digits: 1 }];
+export default class Tables extends Scene {
+  plain = new Table({ columns, rows, motion: false, label: 'plain', box: { x: W * 0.06, y: H * 0.3, w: W * 0.4, h: H * 0.42 } });
+  titled = new Table({ title: 'With a title', columns, rows, motion: false, label: 'titled', box: { x: W * 0.54, y: H * 0.3, w: W * 0.4, h: H * 0.42 } });
+  render(f: Frame, out: THREE.WebGLRenderTarget) {
+    const r = this.ctx.renderer;
+    clearRT(r, out, LIN.bg);
+    for (const t of [this.plain, this.titled]) {
+      t.draw(r, out, f);
+      if (f.lt > 0) continue;
+      const sized = (n: number) => (t as any).sized(n) as number, size = parseFloat(getComputedStyle(t.layer.$('table')).fontSize);
+      const used = sized(size), next = sized(size + 1);
+      sized(size);
+      console.warn('table-fit ' + JSON.stringify({ size, used, next, h: t.box.h }));
+    }
+  }
+}
+`,
   'scenes/faults.ts': `import type * as THREE from 'three';
 import { Scene, type Frame, HtmlLayer, KineticText, TextBlock, clearRT, LIN } from 'reel';
 export default class Faults extends Scene {
@@ -356,6 +378,17 @@ test.skipIf(!hasChrome)('check passes the components and names the faults', asyn
   const faults = real.filter((f) => f.clip === 'faults').map((f) => `${f.kind} ${f.severity} ${f.text!.split(' ')[0]}`).sort();
   expect(faults).toEqual(['clipped warning Cut', 'clipped warning Overfull', 'clipped warning Unbreakablewordthatcannotfitatall', 'clipped warning kinetic', 'overflow error Too']);
   expect(r.code).toBe(1);
+}, 180_000);
+
+test.skipIf(!hasChrome)('a table with many rows shrinks to the largest size at which it fits its box, with or without a title', async () => {
+  const r = await reel(['still', '--t', '20', '--only', 'tables', '--json', '--project', project.dir]);
+  const fits = (r.json().logs as string[]).filter((l) => l.includes('table-fit ')).map((l) => JSON.parse(l.slice(l.indexOf('table-fit ') + 10)) as { size: number; used: number; next: number; h: number });
+  expect(fits.length).toBeGreaterThanOrEqual(2);
+  for (const t of fits.slice(-2)) {
+    expect(t.size).toBeLessThan(Math.floor(720 * 0.028));
+    expect(t.used).toBeLessThanOrEqual(t.h + 0.5);
+    expect(t.next).toBeGreaterThan(t.h + 0.5);
+  }
 }, 180_000);
 
 test.skipIf(!hasChrome)('a component timed by a span of the words shows over the span, in clip seconds', async () => {

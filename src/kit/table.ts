@@ -39,14 +39,15 @@ export interface TableOptions extends ProgressOptions {
   stagger?: boolean;
 }
 
+const MIN_SIZE = 8;
+
 export class Table extends HtmlComponent {
   private o: TableOptions;
+  private fitted = false;
   constructor(o: TableOptions) {
     const box = o.box ?? safeBox(0.12), cols = o.columns.map(columnOf), n = o.rows.length;
     for (const [i, r] of o.rows.entries()) if (r.length > cols.length) throw new Error(`table: row ${i} has ${r.length} cells for ${cols.length} columns`);
-    const fit = (box.h - (n + 1) * 3 - 2) / ((n + 1) * 1.9 + 0.6 + (o.title ? 2.6 : 0));
-    const fs = Math.max(8, Math.floor(Math.min(o.size ?? UNIT * 0.028, fit)));
-    const align = cols.map((c, i) => columnAlign(o.rows, i, c)), pad = Math.round(fs * 0.7);
+    const align = cols.map((c, i) => columnAlign(o.rows, i, c));
     const colgroup = cols.some((c) => c.width !== undefined) ? `<colgroup>${cols.map((c) => `<col${c.width !== undefined ? ` style="width: ${(c.width * 100).toFixed(2)}%"` : ''}>`).join('')}</colgroup>` : '';
     const cell = (tag: string, i: number, text: string) => `<${tag} style="text-align: ${align[i]}">${esc(text)}</${tag}>`;
     super(o, {
@@ -54,19 +55,36 @@ export class Table extends HtmlComponent {
       html: `<div class="frame">${o.title ? `<p class="title">${esc(o.title)}</p>` : ''}<table>${colgroup}<thead><tr>${cols.map((c, i) => cell('th', i, c.label)).join('')}</tr></thead>
         <tbody>${o.rows.map((r, ri) => `<tr>${cols.map((c, i) => cell('td', i, r[i] === undefined ? '' : formatCell(r[i]!, c, ri))).join('')}</tr>`).join('')}</tbody></table></div>`,
       css: `.frame { position: absolute; inset: 0; display: flex; flex-direction: column; }
-        .title { font: 700 ${Math.round(fs * 1.4)}px/1.2 Archivo; margin-bottom: ${Math.round(fs * 0.9)}px; }
-        table { width: 100%; border-collapse: collapse; font: 400 ${fs}px/1.2 Archivo; font-variant-numeric: tabular-nums; }
-        th, td { padding: ${Math.round(fs * 0.35)}px ${pad}px; white-space: nowrap; }
-        th:first-child, td:first-child { padding-left: ${Math.round(pad * 0.6)}px; }
+        .title { font: 700 var(--title-size)/1.2 Archivo; margin-bottom: var(--title-gap); }
+        table { width: 100%; border-collapse: collapse; font: 400 var(--size)/1.2 Archivo; font-variant-numeric: tabular-nums; }
+        th, td { padding: var(--pad-y) var(--pad-x); white-space: nowrap; }
+        th:first-child, td:first-child { padding-left: var(--pad-first); }
         th { font-weight: 700; color: color-mix(in srgb, var(--fg) 75%, var(--bg)); border-bottom: 2px solid color-mix(in srgb, var(--fg) 45%, transparent); }
-        tbody tr { opacity: var(--k, 0); transform: translateY(calc((1 - var(--k, 0)) * ${Math.round(fs * 0.6)}px)); border-bottom: 1px solid color-mix(in srgb, var(--fg) 14%, transparent); }
+        tbody tr { opacity: var(--k, 0); transform: translateY(calc((1 - var(--k, 0)) * var(--rise))); border-bottom: 1px solid color-mix(in srgb, var(--fg) 14%, transparent); }
         tbody tr.hi { background: color-mix(in srgb, ${cssColor(o.color ?? 'accent')} 16%, transparent); -webkit-text-stroke: 0.03em currentColor; }
-        tbody tr.hi td:first-child { box-shadow: inset ${Math.max(3, Math.round(fs * 0.15))}px 0 0 ${cssColor(o.color ?? 'accent')}; }`,
+        tbody tr.hi td:first-child { box-shadow: inset var(--bar) 0 0 ${cssColor(o.color ?? 'accent')}; }`,
     });
     this.o = o;
   }
 
+  private sized(fs: number) {
+    const frame = this.layer.$('.frame'), pad = Math.round(fs * 0.7);
+    const vars = { size: fs, 'title-size': Math.round(fs * 1.4), 'title-gap': Math.round(fs * 0.9), 'pad-y': Math.round(fs * 0.35), 'pad-x': pad, 'pad-first': Math.round(pad * 0.6), rise: Math.round(fs * 0.6), bar: Math.max(3, Math.round(fs * 0.15)) };
+    for (const [k, v] of Object.entries(vars)) frame.style.setProperty(`--${k}`, `${v}px`);
+    const r = frame.getBoundingClientRect(), scale = r.height / frame.offsetHeight;
+    return (Math.max(...this.layer.$$('.title, table, tbody tr').map((e) => e.getBoundingClientRect().bottom)) - r.top) / scale;
+  }
+
+  private fit() {
+    const fits = (fs: number) => this.sized(fs) <= this.box.h + 0.5;
+    let lo = MIN_SIZE, hi = Math.max(MIN_SIZE, Math.floor(this.o.size ?? UNIT * 0.028));
+    if (fits(hi) || !fits(lo)) return;
+    while (hi - lo > 1) { const mid = Math.floor((lo + hi) / 2); if (fits(mid)) lo = mid; else hi = mid; }
+    this.sized(lo);
+  }
+
   protected update(f: Frame) {
+    if (!this.fitted) { this.fitted = true; this.fit(); }
     const o = this.o, n = o.rows.length, [w0, w1] = this.window(f);
     const p = progressOf(o, f, w0, Math.min(Math.max(1.4, 0.2 * (n + 2)), Math.max(0.4, w1 - w0 - 0.8)));
     const h = o.highlight === undefined ? undefined : val(o.highlight, f), hi = new Set(h === undefined ? [] : Array.isArray(h) ? h : [h]);
