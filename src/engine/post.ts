@@ -37,6 +37,7 @@ export const NEUTRAL_POST: PostParams = {
 export const DEFAULT_POST: PostParams = { ...NEUTRAL_POST, ...THEME.post };
 
 const MIPS = 7;
+const BLOOM_GAIN = 3;
 
 export class Post {
   private prefilter: FSPass;
@@ -165,7 +166,7 @@ ${ALPHA ? `        alpha = sat(alpha + (hash12(gl_FragCoord.yx * 1.91 + time) - 
     f.bloomTex!.value = this.ups[0]!.texture;
     f.haloTex!.value = this.ups[3]!.texture;
     f.exposure!.value = p.exposure;
-    f.bloom!.value = p.bloom / 3;
+    f.bloom!.value = p.bloom / BLOOM_GAIN;
     f.halation!.value = p.halation;
     f.ca!.value = p.ca;
     f.grain!.value = p.grain;

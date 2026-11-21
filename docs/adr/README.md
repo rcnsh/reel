@@ -37,6 +37,7 @@ One decision per file: what was decided and why, where the code alone would not 
 - [0028](0028-scene-props-typed-any.md): SceneCtx.props is typed with any, not unknown
 - [0029](0029-stroke-fonts-optical-kerning.md): Stroke fonts are kerned optically and get built typographic glyphs
 - [0030](0030-track-compositing-maths.md): Track grades and blends work on unpremultiplied colour by the W3C formula
+- [0149](0149-bloom-gain-is-a-tuned-divisor.md): The bloom strength is divided by a tuned gain, not the pyramid's
 
 ## Transitions and the component kit
 
