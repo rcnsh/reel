@@ -8,5 +8,4 @@ export default defineVideo({
     { id: 'shot', scene: () => import('./scenes/shot'), start: 0, end: 8 },
     { id: 'captions', scene: () => import('./scenes/captions'), start: 0, end: 8, track: 1 },
   ],
-  sounds: [{ file: 'pop', at: 1.4, db: -4 }],
 });

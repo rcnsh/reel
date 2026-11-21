@@ -1,15 +1,22 @@
 import type * as THREE from 'three';
-import { Scene, type Frame, VideoClip, ImageBox, LottieBox, TextBlock, clearRT, W } from 'reel';
+import { Scene, type Frame, VideoClip, ImageBox, LottieBox, TextBlock, clearRT, sound, W } from 'reel';
+
+const BADGE_AT: [number, number] = [1, 7.6];
+const BADGE_LANDS = 0.4;
 
 export default class Shot extends Scene {
   clip = new VideoClip({ src: 'assets/clip.mp4', alt: 'colour field', box: { x: 0, y: 0, w: W, h: 1920 }, kenBurns: { from: { zoom: 1 }, to: { zoom: 1.08 } }, motion: false });
   mark = new ImageBox({ src: 'assets/mark.svg', alt: 'mark', fit: 'contain', box: { x: W / 2 - 120, y: 150, w: 240, h: 160 }, at: [0.3, 8], motion: { from: 'down', distance: 40 } });
-  badge = new LottieBox({ src: 'assets/badge.json', alt: 'badge', box: { x: W / 2 - 230, y: 400, w: 460, h: 460 }, at: [1, 7.6], motion: { from: 'fade', in: 0.01, out: 0.4 } });
+  badge = new LottieBox({ src: 'assets/badge.json', alt: 'badge', box: { x: W / 2 - 230, y: 400, w: 460, h: 460 }, at: BADGE_AT, motion: { from: 'fade', in: 0.01, out: 0.4 } });
   line = new TextBlock({ text: 'Video, SVG and Lottie, sampled at any moment', box: { x: 110, y: 900, w: W - 220, h: 200 }, size: 64, maxLines: 2, color: '#ffffff', css: '.tb { text-shadow: 0 2px 24px rgba(10, 16, 40, 0.55); }', at: [1.8, 7.6], motion: { from: 'up' } });
   inset = new VideoClip({
     src: 'assets/clip.mp4', alt: 'half speed', box: { x: W / 2 - 200, y: 1150, w: 400, h: 300 }, radius: 28,
     trim: [2, 4], speed: 0.5, loop: true, frames: 'blend', sound: false, at: [2.6, 7.6], motion: { from: 'up' },
   });
+
+  override async init() {
+    sound({ file: 'pop', at: BADGE_AT[0] + BADGE_LANDS, db: -4 });
+  }
 
   override async prepare(f: Frame) {
     await this.clip.prepare(f, this.ctx.renderer);
