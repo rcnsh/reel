@@ -290,7 +290,7 @@ export function stripComments(src: string, lang: Lang): string {
 }
 
 export function trackedFiles(root = ROOT): string[] {
-  const res = Bun.spawnSync(['git', 'ls-files', '--cached', '--others', '--exclude-standard'], { cwd: root });
+  const res = Bun.spawnSync(['git', '-c', `safe.directory=${root}`, 'ls-files', '--cached', '--others', '--exclude-standard'], { cwd: root });
   if (!res.success) throw new Error(`git ls-files failed in ${root}: ${res.stderr.toString().trim()}`);
   return res.stdout.toString().split('\n').filter((f) => f && langOf(f) && !/^(patches|public|node_modules)\//.test(f) && existsSync(join(root, f)));
 }
