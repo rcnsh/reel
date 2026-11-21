@@ -15,9 +15,18 @@ vec4 toClip(vec3 p) {
   if (screen2D) return vec4(p.x / res.x * 2.0 - 1.0, 1.0 - p.y / res.y * 2.0, p.z, 1.0);
   return projectionMatrix * modelViewMatrix * vec4(p, 1.0);
 }
+vec4 toNearPlane(vec4 behind, vec4 front) {
+  float db = behind.z + behind.w, df = front.z + front.w;
+  return mix(behind, front, db / (db - df));
+}
 void main() {
   vec4 ca = toClip(iA), cb = toClip(iB);
-  if (ca.w <= 0.0 || cb.w <= 0.0) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+  if (!screen2D) {
+    bool aBehind = ca.z + ca.w < 0.0, bBehind = cb.z + cb.w < 0.0;
+    if (aBehind && bBehind) { gl_Position = vec4(2.0, 2.0, 2.0, 1.0); return; }
+    if (aBehind) ca = toNearPlane(ca, cb);
+    if (bBehind) cb = toNearPlane(cb, ca);
+  }
   vec2 sa = ca.xy / ca.w * 0.5 * res * pxScale, sb = cb.xy / cb.w * 0.5 * res * pxScale;
   float w = iWidth * widthScale * pxScale;
   if (worldWidth && !screen2D) {

@@ -26,7 +26,7 @@ Everything below is exported by `reel` (`import { … } from 'reel'`) unless it 
 
 ## Lines (`lines.ts`)
 
-`new LineBatch(capacity, { screen2D?, worldWidth?, blend?: 'add' | 'max' | 'normal', depthTest? })`: GPU capsule segments, 10k to 200k of them. Per frame: `lb.clear()`, then `lb.seg2(ax, ay, bx, by, width, [r, g, b], alpha)` (2D px, y down, with `screen2D: true`), `lb.seg(ax, ay, az, bx, by, bz, width, r, g, b, alpha)` (3D, with a camera), `lb.polyline(points, width, rgb, alpha)`, then `lb.render(renderer, target, camera?)`. Colours linear; over 1 glows. Widths stay logical; the edge feather and the hairline floor work in physical px, so hairlines stay crisp at 4K.
+`new LineBatch(capacity, { screen2D?, worldWidth?, blend?: 'add' | 'max' | 'normal', depthTest? })`: GPU capsule segments, 10k to 200k of them. Per frame: `lb.clear()`, then `lb.seg2(ax, ay, bx, by, width, [r, g, b], alpha)` (2D px, y down, with `screen2D: true`), `lb.seg(ax, ay, az, bx, by, bz, width, r, g, b, alpha)` (3D, with a camera), `lb.polyline(points, width, rgb, alpha)`, then `lb.render(renderer, target, camera?)`. Colours linear; over 1 glows. Widths stay logical; the edge feather and the hairline floor work in physical px, so hairlines stay crisp at 4K. In 3D a segment that crosses the camera's near plane is cut at it, so a line running past the camera reaches the frame's edge; one wholly behind the near plane is not drawn.
 
 ## Type (`type.ts`)
 
