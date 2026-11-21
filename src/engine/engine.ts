@@ -934,7 +934,7 @@ export class Engine {
     if (p) return p;
     if (mode === 'yuv420') return this.yuvPacker();
     const { channels: C, bytes: B } = PIXELS[mode], w = (PW * C * B) / 4;
-    const max = (this.renderer.getContext() as WebGL2RenderingContext).getParameter(0x0d33) as number;
+    const max = this.renderer.capabilities.maxTextureSize;
     if (w > max) throw new Error(`a ${mode} readback of a ${PW} px wide frame needs a ${w} px wide target; this GPU allows ${max}`);
     const byte = B === 1 ? 'p[ch]' : `float((${mode === 'linear' ? 'packHalf2x16(vec2(p[ch], 0.0))' : 'uint(clamp(p[ch], 0.0, 1.0) * 65535.0 + 0.5)'} >> (8u * uint(k))) & 255u) / 255.0`;
     const pass = new FSPass(/* glsl */ `
