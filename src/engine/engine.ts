@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { AudioData } from './audio';
 import { Words } from './words';
-import { Compositor, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT, setCpuCanvases } from './gl';
+import { Compositor, compositorFrag, FSPass, W, H, PW, PH, SCALE, FPS, SS_TAP, SUB_FRAME, makeRT, clearRT, setCpuCanvases } from './gl';
 import { ALPHA, BITS } from './format';
 import { PIXELS, yuvFits, type Pixels } from './pixels';
 export { PIXELS, type Pixels };
@@ -198,8 +198,8 @@ export class Engine {
     this.errRT = makeRT(ew, eh, small);
     this.maxRT = makeRT(Math.ceil(ew / R), Math.ceil(eh / R), small);
     this.errBuf = new Float32Array(this.maxRT.width * this.maxRT.height * 4);
-    this.errPass = new FSPass(/* glsl */ `
-      uniform sampler2D a; uniform sampler2D b; uniform float invA, invB;
+    const errFrag = (tiles: boolean) => /* glsl */ `
+      uniform sampler2D a; uniform sampler2D b; uniform float invA, invB;${tiles ? ' uniform sampler2D tiles;' : ''}
       ${SHOULDER_GLSL}
       vec3 disp(vec3 x) { return toSRGB(sat(shoulder(max(x, 0.0)))); }
       void main() {
@@ -210,8 +210,9 @@ export class Engine {
           sa += texelFetch(a, p, 0).rgb; sb += texelFetch(b, p, 0).rgb;
         }
         vec3 e = abs(disp(sa * (invA / ${B * B}.0)) - disp(sb * (invB / ${B * B}.0)));
-        fragColor = vec4(170.0 * max(e.r, max(e.g, e.b)), 0.0, 0.0, 1.0);
-      }`, { a: { value: null }, b: { value: null }, invA: { value: 1 }, invB: { value: 1 } });
+        fragColor = vec4(170.0 * max(e.r, max(e.g, e.b))${tiles ? ` * texelFetch(tiles, ivec2(gl_FragCoord.xy) / ${R}, 0).r` : ''}, 0.0, 0.0, 1.0);
+      }`;
+    this.errPass = new FSPass(errFrag(false), { a: { value: null }, b: { value: null }, invA: { value: 1 }, invB: { value: 1 } });
     this.maxPass = new FSPass(/* glsl */ `
       uniform sampler2D e;
       void main() {
@@ -262,31 +263,11 @@ export class Engine {
       this.maskSubsDefault = maskSubFrames(name);
       setCpuCanvases(softwareGL(name));
     }
-    this.errTilePass = new FSPass(/* glsl */ `
-      uniform sampler2D a; uniform sampler2D b; uniform float invA, invB; uniform sampler2D tiles;
-      ${SHOULDER_GLSL}
-      vec3 disp(vec3 x) { return toSRGB(sat(shoulder(max(x, 0.0)))); }
-      void main() {
-        ivec2 p0 = ivec2(gl_FragCoord.xy) * ${B}, lim = ivec2(${PW - 1}, ${PH - 1});
-        vec3 sa = vec3(0.0), sb = vec3(0.0);
-        for (int y = 0; y < ${B}; y++) for (int x = 0; x < ${B}; x++) {
-          ivec2 p = min(p0 + ivec2(x, y), lim);
-          sa += texelFetch(a, p, 0).rgb; sb += texelFetch(b, p, 0).rgb;
-        }
-        vec3 e = abs(disp(sa * (invA / ${B * B}.0)) - disp(sb * (invB / ${B * B}.0)));
-        float on = texelFetch(tiles, ivec2(gl_FragCoord.xy) / ${R}, 0).r;
-        fragColor = vec4(170.0 * max(e.r, max(e.g, e.b)) * on, 0.0, 0.0, 1.0);
-      }`, { a: { value: null }, b: { value: null }, invA: { value: 1 }, invB: { value: 1 }, tiles: { value: this.tileTex } });
-    this.gainPass = new FSPass(/* glsl */ `
-      uniform sampler2D tex; uniform vec3 tint; uniform vec4 uvXform; uniform bool premult; uniform sampler2D gain;
-      void main() {
-        vec2 uv = (vUv - 0.5) * uvXform.xy + 0.5 + uvXform.zw;
-        if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
-        vec4 c = texture(tex, uv);
-        c.rgb *= tint;
-        if (premult) c.rgb *= c.a;
-        fragColor = vec4(c.rgb, c.a) * texelFetch(gain, ivec2(gl_FragCoord.xy) / ${TP}, 0).r;
-      }`, { tex: { value: null }, tint: { value: new THREE.Vector3(1, 1, 1) }, uvXform: { value: new THREE.Vector4(1, 1, 0, 0) }, premult: { value: false }, gain: { value: this.gainTex } });
+    this.errTilePass = new FSPass(errFrag(true), { a: { value: null }, b: { value: null }, invA: { value: 1 }, invB: { value: 1 }, tiles: { value: this.tileTex } });
+    this.gainPass = new FSPass(
+      compositorFrag({ uniform: 'uniform sampler2D gain;', expr: `texelFetch(gain, ivec2(gl_FragCoord.xy) / ${TP}, 0).r` }),
+      { tex: { value: null }, tint: { value: new THREE.Vector3(1, 1, 1) }, uvXform: { value: new THREE.Vector4(1, 1, 0, 0) }, premult: { value: false }, gain: { value: this.gainTex } },
+    );
   }
 
   private hookDepthState() {

@@ -81,18 +81,22 @@ export class FSPass {
 
 export type BlendMode = 'normal' | 'add' | 'screen' | 'multiply' | 'max' | 'replace';
 
-export class Compositor {
-  private passes = new Map<BlendMode, FSPass>();
-  private frag = /* glsl */ `
-    uniform sampler2D tex; uniform float opacity; uniform vec3 tint; uniform vec4 uvXform; uniform bool premult;
+export function compositorFrag(opacity: { uniform: string; expr: string }) {
+  return /* glsl */ `
+    uniform sampler2D tex; ${opacity.uniform} uniform vec3 tint; uniform vec4 uvXform; uniform bool premult;
     void main() {
       vec2 uv = (vUv - 0.5) * uvXform.xy + 0.5 + uvXform.zw;
       if (uv.x < 0.0 || uv.x > 1.0 || uv.y < 0.0 || uv.y > 1.0) discard;
       vec4 c = texture(tex, uv);
       c.rgb *= tint;
       if (premult) c.rgb *= c.a;
-      fragColor = vec4(c.rgb, c.a) * opacity;
+      fragColor = vec4(c.rgb, c.a) * ${opacity.expr};
     }`;
+}
+
+export class Compositor {
+  private passes = new Map<BlendMode, FSPass>();
+  private frag = compositorFrag({ uniform: 'uniform float opacity;', expr: 'opacity' });
   private get(mode: BlendMode) {
     let p = this.passes.get(mode);
     if (!p) {
