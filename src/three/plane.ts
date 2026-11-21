@@ -19,8 +19,8 @@ export class HtmlPlane extends THREE.Mesh<THREE.PlaneGeometry, THREE.ShaderMater
     const layer = o.layer ?? new HtmlLayer({ ...o, width: o.width ?? Math.round(o.size[0] * ppu), height: o.height ?? Math.round(o.size[1] * ppu) });
     const mat = new THREE.ShaderMaterial({
       uniforms: { map: { value: layer.texture } },
-      vertexShader: `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
-      fragmentShader: `
+      vertexShader: /* glsl */ `varying vec2 vUv; void main() { vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position, 1.0); }`,
+      fragmentShader: /* glsl */ `
         uniform sampler2D map; varying vec2 vUv;
         vec3 lin(vec3 c) { return mix(c / 12.92, pow((c + 0.055) / 1.055, vec3(2.4)), step(0.04045, c)); }
         void main() {

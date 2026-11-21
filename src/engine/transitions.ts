@@ -175,7 +175,7 @@ void main() { fragColor = transition(vUv); }`;
 }
 
 export class TransitionPass {
-  private pass = new FSPass(`
+  private pass = new FSPass(/* glsl */ `
     uniform sampler2D a; uniform sampler2D b; uniform float k, soft, aspect; uniform int mode; uniform bool rev;
     uniform vec2 dir, ctr; uniform vec3 col; uniform float colA;
     vec4 at(sampler2D t, vec2 uv) { return (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? vec4(0.0) : texture(t, uv); }

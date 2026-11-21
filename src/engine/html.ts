@@ -133,7 +133,7 @@ const passes = new Map<string, FSPass>();
 function passFor(blend: NonNullable<HtmlDraw['blend']>) {
   let p = passes.get(blend);
   if (p) return p;
-  p = new FSPass(`
+  p = new FSPass(/* glsl */ `
     uniform sampler2D tex; uniform mat3 inv; uniform vec2 size; uniform float opacity, frameH;
     void main() {
       vec2 q = (inv * vec3(FRAG_PX.x, frameH - FRAG_PX.y, 1.0)).xy;
@@ -154,7 +154,7 @@ function passFor(blend: NonNullable<HtmlDraw['blend']>) {
   return p;
 }
 
-export const HTML_TEXEL_GLSL = `
+export const HTML_TEXEL_GLSL = /* glsl */ `
 vec4 htmlTexel(sampler2D tex, vec2 uv) { vec4 c = texture(tex, uv); vec3 s = c.a > 0.0 ? c.rgb / c.a : vec3(0.0); return vec4(toLinear(s) * c.a, c.a); }`;
 
 interface DomBox { kind: DrawnBox['kind']; x: number; y: number; w: number; h: number; text?: string; size?: number; color?: string; alpha: number; label?: string; exempt?: CheckRule[] | true; overflow?: DrawnBox['overflow']; flow?: string }

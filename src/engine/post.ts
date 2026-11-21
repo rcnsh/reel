@@ -3,7 +3,7 @@ import { FSPass, makeRT, W, H, SCALE } from './gl';
 import { ALPHA, BITS } from './format';
 import { THEME, TONE, glslName } from './palette';
 
-export const SHOULDER_GLSL = `
+export const SHOULDER_GLSL = /* glsl */ `
 vec3 shoulder(vec3 x) {
   const float k = 0.72;
   vec3 y = mix(x, k + (1.0 - k) * (1.0 - exp(-(x - k) / (1.0 - k))), step(k, x));
@@ -53,7 +53,7 @@ export class Post {
       this.ups.push(makeRT(Math.max(2, w), Math.max(2, h), { depthBuffer: false, pxScale: 1 }));
       w >>= 1; h >>= 1;
     }
-    this.prefilter = new FSPass(`
+    this.prefilter = new FSPass(/* glsl */ `
       uniform sampler2D src; uniform vec2 texel; uniform float threshold, knee;
       void main() {
         vec3 c = vec3(0.0);
@@ -71,7 +71,7 @@ ${SCALE === 1 ? `        c += texture(src, vUv + texel * vec2(-1, -1)).rgb; c +=
         float w = max(rq, l - threshold) / max(l, 1e-5);
         fragColor = vec4(c * w, 1.0);
       }`, { src: { value: null }, texel: { value: new THREE.Vector2() }, threshold: { value: 1 }, knee: { value: 0.5 } });
-    this.down = new FSPass(`
+    this.down = new FSPass(/* glsl */ `
       uniform sampler2D src; uniform vec2 texel;
       void main() {
         vec3 a = texture(src, vUv + texel * vec2(-2, -2)).rgb, b = texture(src, vUv + texel * vec2(0, -2)).rgb, c = texture(src, vUv + texel * vec2(2, -2)).rgb;
@@ -82,7 +82,7 @@ ${SCALE === 1 ? `        c += texture(src, vUv + texel * vec2(-1, -1)).rgb; c +=
         vec3 o = (d + e + i + j) * 0.125 + (a + b + g + f) * 0.03125 + (b + c + h + g) * 0.03125 + (f + g + l + k) * 0.03125 + (g + h + m + l) * 0.03125;
         fragColor = vec4(o, 1.0);
       }`, { src: { value: null }, texel: { value: new THREE.Vector2() } });
-    this.up = new FSPass(`
+    this.up = new FSPass(/* glsl */ `
       uniform sampler2D src; uniform sampler2D prev; uniform vec2 texel; uniform float radius;
       void main() {
         vec2 o = texel * radius;
@@ -91,7 +91,7 @@ ${SCALE === 1 ? `        c += texture(src, vUv + texel * vec2(-1, -1)).rgb; c +=
           + texture(src, vUv + vec2(-o.x, o.y)).rgb + 2.0 * texture(src, vUv + vec2(0, o.y)).rgb + texture(src, vUv + o).rgb;
         fragColor = vec4(texture(prev, vUv).rgb + s / 16.0, 1.0);
       }`, { src: { value: null }, prev: { value: null }, texel: { value: new THREE.Vector2() }, radius: { value: 1 } });
-    this.final = new FSPass(`
+    this.final = new FSPass(/* glsl */ `
       uniform sampler2D src; uniform sampler2D bloomTex; uniform sampler2D haloTex;
       uniform float exposure, bloom, halation, ca, grain, vignette, fade, flash, time, zoom, invert;
       uniform vec2 shake; uniform vec2 res;

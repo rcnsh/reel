@@ -1,7 +1,7 @@
 import * as THREE from 'three';
 import { W, H, rtScale } from './gl';
 
-const VERT = `
+const VERT = /* glsl */ `
 precision highp float;
 in vec3 position;
 in vec3 iA; in vec3 iB;
@@ -37,7 +37,7 @@ void main() {
   vColor = iColor * vec4(1.0, 1.0, 1.0, min(1.0, w / 0.7));
 }`;
 
-const FRAG = `
+const FRAG = /* glsl */ `
 precision highp float;
 in vec2 vLocal; in float vLen; in float vHalfW; in vec4 vColor;
 out vec4 fragColor;

@@ -128,7 +128,7 @@ export function isIdentityGrade(g: GradeValues) {
 }
 
 export class TrackFx {
-  private downPass = new FSPass(`
+  private downPass = new FSPass(/* glsl */ `
     uniform sampler2D src; uniform int d;
     void main() {
       ivec2 p0 = ivec2(gl_FragCoord.xy) * d, lim = textureSize(src, 0) - 1;
@@ -136,7 +136,7 @@ export class TrackFx {
       for (int y = 0; y < 64; y++) { if (y >= d) break; for (int x = 0; x < 64; x++) { if (x >= d) break; c += texelFetch(src, min(p0 + ivec2(x, y), lim), 0); } }
       fragColor = c / float(d * d);
     }`, { src: { value: null }, d: { value: 1 } });
-  private blurPass = new FSPass(`
+  private blurPass = new FSPass(/* glsl */ `
     uniform sampler2D src; uniform vec2 dir; uniform float sigma; uniform int taps;
     void main() {
       float dx = 3.0 * sigma / float(taps);
@@ -151,7 +151,7 @@ export class TrackFx {
       }
       fragColor = c / wsum;
     }`, { src: { value: null }, dir: { value: new THREE.Vector2() }, sigma: { value: 1 }, taps: { value: 1 } });
-  private gradePass = new FSPass(`
+  private gradePass = new FSPass(/* glsl */ `
     uniform sampler2D src; uniform vec2 srcScale; uniform sampler2D matteTex; uniform int matte; uniform bool grade, upper;
     uniform float exposure, saturation, contrast, fade, flash; uniform vec3 tint;
     void main() {
@@ -219,7 +219,7 @@ export class TrackFx {
 }
 
 export class BlendPass {
-  private pass = new FSPass(`
+  private pass = new FSPass(/* glsl */ `
     uniform sampler2D base; uniform sampler2D top; uniform float opacity; uniform int mode;
     float softD(float x) { return x <= 0.25 ? ((16.0 * x - 12.0) * x + 4.0) * x : sqrt(x); }
     vec3 hard(vec3 b, vec3 s) { return mix(b * 2.0 * s, b + (2.0 * s - 1.0) - b * (2.0 * s - 1.0), step(0.5, s)); }

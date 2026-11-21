@@ -13,7 +13,7 @@ let pass: FSPass | null = null;
 
 function visPass() {
   if (pass) return pass;
-  pass = new FSPass(`
+  pass = new FSPass(/* glsl */ `
     uniform sampler2D levels; uniform int n, mode, reach;
     uniform vec4 box;
     uniform float scale, frameH, opacity, x0, dx, halfW, minLen, lineW, fillA, splitX, restA, r0, rLen, edge, mirror, rounded;

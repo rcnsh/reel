@@ -20,7 +20,7 @@ export interface ImageBoxOptions extends Omit<ComponentOptions, 'css'> {
 
 let pass: FSPass | null = null;
 function picturePass() {
-  pass ??= new FSPass(`
+  pass ??= new FSPass(/* glsl */ `
     uniform sampler2D tex, tex2; uniform vec4 box; uniform vec2 extent, centre; uniform float radius, opacity, frameH, mixw;
     uniform int alphaMode;
     float encode(float x) { return x <= 0.0031308 ? x * 12.92 : 1.055 * pow(x, 1.0 / 2.4) - 0.055; }
