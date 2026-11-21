@@ -13,6 +13,7 @@ export interface Comment {
   ownLine: boolean;
   inTemplate: boolean;
   pragma: boolean;
+  cut: boolean;
 }
 
 export const ROOT = join(import.meta.dir, '..');
@@ -21,7 +22,6 @@ export const BASELINE = join(ROOT, 'comments-baseline.json');
 const LICENCE = /\bCopyright (\(c\)|©|\d{4})|SPDX-License-Identifier:|@license\b|\((?:[^()]*,\s*)?(MIT|BSD-[23]-Clause|Apache-2\.0|ISC|MPL-2\.0|OFL-1\.1)\)/;
 const PRAGMA_TS = new RegExp(String.raw`^\/\/\/\s*<reference\b|^\/\/\s*@ts-(expect-error|ignore|nocheck)\b|^\/\*\s*(@vite-ignore|glsl|css|html)\s*\*\/$|^#!|` + LICENCE.source);
 const PEP723 = /^# \/\/\/ [a-zA-Z0-9-]+$\n(?:^#(?:| .*)$\n)+^# \/\/\/$/gm;
-const PRAGMA_PY = /^#!|^#\s*(noqa|type:\s*ignore|pragma\b)|^#\s*\/\/\/(\s|$)|^#\s*[a-z-]+\s*=|^#\s*dependencies\s*=|^#\s*\]|^#\s+"/;
 
 export function langOf(file: string): Lang | null {
   if (/\.(ts|tsx|js|mjs|cjs)$/.test(file) || /(^|\/)tsconfig[^/]*\.json$/.test(file)) return 'ts';
@@ -31,6 +31,7 @@ export function langOf(file: string): Lang | null {
   return null;
 }
 
+const CONDITION_KEYWORDS = new Set(['if', 'while', 'for', 'with']);
 const KEYWORDS_BEFORE_REGEX = new Set(['return', 'typeof', 'case', 'do', 'else', 'in', 'of', 'new', 'delete', 'void', 'throw', 'instanceof', 'yield', 'await']);
 
 function lineStarts(src: string): number[] {
@@ -49,7 +50,7 @@ function lineAt(starts: number[], pos: number): number {
   return lo + 1;
 }
 
-type Span = { start: number; end: number; inTemplate: boolean };
+type Span = { start: number; end: number; inTemplate: boolean; cut?: boolean };
 
 function scanTsSpans(src: string, from = 0, to = src.length): Span[] {
   const spans: Span[] = [];
@@ -57,6 +58,7 @@ function scanTsSpans(src: string, from = 0, to = src.length): Span[] {
   let i = from;
   let prev = '';
   let tq = '';
+  const parens: boolean[] = [];
   const blockEnd = (j: number) => {
     const k = src.indexOf('*/', j + 2);
     return k < 0 || k >= to ? to : k + 2;
@@ -69,19 +71,21 @@ function scanTsSpans(src: string, from = 0, to = src.length): Span[] {
       if (c === '$' && d === '{') { stack.push('{'); i += 2; prev = '('; continue; }
       if (c === '\n') { tq = ''; i++; continue; }
       if (tq) { if (c === tq) tq = ''; i++; continue; }
-      if (c === '"' || c === "'") { tq = c; i++; continue; }
       const before = i === 0 ? '\n' : src[i - 1];
-      if (c === '/' && (d === '/' || d === '*') && /[\s;{}()`]/.test(before)) {
-        let j = i + 2;
+      if ((c === '"' || c === "'") && !/[A-Za-z0-9]/.test(before)) { tq = c; i++; continue; }
+      const nested = stack.filter((x) => x === '`').length > 1;
+      if (!nested && c === '/' && (d === '/' || d === '*') && /[\s;{}()`]/.test(before)) {
+        let j = i + 2, cut = false;
         while (j < to) {
           if (src[j] === '\\') { j += 2; continue; }
-          if (src[j] === '`' || (src[j] === '$' && src[j + 1] === '{')) break;
+          if (src[j] === '$' && src[j + 1] === '{') { cut = true; break; }
+          if (src[j] === '`') break;
           if (d === '/' && src[j] === '\n') break;
           if (d === '*' && src[j] === '*' && src[j + 1] === '/') { j += 2; break; }
           j++;
         }
         j = Math.min(j, to);
-        spans.push({ start: i, end: j, inTemplate: true });
+        spans.push({ start: i, end: j, inTemplate: true, cut });
         i = j;
         continue;
       }
@@ -109,6 +113,8 @@ function scanTsSpans(src: string, from = 0, to = src.length): Span[] {
       continue;
     }
     if (c === '`') { stack.push('`'); i++; continue; }
+    if (c === '(') { parens.push(CONDITION_KEYWORDS.has(prev)); i++; prev = '('; continue; }
+    if (c === ')') { prev = parens.pop() ? '{' : ')'; i++; continue; }
     if (c === '{') { if (stack.length) stack.push('{'); i++; prev = '{'; continue; }
     if (c === '}') {
       if (stack[stack.length - 1] === '{') stack.pop();
@@ -139,7 +145,7 @@ function scanTsSpans(src: string, from = 0, to = src.length): Span[] {
       let j = i;
       while (j < to && /[A-Za-z0-9_$]/.test(src[j])) j++;
       prev = src.slice(i, j);
-      if (!KEYWORDS_BEFORE_REGEX.has(prev)) prev = 'x';
+      if (!KEYWORDS_BEFORE_REGEX.has(prev) && !CONDITION_KEYWORDS.has(prev)) prev = 'x';
       i = j;
       continue;
     }
@@ -182,7 +188,7 @@ function scanYamlSpans(src: string): Span[] {
     for (let k = 0; k < line.length; k++) {
       const c = line[k];
       if (quote) { if (c === quote) quote = ''; continue; }
-      if (c === '"' || c === "'") { quote = c; continue; }
+      if ((c === '"' || c === "'") && /(^|[:\-[,{])$/.test(line.slice(0, k).trimEnd())) { quote = c; continue; }
       if (c === '#' && (k === 0 || /\s/.test(line[k - 1]))) {
         spans.push({ start: pos + k, end: pos + line.length, inTemplate: false });
         break;
@@ -248,13 +254,13 @@ export function scanComments(src: string, lang: Lang): Comment[] {
     if (lang === 'py') {
       pragma = pep723.some(([a, b]) => s.start >= a && s.start < b) || (line === 1 && text.startsWith('#!')) || /^#\s*(noqa|type:\s*ignore|pragma\b)/.test(text);
     } else if (lang === 'ts' || lang === 'html') pragma = PRAGMA_TS.test(text.trim()) && (!s.inTemplate || LICENCE.test(text));
-    out.push({ start: s.start, end: s.end, line, endLine, text, ownLine, inTemplate: s.inTemplate, pragma });
+    out.push({ start: s.start, end: s.end, line, endLine, text, ownLine, inTemplate: s.inTemplate, pragma, cut: !!s.cut });
   }
   return out;
 }
 
 export function deleteComments(src: string, lang: Lang, lines: Set<number>): { src: string; deleted: number; matched: number } {
-  const targets = scanComments(src, lang).filter((c) => !c.pragma && lines.has(c.line));
+  const targets = scanComments(src, lang).filter((c) => !c.pragma && !c.cut && lines.has(c.line));
   const matched = new Set(targets.map((c) => c.line)).size;
   let out = src;
   for (const c of [...targets].sort((a, b) => b.start - a.start)) {
@@ -270,7 +276,8 @@ export function deleteComments(src: string, lang: Lang, lines: Set<number>): { s
       const nextIsEol = c.end + tail >= out.length || out[c.end + tail] === '\n';
       const breaks = c.text.includes('\n') && !nextIsEol;
       const left = nextIsEol || breaks ? s : c.start, right = nextIsEol ? c.end : c.end + tail;
-      const glue = breaks ? '\n' : /[\w$]/.test(out[left - 1] ?? '') && /[\w$]/.test(out[right] ?? '') ? ' ' : '';
+      const joins = /[\w$+\-*/<>=&|!?.%^~]/;
+      const glue = breaks ? '\n' : joins.test(out[left - 1] ?? '') && joins.test(out[right] ?? '') ? ' ' : '';
       out = out.slice(0, left) + glue + out.slice(right);
     }
   }
@@ -350,7 +357,7 @@ if (import.meta.main) {
       for (const c of scanComments(readFileSync(join(ROOT, f), 'utf8'), lang)) {
         if (c.pragma && !pragmas) continue;
         const span = c.endLine > c.line ? `${c.line}-${c.endLine}` : `${c.line}`;
-        const tags = [c.ownLine ? '' : 'trailing', c.inTemplate ? 'template' : '', c.pragma ? 'pragma' : ''].filter(Boolean).join(',');
+        const tags = [c.ownLine ? '' : 'trailing', c.inTemplate ? 'template' : '', c.pragma ? 'pragma' : '', c.cut ? 'cut' : ''].filter(Boolean).join(',');
         console.log(`${f}:${span}${tags ? ` [${tags}]` : ''} ${c.text.replace(/\n\s*/g, '\n    ')}`);
       }
     }

@@ -13,7 +13,7 @@ reel bans code comments. `comments-baseline.json` holds the most comments each f
 `tools/comments.ts` is the one scanner the ratchet and this skill share (TS/JS, GLSL and CSS in template literals, Python, HTML, YAML).
 
 - `bun tools/comments.ts stats [paths]`: comments and comment-only lines per file; start here to size the pass.
-- `bun tools/comments.ts list [paths]`: every comment as `file:line[-end] [trailing|template] text`. Pragmas (`/// <reference>`, `@ts-expect-error`, `/* glsl */` markers, licence credits, shebangs, PEP 723 blocks) are exempt: never listed, counted or deleted.
+- `bun tools/comments.ts list [paths]`: every comment as `file:line[-end] [trailing|template|cut] text`. `cut` marks a template comment that runs into a `${…}`: `delete` refuses it, because deleting it would take an expression with it, so edit that one by hand. Pragmas (`/// <reference>`, `@ts-expect-error`, `/* glsl */` markers, licence credits, shebangs, PEP 723 blocks) are exempt: never listed, counted or deleted.
 - `bun tools/comments.ts delete <file> <line...>`: deletes the comments that start on those lines, taking a whole-line comment's line and leaving a trailing comment's code. One call per file, with every line from a `list` taken *before* that file changed (lines shift after a delete). It prints how many of the lines given held a comment; any short of all means a line was wrong.
 - `bun tools/comments.ts check` / `update`: the ratchet; `update` lowers the baseline and refuses to raise it. A change to the scanner itself can move counts either way: then rebuild with `rm comments-baseline.json && bun tools/comments.ts update --init`, and say why in the commit.
 

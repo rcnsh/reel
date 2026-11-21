@@ -24,6 +24,16 @@ describe('scanComments', () => {
     expect(texts('const s = `\n  float a; // n=${n} here\n  // uses ${`x`}\n`;')).toEqual(['// n=', '// uses ']);
   });
 
+  test('reads a regex after a condition, and nothing in a template nested in an interpolation', () => {
+    expect(texts('if (ok) /\\/\\//.test(s); // real')).toEqual(['// real']);
+    expect(texts('const s = `a ${`b // no`} c`; // real')).toEqual(['// real']);
+  });
+
+  test('counts a template comment after an apostrophe in a word, and a YAML comment after one', () => {
+    expect(texts("const s = `\n  don't do it; // real\n`;")).toEqual(['// real']);
+    expect(texts("run: echo don't # note\n", 'yaml')).toEqual(['# note']);
+  });
+
   test('reads only block comments in an HTML style', () => {
     expect(texts('<style>@import url(http://f/x.css); /* c */ p { color: red }</style>', 'html')).toEqual(['/* c */']);
   });
@@ -65,6 +75,12 @@ describe('deleteComments', () => {
 
   test('keeps tokens apart and line breaks that end a statement', () => {
     expect(deleteComments('let/* c */x = 1;\nreturn /*\n */ 1;\n', 'ts', new Set([1, 2])).src).toBe('let x = 1;\nreturn\n1;\n');
+  });
+
+  test('keeps operators apart and refuses a template comment cut by an interpolation', () => {
+    expect(deleteComments('a = b-/* c */-d;\n', 'ts', new Set([1])).src).toBe('a = b- -d;\n');
+    const src = 'const s = `\n  float a; // n=${n} here\n`;\n';
+    expect(deleteComments(src, 'ts', new Set([2]))).toMatchObject({ src, deleted: 0, matched: 0 });
   });
 
   test('counts the lines given that held a comment', () => {
