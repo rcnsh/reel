@@ -1,5 +1,3 @@
-// Generated assets: the manifest's checks, status and cache keys, the providers' requests, and a generation run
-// against a mocked provider (no request leaves the machine).
 import { afterAll, describe, expect, test } from 'bun:test';
 import { $ } from 'bun';
 import { readFileSync, writeFileSync } from 'node:fs';
@@ -58,7 +56,6 @@ describe('providers', () => {
     const none = (async () => { throw new Error('no request may be made'); }) as unknown as typeof fetch;
     const rows = await runAssets(root, {}, { env: {}, fetch: none });
     expect(rows.map((r) => r.status)).toEqual(['missing', 'missing']);
-    // a 64x32 PNG as the provider's answer
     const png = path.join(root, 'src.png');
     await $`ffmpeg -nostdin -loglevel error -f lavfi -i color=c=red:s=64x32 -frames:v 1 ${png}`;
     const b64 = readFileSync(png).toString('base64');
@@ -71,7 +68,6 @@ describe('providers', () => {
     expect(dims).toBe('1600,900');
     const rec = JSON.parse(readFileSync(path.join(root, 'data/generated-assets.json'), 'utf8'));
     expect(rec.ridge.model).toBe('gpt-image-1');
-    // unchanged: not generated again
     expect((await runAssets(root, {}, { env: { OPENAI_API_KEY: 'k' }, fetch: none }))[0]!.status).toBe('generated');
   });
 });

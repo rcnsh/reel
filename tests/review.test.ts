@@ -1,6 +1,3 @@
-// `reel review` end to end: a short draft of a scratch example, the review server started on it, its page and
-// video fetched, a note posted through the page's API, then read back with `reel notes --json` and through the
-// MCP tools, and resolved there.
 import { afterAll, expect, test } from 'bun:test';
 import { realpathSync } from 'node:fs';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
@@ -16,7 +13,6 @@ afterAll(async () => {
   layers.cleanup();
 });
 
-/** The first line the process writes to stdout. */
 async function firstLine(p: ReturnType<typeof Bun.spawn>) {
   const dec = new TextDecoder();
   let buf = '';
@@ -47,7 +43,6 @@ test.skipIf(!hasChrome)('review a draft: the page, the video in ranges, a note t
   expect(part.status).toBe(206);
   expect((await part.arrayBuffer()).byteLength).toBe(100);
   expect(part.headers.get('content-range')).toMatch(/^bytes 0-99\/\d+$/);
-  // only the page, the video and the API: nothing else of the project, and no other host name
   expect((await fetch(`${url}reel.config.ts`)).status).toBe(404);
   expect((await fetch(url, { headers: { host: 'example.com' } })).status).toBe(403);
 
@@ -56,7 +51,6 @@ test.skipIf(!hasChrome)('review a draft: the page, the video in ranges, a note t
   expect(state.logical).toEqual([1080, 1920]);
   expect(state.timeline.map((c: { id: string }) => c.id)).toEqual(['dawn', 'dusk', 'title', 'overlay']);
 
-  // the page posts the current time: the note lands on that frame's start, with the clips there
   const post = await fetch(`${url}api/notes`, { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: 0.51, text: 'Title too low', rect: { x: 100, y: 1500, w: 880, h: 200 } }) });
   expect(post.status).toBe(200);
   const { note } = await post.json();
@@ -79,10 +73,8 @@ test.skipIf(!hasChrome)('review a draft: the page, the video in ranges, a note t
   const missing = await client.callTool({ name: 'resolve_note', arguments: { project: dir, id: 'zzzz' } });
   expect(missing.isError).toBe(true);
 
-  // the page sees the agent's change
   expect((await (await fetch(`${url}api/notes`)).json()).notes[0].status).toBe('done');
 
-  // a note pinned to the wrong moment moves, through the page's API and the CLI: time, frame and clips together
   const moved = await (await fetch(`${url}api/notes/${note.id}`, { method: 'PATCH', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ t: 3.21 }) })).json();
   expect(moved.note).toMatchObject({ t: 3.2, frame: 96, clips: ['dawn', 'dusk', 'title'], text: 'Title too low' });
   const back = await reel(['notes', 'move', note.id, '--t', '5.8', '--json', '--project', dir]);

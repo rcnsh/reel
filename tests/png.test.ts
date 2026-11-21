@@ -30,8 +30,8 @@ test('diff: identical, a changed patch, a size mismatch', () => {
   expect(stats).toMatchObject({ changed: 12, max: 30, box: [4, 2, 4, 3] });
   expect(stats.fraction).toBeCloseTo(12 / 200, 9);
   expect(stats.mean).toBeCloseTo((12 * 30) / 200, 4);
-  expect(image.data[(3 * 20 + 5) * 4]).toBeGreaterThan(140); // changed pixels are red
-  expect(diffImages(a, b, 30).stats.changed).toBe(0); // within the tolerance
+  expect(image.data[(3 * 20 + 5) * 4]).toBeGreaterThan(140);
+  expect(diffImages(a, b, 30).stats.changed).toBe(0);
   expect(() => diffImages(a, img(10, 10, () => [0, 0, 0]))).toThrow('differ in size');
 });
 

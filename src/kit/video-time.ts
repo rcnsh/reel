@@ -1,5 +1,3 @@
-// A video clip's time: which moment of the source file shows at a moment of the clip (trim, speed, loop), which
-// decoded frame that is (held or blended with the next), and the sound the mix lays under it. Pure functions, so the mapping is tested without a browser.
 import type { SoundClip } from '../config';
 
 export interface VideoTiming {
@@ -16,7 +14,6 @@ export interface VideoTiming {
 /** A decoded frame's place in the source: presentation time and duration (s), in presentation order. */
 export interface FrameSpan { pts: number; dur: number }
 
-/** The source time shown at clip time lt. */
 export function sourceTime(lt: number, o: VideoTiming): number {
   const len = Math.max(0, o.trim[1] - o.trim[0]);
   let x = Math.max(0, lt - o.at[0]) * o.speed;
@@ -29,7 +26,6 @@ export function sourceTime(lt: number, o: VideoTiming): number {
 export function frameAt(frames: FrameSpan[], u: number): number {
   let lo = 0, hi = frames.length - 1;
   if (hi < 0) return -1;
-  // (a hair of tolerance: a time computed as k / fps lands on frame k, not just before it)
   const v = u + 1e-7;
   while (lo < hi) { const m = (lo + hi + 1) >> 1; if (frames[m]!.pts <= v) lo = m; else hi = m - 1; }
   return lo;

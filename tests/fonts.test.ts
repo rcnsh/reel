@@ -1,4 +1,3 @@
-// A project's fonts as the page loads them: family, weight range, width and style read from the files.
 import { expect, test } from 'bun:test';
 import { cpSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';

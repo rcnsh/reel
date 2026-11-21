@@ -77,7 +77,7 @@ def checkpoint() -> Path:
             tmp.write_bytes(data)
             os.replace(tmp, f)
             return f
-        except Exception as e:  # (the next source)
+        except Exception as e:
             errors.append(f"{url}: {e}")
     sys.exit("music_models: could not fetch the Beat This! checkpoint:\n  " + "\n  ".join(errors) + "\n(reel analyze --fast works without it)")
 
@@ -96,7 +96,7 @@ def cached():
         from demucs_mlx.model_converter import get_mlx_cache_dir
 
         return all((get_mlx_cache_dir() / f).exists() for f in ("htdemucs.safetensors", "htdemucs_config.json"))
-    return any(hub.glob("955717e8-*.th"))  # (htdemucs's one checkpoint, as demucs names it in torch hub's cache)
+    return any(hub.glob("955717e8-*.th"))
 
 
 def separate(song):
@@ -115,7 +115,6 @@ def separate(song):
     model = get_model("htdemucs")
     model.eval()
     sr = model.samplerate
-    # (decoded by ffmpeg, which reel needs anyway, so any format the song comes in reads the same)
     with tempfile.TemporaryDirectory() as tmp:
         wav = os.path.join(tmp, "song.wav")
         subprocess.run(["ffmpeg", "-v", "error", "-i", song, "-ac", str(model.audio_channels), "-ar", str(sr), "-c:a", "pcm_f32le", wav], check=True)

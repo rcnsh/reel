@@ -1,4 +1,3 @@
-// Text beside an image: a heading and a body fitted to their boxes, a photo with a slow push in, and a credit.
 import type * as THREE from 'three';
 import { Scene, type Frame, TextBlock, ImageBox, LowerThird, clearRT, LIN, W, H } from 'reel';
 import { BOTTOM, TOP } from './_script';

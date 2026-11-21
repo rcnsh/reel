@@ -60,10 +60,8 @@ test('sequence: a start, a track and a default transition; bad lengths throw', (
   expect(() => sequence([{ id: 'a', scene: load, dur: 1 }, { id: 'b', scene: load, dur: 3, overlap: -1 }])).toThrow("clip 'b': overlap -1 must be");
   expect(() => sequence([], { start: -1 })).toThrow('start -1');
   expect(() => sequence([{ id: 'a', scene: load, dur: 1, overlap: NaN }])).toThrow('no clip before it');
-  // a clip that would reach back over two before it: b is overlapped on both sides by more than its length
   expect(() => sequence([{ id: 'a', scene: load, dur: 10 }, { id: 'b', scene: load, dur: 1, overlap: 0.6 }, { id: 'c', scene: load, dur: 1, overlap: 0.6 }])).toThrow("clip 'c': overlap 0.6 reaches back past the start of the clip before, 'b'");
   expect(sequence([{ id: 'a', scene: load, dur: 10 }, { id: 'b', scene: load, dur: 1, overlap: 0.5 }, { id: 'c', scene: load, dur: 1, overlap: 0.5 }]).map((c) => c.start)).toEqual([0, 9.5, 10]);
-  // (0.1 + 0.2 is 0.30000000000000004: no clip three back for the sake of a rounding error)
   expect(sequence([{ id: 'a', scene: load, dur: 5 }, { id: 'b', scene: load, dur: 0.3, overlap: 0.1 }, { id: 'c', scene: load, dur: 2, overlap: 0.2 }]).map((c) => c.start)).toEqual([0, 4.9, 5]);
   expect(sequence([])).toEqual([]);
 });
@@ -84,10 +82,8 @@ test('clipsFromSections: transitions overlap the clips across each boundary, cen
   ]);
   expect(named.map((c) => c.params)).toEqual([{ n: 'a' }, { n: 'b' }, { n: 'c' }]);
   expect(clipsFromSections(src, mods, { params: { k: 1 } })[2]!.params).toEqual({ k: 1 });
-  // an overlap without a transition crossfades every boundary
   expect(windows(clipsFromSections(src, mods, { overlap: 0.4 })).map((c) => [c.start, c.end])).toEqual([[0, 3.2], [2.8, 5.2], [4.8, 9]]);
   expect(() => clipsFromSections(src, mods, { overlap: 2.2 })).toThrow("section 'b' (2.00 s) is too short");
-  // b's whole length overlapped, half by a and half by c, but never three at once
   expect(windows(clipsFromSections(src, mods, { overlap: 2 })).map((c) => [c.start, c.end])).toEqual([[0, 4], [2, 6], [4, 9]]);
   expect(() => clipsFromSections(src, mods, { overlap: -1 })).toThrow('overlap -1');
 });
@@ -129,9 +125,7 @@ test('resolveProps: the given props over the defaults, key by key, checked again
   expect(() => resolveProps(d, { style: null })).toThrow("'style' expected an object, as in the config's props, got null");
   expect(() => resolveProps({}, { a: 1 })).toThrow('(it has none)');
   expect(() => resolveProps([1], null)).toThrow("the config's props: expected an object, got an array");
-  // (an optional prop: a default of undefined, like null, takes any value)
   expect(resolveProps({ title: 'x', subtitle: undefined }, { subtitle: 'hi' })).toEqual({ title: 'x', subtitle: 'hi' });
-  // (the defaults are not changed)
   expect(d.title).toBe('Hi');
 });
 
@@ -148,7 +142,6 @@ test('defineVideo types src.props from the config\'s props', () => {
   expect(c.timeline({ words: new Words({ lines: [] }), audio: AudioData.empty(), props: { title: 'x', seconds: 3 } }).map((e) => [e.id, e.end])).toEqual([['x', 3]]);
 });
 
-/** Props typed as the authoring skill says: an interface (which has no index signature). */
 interface TitleProps { title: string; n: number }
 
 test('a config with typed props (inferred, or an interface) and a sounds function is still a VideoConfig', () => {

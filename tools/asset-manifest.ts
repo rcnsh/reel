@@ -1,5 +1,3 @@
-// The asset manifest (assets.json in a project): what each generated asset is and whether its file is there.
-// Pure apart from reading files, so it is unit-tested.
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -7,13 +5,11 @@ import type { AssetEntry } from '../src/engine/assets';
 
 export type { AssetEntry };
 
-/** Where `reel assets` records what it generated (committed, so a clone knows which files are generated). */
 export const RECORD = 'data/generated-assets.json';
 
 const KINDS = ['image', 'sfx', 'music'] as const;
 const EXT: Record<AssetEntry['kind'], string[]> = { image: ['.png', '.jpg', '.jpeg', '.webp'], sfx: ['.mp3', '.wav', '.flac'], music: ['.mp3', '.wav', '.flac'] };
 
-/** The entries of an assets.json, checked: unique ids, a known kind, a prompt, an output path in the project of the right type, a size or duration. */
 export function parseManifest(json: unknown, file = 'assets.json'): AssetEntry[] {
   const list = (json as { assets?: unknown })?.assets;
   if (!Array.isArray(list)) throw new Error(`${file}: expected { "assets": [ … ] }`);
@@ -38,7 +34,6 @@ export function parseManifest(json: unknown, file = 'assets.json'): AssetEntry[]
   });
 }
 
-/** What makes a generated file current: its kind, prompt, size or duration and the model that made it. */
 export function assetKey(a: AssetEntry, model: string) {
   return createHash('sha256').update(JSON.stringify({ v: 1, kind: a.kind, prompt: a.prompt.trim(), size: a.size ?? null, duration: a.duration ?? null, model })).digest('hex').slice(0, 16);
 }
@@ -46,10 +41,6 @@ export function assetKey(a: AssetEntry, model: string) {
 export type Status = 'missing' | 'generated' | 'stale' | 'provided';
 export type Record_ = Record<string, { key: string; out: string; model: string }>;
 
-/**
- * Each asset's state: missing (no file), generated (made by reel assets from this prompt), stale (made from a
- * different prompt or settings: regenerated when a key is present), provided (a file someone put there: never replaced).
- */
 export function statusOf(a: AssetEntry, exists: boolean, rec: Record_, key: (a: AssetEntry) => string | null): Status {
   if (!exists) return 'missing';
   const r = rec[a.id];
@@ -58,7 +49,6 @@ export function statusOf(a: AssetEntry, exists: boolean, rec: Record_, key: (a: 
   return k === null || r.key === k ? 'generated' : 'stale';
 }
 
-/** A project's manifest and record (an empty list when it has no assets.json). */
 export function loadAssets(root: string): { entries: AssetEntry[]; record: Record_ } {
   const f = path.join(root, 'assets.json');
   const entries = existsSync(f) ? parseManifest(JSON.parse(readFileSync(f, 'utf8')), f) : [];
@@ -66,12 +56,10 @@ export function loadAssets(root: string): { entries: AssetEntry[]; record: Recor
   return { entries, record: existsSync(r) ? JSON.parse(readFileSync(r, 'utf8')) : {} };
 }
 
-/** The assets whose files are missing: what `reel check` reports. */
 export function missingAssets(root: string): AssetEntry[] {
   return loadAssets(root).entries.filter((a) => !existsSync(path.join(root, a.out)));
 }
 
-/** What a person needs to make an asset by hand. */
 export function describe(a: AssetEntry) {
   return a.kind === 'image' ? `${a.size![0]}×${a.size![1]} px image (${path.extname(a.out).slice(1)})` : `${a.kind === 'sfx' ? 'sound effect' : 'music'}, ${a.duration} s (${path.extname(a.out).slice(1)})`;
 }

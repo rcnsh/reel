@@ -1,0 +1,3 @@
+# LineBatch widens each quad for anti-aliasing and fades hairlines instead of thinning them
+
+The vertex shader in `src/engine/lines.ts` (`LineBatch`) expands each segment's quad by its half width plus 1 physical px, since the capsule SDF's coverage ramp (`0.5 - d`) extends half a pixel past the edge and a quad cut at the edge would clip it. The half width is floored at 0.35 physical px, and a line thinner than 0.7 physical px keeps that minimum width and has its alpha scaled by `w / 0.7` instead: a line that shrank below a pixel would shimmer and break up, while fading keeps hairlines smooth. Both work in physical px (`pxScale`), so hairlines stay crisp at `--scale 2`.

@@ -1,22 +1,14 @@
-// Captions from the project's timed words: pages of at most a few lines, shown as their words are said.
 import { H, W } from '../engine/gl';
 import type { Frame } from '../engine/scene';
 import type { Word, Words } from '../engine/words';
 import { cssColor, esc, graphemes, HtmlComponent, UNIT, type ComponentOptions } from './common';
 
 export interface CaptionsOptions extends ComponentOptions {
-  /** The timed words: `this.ctx.words` (narration), or `Words.timed([...])` for a video without a voice. */
   words: Words;
-  /**
-   * 'highlight' (default): the page's words, those not yet said dimmed and the one being said in the accent;
-   * 'line': the page as a whole, faded in; 'word': one word at a time, large.
-   */
   style?: 'highlight' | 'line' | 'word';
-  /** Where in the safe area (default 'bottom'). */
   position?: 'bottom' | 'top' | 'middle';
   /** Font size in px (default 4.4% of the short side; 'word' twice that). */
   size?: number;
-  /** Lines per page at most (default 2). */
   lines?: number;
   /** A panel behind the text (default true), and its opacity (default 0.82). */
   panel?: boolean;
@@ -34,15 +26,9 @@ export interface CaptionsOptions extends ComponentOptions {
 /** A page of captions: its words and when it shows; `joined[k]`: word k follows the one before without a space. */
 export interface CaptionPage { text: string; words: Word[]; joined: boolean[]; start: number; end: number }
 
-/** East Asian wide and fullwidth characters and emoji: about twice the width of a Latin letter. */
 const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
-/** A text's width in Latin characters: wide characters (CJK, Hangul, fullwidth forms, emoji) count twice. */
 export const textWidth = (s: string) => graphemes(s).reduce((a, g) => a + (WIDE.test(g) ? 2 : 1), 0);
 
-/**
- * A word wider than `max` (a run of CJK text has no spaces, so it arrives as one word) as pieces of at most `max`,
- * its time shared between them by width; the pieces after the first join it without a space.
- */
 function splitWide(w: Word, max: number): { w: Word; joined: boolean }[] {
   const total = textWidth(w.w);
   if (total <= max) return [{ w, joined: false }];
@@ -63,11 +49,6 @@ function splitWide(w: Word, max: number): { w: Word; joined: boolean }[] {
   });
 }
 
-/**
- * Split timed words into caption pages: each line of the words into runs of whole words at most `maxChars`
- * Latin characters wide (CJK and emoji count twice; a word wider than that is split), each shown from its first
- * word until the next page or `hold` after its last word.
- */
 export function captionPages(words: Words, maxChars: number, hold = 0.5): CaptionPage[] {
   const pages: CaptionPage[] = [];
   for (const line of words.lines) {
@@ -87,10 +68,6 @@ export function captionPages(words: Words, maxChars: number, hold = 0.5): Captio
   return pages;
 }
 
-/**
- * Captions in the safe area, driven by timed words. Pages hold at most `lines` lines; their words light up as
- * they are said. Classes: `.cap` (the page), `.w` (a word), `.said`, `.now`.
- */
 export class Captions extends HtmlComponent {
   readonly pages: CaptionPage[];
   private o: CaptionsOptions;
@@ -117,12 +94,10 @@ export class Captions extends HtmlComponent {
         @keyframes capPop { from { opacity: 0; transform: scale(.92); } }`,
     });
     this.o = o;
-    // characters per page: as many as `lines` lines of the box hold at this size (about half an em a character)
     const perLine = Math.max(8, Math.floor(this.box.w / (size * 0.52)));
     this.pages = style === 'word' ? o.words.words.map((w, i, a) => ({ text: w.w, words: [w], joined: [false], start: w.start, end: Math.min(w.end + (o.hold ?? 0.25), a[i + 1]?.start ?? Infinity) })) : captionPages(o.words, perLine * lines, o.hold ?? 0.5);
   }
 
-  /** The page on screen at video time t, or -1. */
   pageAt(t: number) {
     for (let i = this.pages.length - 1; i >= 0; i--) { const p = this.pages[i]!; if (t >= p.start) return t < p.end ? i : -1; }
     return -1;

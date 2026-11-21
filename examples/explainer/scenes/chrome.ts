@@ -1,4 +1,3 @@
-// Over the whole video: captions from the script, a progress bar and a timer.
 import type * as THREE from 'three';
 import { Scene, type Frame, Captions, ProgressBar, Timer, clearRT, W, H } from 'reel';
 import { SCRIPT } from './_script';

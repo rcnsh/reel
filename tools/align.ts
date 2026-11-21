@@ -1,7 +1,3 @@
-// `reel align <recording | folder>`: re-time the video to a real voice. The script is known, so its words are
-// force-aligned to the audio (Qwen3-ForcedAligner) rather than transcribed; `--method whisper` transcribes
-// with Whisper and matches the words heard to the script instead, for a reading that departs from it. Writes the
-// same files as `reel narrate`: audio/narration.flac, data/words.json, data/audio.json.
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -65,7 +61,6 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
   const work = path.join(root, 'audio/.align');
   rmSync(work, { recursive: true, force: true });
   mkdirSync(work, { recursive: true });
-  // a recording, high-passed, at -16 LUFS, without the silence at its ends
   const load = async (f: string, k: string) => {
     const o = path.join(work, `${k}.f32.wav`);
     await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-i', f, '-af', CLEAN, '-ac', '1', '-ar', String(SR), '-c:a', 'pcm_f32le', o]);
@@ -74,7 +69,6 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
 
   let parts: PlateAudio[];
   const warnings: string[] = [];
-  // (every recording is transcribed by one Whisper process, so its model loads once)
   const verify = async (checks: { pcm: Float32Array; words: TimedWord[]; ps: Plate[] }[]) => {
     if (method !== 'qwen' || flags['no-verify']) return;
     const heard = await transcribe(checks.map((c) => ({ pcm: c.pcm, script: '' })), work, 'v');
@@ -108,17 +102,12 @@ export async function align(root: string, src: string, method: 'qwen' | 'whisper
   return { summary: report(r), warnings };
 }
 
-/** Times of each passage's script words: force-aligned, or transcribed with Whisper and matched. */
 async function timeWords(passages: { pcm: Float32Array; words: { w: string }[] }[], method: 'qwen' | 'whisper', work: string, language: string): Promise<TimedWord[][]> {
   if (method === 'qwen') return forcedAlign(passages, path.join(work, 'fa'), language);
   const heard = await transcribe(passages.map((p) => ({ pcm: p.pcm, script: p.words.map((x) => x.w).join(' ') })), work, 'wh');
   return passages.map((p, i) => refine(p.words, heard[i]!, p.pcm));
 }
 
-/**
- * What faster-whisper (small.en) hears in each recording, figures joined; a recording's `script` primes its
- * vocabulary. One process for all of them, so the model loads once.
- */
 async function transcribe(items: { pcm: Float32Array; script: string }[], work: string, name: string): Promise<TimedWord[][]> {
   const jobs = await Promise.all(items.map(async (it, i) => {
     const w48 = path.join(work, `${name}${i}.f32.wav`), w16 = path.join(work, `${name}${i}.wav`);
@@ -133,7 +122,6 @@ async function transcribe(items: { pcm: Float32Array; script: string }[], work: 
   return jobs.map((j) => joinFigures(JSON.parse(readFileSync(j.out, 'utf8'))));
 }
 
-/** Whisper splits figures ("152" ",000", "2" ".06"): join them back into one word. */
 export function joinFigures(heard: { w: string; s: number; e: number }[]): TimedWord[] {
   const out: TimedWord[] = [];
   for (const h of heard) {
@@ -144,10 +132,6 @@ export function joinFigures(heard: { w: string; s: number; e: number }[]): Timed
   return out;
 }
 
-/**
- * One take cut into plates: each cut at the quietest 20 ms in the gap between one plate's last word and the
- * next one's first, so it never falls in a breath or a word; each part's words re-timed from its start.
- */
 export function splitPlates(plates: Plate[], pcm: Float32Array, words: TimedWord[]): PlateAudio[] {
   const db = levels(pcm, SR, 0.005);
   const counts = plates.map((p) => plateWords(p).length);

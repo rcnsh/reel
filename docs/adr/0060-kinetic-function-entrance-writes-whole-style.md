@@ -1,0 +1,3 @@
+# KineticText writes a function entrance's style whole every frame
+
+When `enter` is a function of the piece's progress, `KineticText.update` in `src/kit/kinetic.ts` writes each piece's whole `style` attribute (`--k` plus every property the function returns) rather than setting the returned properties one by one. A property the function leaves out at this `k` must not survive from another frame: setting properties individually would keep it, and the piece would then depend on the frames drawn before it, breaking the rule that a frame is a function of `t` alone (frames render out of order under seeks, `reel check` and adaptive sampling).

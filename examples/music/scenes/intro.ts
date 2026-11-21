@@ -1,4 +1,3 @@
-// The intro: the pad swells (the `other` stem's envelope brightens the glow) under a title card.
 import type * as THREE from 'three';
 import { W, H, Scene, type Frame, FSPass, TitleCard } from 'reel';
 

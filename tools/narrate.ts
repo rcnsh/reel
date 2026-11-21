@@ -1,8 +1,3 @@
-// `reel narrate`: narration.txt to a voice and word times. Each plate is voiced as one passage, trimmed,
-// brought to -16 LUFS and timed (by the voice's own timestamps where it has them, else by the forced aligner),
-// then cached in audio/.narration/ under a key of its text and the voice, so re-running after an edit voices only
-// the plates that changed. A hosted voice's plates are kept as each arrives, so after a failure part-way a re-run
-// voices only those still missing. Writes audio/narration.flac, data/words.json and data/audio.json.
 import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -61,9 +56,6 @@ export async function narrate(root: string, flags: Record<string, string | boole
   const cache = path.join(root, 'audio/.narration'), work = path.join(cache, 'work');
   mkdirSync(work, { recursive: true });
 
-  // A plate's cache is <name>-<key>.flac and .json (its words), each written whole or not at all and kept as soon as
-  // the voice hands the plate over, so a later plate's failure keeps what was paid for. The words go first when the
-  // voice gives them; a .flac alone was voiced by a voice without timestamps but not yet aligned.
   const keys = plates.map((p) => plateKey(voice.id, s, plateText(p)));
   const file = (k: number) => path.join(cache, `${plates[k]!.name}-${keys[k]}`);
   const writeWords = (k: number, words: TimedWord[]) => {
@@ -71,7 +63,7 @@ export async function narrate(root: string, flags: Record<string, string | boole
     renameSync(`${file(k)}.part.json`, `${file(k)}.json`);
   };
   const keep = async (k: number, pcm: Float32Array, words?: TimedWord[]) => {
-    for (const ext of ['flac', 'json']) rmSync(`${file(k)}.${ext}`, { force: true }); // (a previous voicing, under --force)
+    for (const ext of ['flac', 'json']) rmSync(`${file(k)}.${ext}`, { force: true });
     if (words) writeWords(k, words);
     await writeAudio(pcm, `${file(k)}.part.flac`);
     renameSync(`${file(k)}.part.flac`, `${file(k)}.flac`);
@@ -107,7 +99,6 @@ export async function narrate(root: string, flags: Record<string, string | boole
       writeWords(x.k, timed[i]!);
     }
   }
-  // (cached plates no longer in the script, or voiced differently, are removed)
   const current = new Set(plates.flatMap((_, k) => [`${path.basename(file(k))}.flac`, `${path.basename(file(k))}.json`]));
   for (const f of readdirSync(cache)) if (f !== 'work' && !current.has(f)) rmSync(path.join(cache, f), { force: true });
   rmSync(work, { recursive: true, force: true });

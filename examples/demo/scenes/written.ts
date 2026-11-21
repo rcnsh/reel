@@ -1,6 +1,3 @@
-// Demo plate: a single-stroke font written by a spark in step with the narration's word timings, with a
-// sound cue at the start of every word for the mix. The line breaks to fit the frame's width, so it holds in
-// 16:9 and vertical alike.
 import type * as THREE from 'three';
 import { Scene, type Frame, Layer2D, W, H, clearRT, LIN, rgba, strokeText, drawStrokeText, writtenLength, type StrokeText, sparkHead2D, cue, reportStrokeText } from 'reel';
 
@@ -14,7 +11,6 @@ export default class Written extends Scene {
 
   override init() {
     const line = this.ctx.words.get('pen writes');
-    // words onto rows no wider than the frame less its margins
     const groups: (typeof line.words)[] = [[]];
     for (const w of line.words) {
       const cur = groups.at(-1)!, next = [...cur, w].map((x) => x.w).join(' ');
@@ -24,7 +20,6 @@ export default class Written extends Scene {
     const top = H / 2 - ((groups.length - 1) * SIZE * LEADING) / 2;
     this.rows = groups.map((ws, r) => {
       const st = strokeText(ws.map((w) => w.w).join(' '), 'script', SIZE), charTimes: [number, number][] = [];
-      // each character is written during its word; spaces take no time
       for (const w of ws) {
         cue('tick', w.start);
         const n = Array.from(w.w).length;

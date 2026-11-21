@@ -1,11 +1,9 @@
-// `reel diff` and the MCP diff tool: two images, or a render of one time against a saved image.
 import path from 'node:path';
 import { UsageError } from './args';
 import { freeName, type Req, type Result } from './ops';
 import { describeDiff, diffImages, readPng, writePng } from './png';
 
 export interface DiffOpts {
-  /** The first image; or, with `t` and `req`, a render of that time (at `b`'s size: goldens are downscaled). */
   a?: string;
   t?: number;
   req?: Req;
@@ -13,12 +11,10 @@ export interface DiffOpts {
   tol: number;
   threshold: number;
   out?: string;
-  /** The project, for the default place of the diff image (out/diffs); without one it goes beside `a`. */
   project?: string;
   render: (q: Req) => Promise<Result>;
 }
 
-/** Compare; the result is not ok when more than `threshold` of the pixels changed. Paths absolute. */
 export async function runDiff(o: DiffOpts): Promise<Result> {
   const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
   let a = o.a;

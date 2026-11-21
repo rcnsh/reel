@@ -1,4 +1,3 @@
-// The captions: what the video says and when (video seconds), timed per word by Words.timed.
 import { Words } from 'reel';
 
 export const SCRIPT = Words.timed([
@@ -10,5 +9,4 @@ export const SCRIPT = Words.timed([
   { text: 'Clips come in by iris, clock, whip, flash, or a shader of your own.', start: 26.0, end: 36.4 },
 ]);
 
-/** The content area: below the progress bar and timer, above the captions. */
 export const TOP = 0.15, BOTTOM = 0.74;

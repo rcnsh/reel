@@ -1,21 +1,12 @@
-// A narration script (narration.txt) and the timing files made from it: what `reel narrate` and `reel align`
-// share. Pure, so it is unit-tested; tools/timing-files.ts writes the results.
 
-/** A plate: a `# name` header and the lines under it. */
 export interface Plate { name: string; lines: string[] }
 
-/** A timed word: the script's token (punctuation attached) and its times in seconds. */
 export interface TimedWord { w: string; start: number; end: number }
 
-/** A line of data/words.json. */
 export interface TimedLine { i: number; plate: string; text: string; start: number; end: number; words: TimedWord[] }
 
 export interface Section { name: string; start: number; end: number }
 
-/**
- * The plates of a script: `# name` headers, each followed by its lines; blank lines are ignored and `//` starts a
- * comment line. Throws on text before the first header, a plate without lines, or a name used twice.
- */
 export function parseScript(text: string, file = 'narration.txt'): Plate[] {
   const plates: Plate[] = [];
   text.split('\n').forEach((raw, n) => {
@@ -36,19 +27,12 @@ export function parseScript(text: string, file = 'narration.txt'): Plate[] {
   return plates;
 }
 
-/** The text of a plate as one passage for a voice (its lines in order). */
 export const plateText = (p: Plate) => p.lines.join(' ');
 
-/** The script's words of a plate, each with the index of its line in the plate. */
 export const plateWords = (p: Plate) => p.lines.flatMap((text, line) => text.split(' ').map((w) => ({ w, line })));
 
 const r3 = (x: number) => Math.round(x * 1000) / 1000;
 
-/**
- * The lines and sections of a timed script. `words[k]` holds plate k's words, in order and in video time, one per
- * script word (plateWords). Each section starts `cutLead` seconds before its plate's first word (never before the
- * end of the previous plate's last word; the first at 0) and runs to the next section, the last to `duration`.
- */
 export function timing(plates: Plate[], words: TimedWord[][], duration: number, cutLead = 0.25): { lines: TimedLine[]; sections: Section[] } {
   const lines: TimedLine[] = [];
   plates.forEach((p, k) => {
@@ -68,10 +52,6 @@ export function timing(plates: Plate[], words: TimedWord[][], duration: number, 
   return { lines, sections };
 }
 
-/**
- * data/audio.json for a narrated video: its length, the track, one section per plate, and a silent 100 BPM grid
- * so the engine's beat helpers still answer (no envelopes or onsets).
- */
 export function narrationAudioJSON(duration: number, sections: Section[], track: string, notes: string) {
   const bpm = 100, period = 60 / bpm, beats: number[] = [];
   for (let b = 0; b * period < duration; b++) beats.push(r3(b * period));

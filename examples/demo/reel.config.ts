@@ -1,5 +1,3 @@
-// The demo: two narrated plates (voiced by Kokoro, a local model), each shown by the scene of the same name, in
-// the print theme (ink on paper).
 import { clipsFromSections, defineVideo } from 'reel/config';
 
 export default defineVideo({

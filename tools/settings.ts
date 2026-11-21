@@ -1,5 +1,3 @@
-// The narration settings a run uses: the defaults, then the project's config (`narration` in reel.config.ts),
-// then the command's flags. Pure, so it is unit-tested; and the cache key of a voiced plate.
 import { createHash } from 'node:crypto';
 import type { NarrationSettings } from '../src/config';
 
@@ -9,7 +7,6 @@ export const DEFAULTS: Resolved = { voice: 'kokoro:af_heart', speed: 1, lead: 0.
 
 const KEYS = ['voice', 'speed', 'model', 'lead', 'hold', 'tail', 'language'];
 
-/** Settings from the config's `narration` and flags (strings from the command line), checked. */
 export function resolveSettings(config: NarrationSettings | undefined, flags: Record<string, string | boolean | undefined>): Resolved {
   for (const k of Object.keys(config ?? {})) if (!KEYS.includes(k)) throw new Error(`reel.config.ts: narration.${k} is not a setting (expected ${KEYS.join(', ')})`);
   const o: Record<string, unknown> = { ...DEFAULTS, ...(config ?? {}) };
@@ -27,10 +24,6 @@ export function resolveSettings(config: NarrationSettings | undefined, flags: Re
   return r;
 }
 
-/**
- * What makes a voiced plate reusable: the voice, its rate and model, the text, and the language (the forced aligner
- * times a voice without timestamps in it); not the pauses, applied later.
- */
 export function plateKey(voice: string, s: Resolved, text: string) {
   return createHash('sha256').update(JSON.stringify({ v: 1, voice, speed: s.speed, model: s.model ?? null, language: s.language, text })).digest('hex').slice(0, 16);
 }

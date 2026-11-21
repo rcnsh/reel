@@ -1,24 +1,13 @@
-// Data components animated by a progress value from 0 to 1 (by default the first 1.4 s of their window, eased):
-// bar charts (vertical or horizontal, plain or stacked), a line chart, a number counter, a progress bar and a timer.
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
 import { cssColor, esc, HtmlComponent, lineWidth, progressOf, safeBox, UNIT, val, type Anim, type ComponentOptions, type ProgressOptions } from './common';
 
-/**
- * How far item i of n has grown (0 to 1) at progress p: one after another, each over 3/(n+2) of the progress and
- * overlapping its neighbours (all done at p = 1), or with `stagger` false all together, k = p.
- */
 export function growth(p: number, i: number, n: number, stagger = true) {
   return stagger ? ease.outCubic(clamp((p * (n + 2) - i) / 3)) : clamp(p);
 }
 
-/** Numbers as text: `en-US` grouping (the same on every machine), at most `digits` decimals. */
 export const formatNumber = (x: number, digits = 0) => x.toLocaleString('en-US', { minimumFractionDigits: digits, maximumFractionDigits: digits });
 
-/**
- * The default colour of series (or slice) i, from the keys every palette has: accent, a light accent, fg, a light
- * fg, accentHi, accentLo, then round again.
- */
 export function seriesColor(i: number) {
   const c = ['var(--accent)', 'color-mix(in srgb, var(--accent) 45%, var(--bg))', 'var(--fg)', 'color-mix(in srgb, var(--fg) 45%, var(--bg))', 'var(--accent-hi)', 'var(--accent-lo)'];
   return c[((i % c.length) + c.length) % c.length]!;
@@ -45,29 +34,16 @@ export function stackBars(bars: number[][]) {
 type Orientation = 'vertical' | 'horizontal';
 
 interface BarsOptions extends ProgressOptions {
-  /** The value of a full bar (default the largest value, or for stacked bars the largest total). */
   max?: number;
-  /** A value's label (default formatNumber). */
   format?: (v: number) => string;
-  /** The index of a bar to pick out. */
   highlight?: number;
-  /** A title above the chart. */
   title?: string;
-  /**
-   * Bars grow one after another (default true). False: all together, each in proportion, so the chart never shows
-   * a smaller bar ahead of a larger one (for a comparison whose order is the point).
-   */
   stagger?: boolean;
-  /** Bars stand up from a baseline (default) or run right from an axis on the left, labels beside them. */
   orientation?: Orientation;
 }
 
 interface BarsSpec { labels: string[]; totals: number[]; color?: string; segs?: { colors: string[]; spans: [number, number][][] }; legend?: { label: string; color: string }[]; label: string }
 
-/**
- * What bar charts share: markup and CSS for vertical and horizontal bars, each a `.fill` (holding `.seg`s when
- * stacked) with its `.value` and `.label`, and an update that grows them.
- */
 abstract class Bars extends HtmlComponent {
   private bo: BarsSpec;
   constructor(o: BarsOptions, bo: BarsSpec) {
@@ -79,7 +55,6 @@ abstract class Bars extends HtmlComponent {
       : `<div class="bar${i === o.highlight ? ' hi' : ''}"><span class="value"></span><div class="fill">${segs(i)}</div><span class="label">${esc(l)}</span></div>`).join('');
     const legend = bo.legend ? `<div class="legend">${bo.legend.map((s) => `<span class="key"><i style="background: ${s.color}"></i>${esc(s.label)}</span>`).join('')}</div>` : '';
     const title = `.title { font: 700 ${Math.round(fs * 1.4)}px/1.2 Archivo; }`;
-    // (the room a horizontal bar leaves at its end for its value: the longest label of the largest value)
     const fmt = o.format ?? formatNumber, room = Math.ceil(Math.max(...bo.totals.map((t) => fmt(t).length), 1) * fs * 0.62 + fs * 0.8);
     const css = hz
       ? `.frame { position: absolute; inset: 0; display: flex; flex-direction: column; gap: ${fs}px; }
@@ -99,7 +74,6 @@ abstract class Bars extends HtmlComponent {
         .bar.hi .fill { background: var(--fg); }
         .value { font: 600 ${fs}px/1.3 Archivo; font-variant-numeric: tabular-nums; margin-bottom: ${Math.round(fs * 0.3)}px; }
         .label { position: absolute; top: 100%; margin-top: ${Math.round(fs * 0.4)}px; font: 400 ${fs}px/1.2 Archivo; color: color-mix(in srgb, var(--fg) 75%, var(--bg)); white-space: nowrap; }`;
-    // stacked: segments placed in their bar by their shares, the bar clipped to its rounded end; a highlight dims the rest
     const stacked = !bo.segs ? '' : `
         .fill, .bar.hi .fill { position: relative; overflow: hidden; background: none; }
         .seg { position: absolute; ${hz ? 'top: 0; bottom: 0; left: calc(var(--a) * 100%); width: calc((var(--b) - var(--a)) * 100%);' : 'left: 0; right: 0; bottom: calc(var(--a) * 100%); height: calc((var(--b) - var(--a)) * 100%);'} }
@@ -120,7 +94,6 @@ abstract class Bars extends HtmlComponent {
     const max = o.max ?? Math.max(...this.bo.totals, 1e-9);
     this.layer.$$('.bar').forEach((e, i) => {
       const k = growth(p, i, n, o.stagger !== false), v = this.bo.totals[i]!;
-      // (a value past max fills its bar)
       this.layer.set(e, { vars: { h: (Math.min(1, v / max) * k).toFixed(4) } });
       this.layer.set(e.querySelector('.value')!, { text: k > 0 ? (o.format ?? formatNumber)(v * k) : '' });
     });
@@ -129,16 +102,9 @@ abstract class Bars extends HtmlComponent {
 
 export interface BarChartOptions extends BarsOptions {
   data: { label: string; value: number }[];
-  /** Bar colour (palette key or CSS colour, default accent); the `highlight`ed bar is drawn in fg instead. */
   color?: string;
 }
 
-/**
- * A bar chart: bars grow from the baseline one after another (or together, `stagger: false`) as progress runs 0 to
- * 1, with their values above and labels below; `orientation: 'horizontal'` runs them right from an axis, labels on
- * the left and values at their ends. Markup: `.frame` (a column) > `.title`, `.bars` > `.bar` > `.value`, `.fill`,
- * `.label` (horizontal: `.bars` is a grid, `.bar` > `.label`, `.track` > `.fill`, `.value`).
- */
 export class BarChart extends Bars {
   constructor(o: BarChartOptions) {
     super(o, { labels: o.data.map((d) => d.label), totals: o.data.map((d) => d.value), color: o.color, label: 'bar chart' });
@@ -146,20 +112,11 @@ export class BarChart extends Bars {
 }
 
 export interface StackedBarChartOptions extends BarsOptions {
-  /** One bar per item: its label and one value per series (0 or more), stacked bottom (or left) first. */
   data: { label: string; values: number[] }[];
-  /** The series, in the order of each bar's values: a name for the legend and a colour (default seriesColor(i)). */
   series: { label: string; color?: string }[];
-  /** Show the legend under the title (default true). */
   legend?: boolean;
 }
 
-/**
- * Stacked bars, vertical or horizontal: each bar grows as a whole (one after another, or together with
- * `stagger: false`) with its segments in proportion, its total at its end, and a legend of the series. A
- * `highlight`ed bar keeps its colours and the rest are dimmed. Markup as BarChart, plus `.legend` > `.key` and
- * `.seg` inside each `.fill`.
- */
 export class StackedBarChart extends Bars {
   constructor(o: StackedBarChartOptions) {
     const stacks = stackBars(o.data.map((d) => d.values));
@@ -174,28 +131,20 @@ export class StackedBarChart extends Bars {
 }
 
 export interface LineChartOptions extends ProgressOptions {
-  /** One series of values, or several, evenly spaced along x. */
   series: number[] | { label?: string; values: number[]; color?: string }[];
-  /** Labels along x (the first and last are shown). */
   labels?: string[];
   min?: number;
   max?: number;
   title?: string;
-  /** The last value's label (default formatNumber). */
   format?: (v: number) => string;
 }
 
-/**
- * A line chart drawn left to right as progress runs 0 to 1 (an SVG path revealed along its length), with a dot
- * and the value at its head. Classes: `.title`, `.plot`, `.line`, `.head`, `.value`, `.axis`.
- */
 export class LineChart extends HtmlComponent {
   private o: LineChartOptions;
   private head: (p: number) => { v: number; x: number; y: number };
   constructor(o: LineChartOptions) {
     const fs = Math.round(UNIT * 0.028), box = o.box ?? safeBox(0.12);
     const series = (typeof o.series[0] === 'number' ? [{ values: o.series as number[] }] : (o.series as { values: number[]; color?: string }[])).map((s, i) => ({ values: s.values, color: cssColor(s.color ?? (i === 0 ? 'accent' : 'fg')) }));
-    // (no values at all: an empty plot with its title and axis, no line and no head)
     const all = series.flatMap((s) => s.values), lo = o.min ?? Math.min(0, ...all), hi = o.max ?? (all.length ? Math.max(...all) : lo + 1);
     const titleH = o.title ? fs * 2.4 : 0, axisH = o.labels ? fs * 2 : 0;
     const pw = Math.round(box.w - fs * 4), ph = Math.round(box.h - titleH - axisH - fs * 1.6);
@@ -219,7 +168,6 @@ export class LineChart extends HtmlComponent {
         .axis { display: flex; justify-content: space-between; width: ${pw}px; margin-top: ${Math.round(fs * 0.5)}px; font: 400 ${fs}px Archivo; color: color-mix(in srgb, var(--fg) 75%, var(--bg)); }`,
     });
     this.o = o;
-    // the line is revealed left to right by x, and its head sits on the first series at that x
     const s = series[0]?.values ?? [];
     this.head = (p: number) => {
       if (!s.length) return { v: NaN, x: p * pw, y: ph };
@@ -233,7 +181,6 @@ export class LineChart extends HtmlComponent {
     const p = progressOf(this.o, f, this.window(f)[0]), h = this.head(p), on = p > 0 && !Number.isNaN(h.v);
     this.layer.vars({ x: `${h.x.toFixed(2)}px` });
     this.layer.set('.head', { style: { left: `${h.x.toFixed(2)}px`, top: `${h.y.toFixed(2)}px`, display: on ? '' : 'none' } });
-    // (the value's label slides from left aligned at the start to right aligned at the end, so it stays in the box)
     this.layer.set('.value', { text: on ? (this.o.format ?? formatNumber)(h.v) : '', style: { left: `${h.x.toFixed(1)}px`, top: `${h.y.toFixed(1)}px`, transform: `translate(${(-p * 100).toFixed(2)}%, -150%)` } });
   }
 }
@@ -241,23 +188,16 @@ export class LineChart extends HtmlComponent {
 export interface CounterOptions extends ProgressOptions {
   to: number;
   from?: number;
-  /** Decimals (default 0), or a format of your own. */
   digits?: number;
   format?: (v: number) => string;
   prefix?: string;
   suffix?: string;
-  /** A caption under the number. */
   caption?: string;
   size?: number;
   color?: string;
-  /** Where the number and caption sit across the box (default center). */
   align?: 'left' | 'center' | 'right';
 }
 
-/**
- * A number counting from `from` to `to` as progress runs 0 to 1, with a caption. Markup: `.frame` (a column, centred
- * vertically, aligned by `align`) > `.num`, `.cap`.
- */
 export class Counter extends HtmlComponent {
   private o: CounterOptions;
   constructor(o: CounterOptions) {
@@ -278,14 +218,11 @@ export class Counter extends HtmlComponent {
 }
 
 export interface ProgressBarOptions extends ComponentOptions {
-  /** 0 to 1 (default the clip's progress, f.p). */
   progress?: Anim<number>;
-  /** Text beside the bar, or a function of the frame. */
   text?: Anim<string>;
   color?: string;
 }
 
-/** A progress bar along the bottom of the safe area by default. Classes: `.track`, `.fill`, `.label`. */
 export class ProgressBar extends HtmlComponent {
   private o: ProgressBarOptions;
   constructor(o: ProgressBarOptions = {}) {
@@ -308,7 +245,6 @@ export class ProgressBar extends HtmlComponent {
 }
 
 export interface TimerOptions extends ComponentOptions {
-  /** Seconds shown at the start of the window and at its end (default counts up from 0 over the window). */
   from?: number;
   to?: number;
   /** 'm:ss' (default), 'mm:ss', 'ss', or 'm:ss.t' (tenths). */
@@ -317,7 +253,6 @@ export interface TimerOptions extends ComponentOptions {
   color?: string;
 }
 
-/** Seconds as a clock: 'm:ss', 'mm:ss', 'ss' or 'm:ss.t'. */
 export function clock(s: number, format: TimerOptions['format'] = 'm:ss') {
   const t = Math.max(0, s), tenths = format === 'm:ss.t';
   const whole = tenths ? Math.floor(t * 10 + 1e-6) / 10 : Math.floor(t + 1e-6);
@@ -327,7 +262,6 @@ export function clock(s: number, format: TimerOptions['format'] = 'm:ss') {
   return `${format === 'mm:ss' ? String(m).padStart(2, '0') : m}:${ss}`;
 }
 
-/** A clock counting up (or down, with from > to) across its window. Classes: `.clock`. */
 export class Timer extends HtmlComponent {
   private o: TimerOptions;
   constructor(o: TimerOptions = {}) {

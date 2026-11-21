@@ -1,10 +1,3 @@
-// `reel mix <in.mp4> <out.mp4> [--from 0]`: the finished sound under a rendered video. The project's track (the
-// narration, or a song) is read from its lossless file rather than from the render, music beds and cue sounds are
-// laid with it, and the sum is brought to a loudness target in two passes (EBU R128: measure with ebur128, then a
-// linear gain where the true-peak ceiling allows it, else loudnorm's own two passes) and encoded once, in the output container's codec (AAC in MP4, 24-bit PCM in MOV, Opus
-// in WebM). The picture is copied. `reel video --mix` runs this after
-// rendering, so one command makes the finished file.
-//
 // mix.json in the project root says what to lay where (every key optional):
 //   {
 //     "music": [{ "file": "bed.flac", "from": "intro", "to": "outro", "db": -17, "fadeIn": 2, "fadeOut": 4 }, { "file": "pad.flac", "at": 12 }],
@@ -65,22 +58,14 @@ export interface MixOptions {
   root: string;
   input: string;
   output: string;
-  /** The timeline time the video starts at. */
   from?: number;
-  /** The clips and cues (default: data/cues.json). */
   events?: Events;
-  /** A subtitle file (.srt or .vtt) to add as a soft track. */
   subtitles?: string;
 }
 
-/** The cue sounds the engine ships (tools/make_sounds.ts): tick, click, pop, whoosh, swell, impact. */
 export function bundledDir() { return path.join(import.meta.dir, '..', 'sounds'); }
 export function bundledSounds() { return readdirSync(bundledDir()).filter((f) => f.endsWith('.wav')).map((f) => f.slice(0, -4)); }
 
-/**
- * A sound file named in mix.json or by a sound on the timeline: a path in the project, else in its audio/ folder,
- * else one of the engine's bundled sounds by name.
- */
 export function soundFile(root: string, file: string) {
   for (const f of [path.join(root, file), path.join(root, 'audio', file)]) if (path.resolve(f).startsWith(root + path.sep) && existsSync(f) && statSync(f).isFile()) return f;
   const name = file.replace(/^reel:/, '').replace(/\.wav$/, '');
@@ -88,7 +73,6 @@ export function soundFile(root: string, file: string) {
   throw new Error(`mix.json names ${file}, which is not in ${path.join(root, 'audio')} nor one of the bundled sounds (${bundledSounds().join(', ')})`);
 }
 
-/** The project's track (data/audio.json `track`), or null for a silent video. */
 export function projectTrack(root: string): string | null {
   const f = path.join(root, 'data/audio.json');
   if (!existsSync(f)) return null;
@@ -97,10 +81,6 @@ export function projectTrack(root: string): string | null {
   return t && existsSync(path.join(root, t)) ? path.join(root, t) : null;
 }
 
-/**
- * How a finished file's container carries the mix and subtitles: AAC in MP4, 24-bit PCM in MOV (an editing
- * master), Opus and WebVTT in WebM. Throws for a container that carries no sound.
- */
 export function containerOf(file: string): { audio: string[]; subtitles: string; flags: string[] } {
   const ext = path.extname(file).toLowerCase();
   if (ext === '.mp4' || ext === '.m4v') return { audio: ['-c:a', 'aac', '-b:a', '320k'], subtitles: 'mov_text', flags: ['-movflags', '+faststart'] };
@@ -122,14 +102,10 @@ export async function mixVideo(o: MixOptions) {
     if (!existsSync(cuesPath)) throw new Error(`${cuesPath} is missing: run \`reel events\` first (it writes the clips and the scenes' cues)`);
     ev = JSON.parse(readFileSync(cuesPath, 'utf8')) as Events;
   }
-  // (a cue kind named after a bundled sound needs no entry in mix.json)
   const bundled = bundledSounds();
   for (const c of ev.cues) if (!cfg.cues?.[c.kind] && bundled.includes(c.kind)) cfg.cues = { ...cfg.cues, [c.kind]: { file: c.kind, db: -6 } };
   const dur = await durationOf(input);
   const track = projectTrack(root);
-  // the timeline's sounds: each file must hold sound, and its length is needed where a sound plays to its end; a music
-  // bed's, to start it part-way through or end it with its file
-  // (a bed whose container gives no duration counts as endless: if it does not loop it then plays to its `to`)
   const lengths = new Map<string, number>(), bedLengths = new Map<string, number>();
   for (const m of cfg.music ?? []) {
     const f = soundFile(root, m.file);
@@ -151,12 +127,10 @@ export async function mixVideo(o: MixOptions) {
   } finally { rmSync(work, { recursive: true, force: true }); }
 }
 
-/** Write a cue kind's track: its sound decoded once and summed at each offset, a block at a time, as raw f32. */
 async function cueTrack(c: CueLay) {
   const r = await run(['ffmpeg', '-nostdin', '-loglevel', 'error', '-i', c.file, '-map', '0:a:0', '-af', FMT, '-f', 'f32le', '-'], { quiet: true, nothrow: true });
   if (r.exitCode !== 0) throw new Error(`ffmpeg (decoding ${c.file}, the sound of cue kind '${c.kind}'): ${r.stderr.slice(-1200)}`);
   const src = new Float32Array(r.stdout.buffer, r.stdout.byteOffset, r.stdout.byteLength / 4);
-  // (offsets are in time order)
   const total = c.offsets.at(-1)! + src.length / 2, block = 48000 * 10;
   const w = Bun.file(c.track).writer();
   for (let s = 0; s < total; s += block) { w.write(cueBlock(src, c.gain, c.offsets, s, Math.min(block, total - s))); await w.flush(); }
@@ -166,10 +140,7 @@ async function cueTrack(c: CueLay) {
 async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: ReturnType<typeof loudnessTarget>, track: string | null) {
   const { input, output } = o;
   const ins = ['-i', input, ...g.inputs];
-  // (one thread through the filters: amix and the sidechain then see their inputs' frames in the same order every
-  // run, so the same project mixes to the same samples)
   const det = ['-nostdin', '-hide_banner', '-filter_complex_threads', '1', '-threads', '1'];
-  // the loudness: measured by ebur128, then a linear gain where the true peak allows it, else loudnorm's two passes
   let gain = '';
   if (!g.silent && target) {
     const m = await ffmpegR128([...det, '-loglevel', 'error', ...ins, '-filter_complex', `${g.filter};[mixed]${EBUR128}[a]`, '-map', '[a]', '-f', 'null', '-'], 'measuring the mix');
@@ -185,8 +156,6 @@ async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: Ret
   const subs = o.subtitles ? ['-i', o.subtitles] : [];
   const box = containerOf(output);
   const subMap = o.subtitles ? ['-map', `${ins.filter((x) => x === '-i').length}:s`, '-c:s', box.subtitles, '-metadata:s:s:0', 'language=eng'] : [];
-  // (written beside the output and put in place once finished: a failed or stopped mix leaves the previous file)
-  // (spawned rather than through the shell: a stopped mix kills its ffmpeg before removing the partial)
   const dest = destOf(output), partial = partialOf(dest);
   const ff = spawnChild(['ffmpeg', ...det, '-loglevel', 'error', '-y', ...ins, ...subs, '-filter_complex', `${g.filter};${tail}`, '-map', '0:v', '-c:v', 'copy', '-map', '[a]', ...box.audio, '-ar', '48000', ...subMap, '-fflags', '+bitexact', '-flags:a', '+bitexact', ...box.flags, partial], { stdin: 'ignore', stdout: 'ignore', stderr: 'pipe' });
   const offAbort = onAbort(() => { ff.kill(9); rmSync(partial, { force: true }); });
@@ -195,7 +164,6 @@ async function encode(o: MixOptions, g: ReturnType<typeof buildMix>, target: Ret
     if (code !== 0) throw new Error(`ffmpeg (the mix): ${err.slice(-1200)}`);
     commit(partial, dest);
   } finally { rmSync(partial, { force: true }); offAbort(); }
-  // (measured from the file, so what is reported includes the encoder's overshoot)
   const loud = g.silent ? null : await loudnessOf(output);
   const what = [track ? `the track (${path.basename(track)})` : 'no track', `${g.segments} music segment${g.segments === 1 ? '' : 's'}`, ...g.counts].join(', ');
   return {

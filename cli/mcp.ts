@@ -1,5 +1,3 @@
-// `reel mcp`: a stdio MCP server for agents, over the same warm renderer as the CLI. Rendering and inspection
-// only: agents author a video by editing its files (reel.config.ts, scenes/*.ts) and use these tools to look.
 import { McpServer } from '@modelcontextprotocol/sdk/server/mcp.js';
 import { StdioServerTransport } from '@modelcontextprotocol/sdk/server/stdio.js';
 import { readFileSync } from 'node:fs';
@@ -15,7 +13,6 @@ import { listed, notesPath, patchNote, readNotes } from './notes';
 import { downscale, encodePng, readPng } from './png';
 import { ENGINE, projectDir } from './server';
 
-/** Inline images: at most this long side unless full size is asked for, and at most this many per call. */
 const PREVIEW = 1280, MAX_IMAGES = 12;
 
 type Content = { type: 'text'; text: string } | { type: 'image'; data: string; mimeType: string };
@@ -38,7 +35,6 @@ const imageOpts = {
   max_size: z.number().int().min(128).max(4096).optional().describe(`The long side of the images returned, in px (default ${PREVIEW}): 640 makes a cheap overview of a contact sheet. The files on disk are always full size.`),
 };
 
-/** A request from a tool's arguments, checked by the same rules as the CLI's flags. */
 function reqOf(op: Op, a: Record<string, any>, args: Record<string, unknown>): Req {
   const v: Values = {
     size: a.size, fps: a.fps === undefined ? undefined : String(a.fps), scale: a.scale === undefined ? undefined : String(a.scale),
@@ -49,30 +45,20 @@ function reqOf(op: Op, a: Record<string, any>, args: Record<string, unknown>): R
 
 const text = (x: unknown): Content => ({ type: 'text', text: typeof x === 'string' ? x : JSON.stringify(x, null, 1) });
 const image = (b64: string): Content => ({ type: 'image', data: b64, mimeType: 'image/png' });
-/** A PNG file as an inline image (downscaled unless full size is asked for). */
 const fileImage = (file: string, full?: boolean, max = PREVIEW) => image((full ? readFileSync(file) : encodePng(downscale(readPng(file), max))).toString('base64'));
 
-/** A result's JSON for the model: without the inline image data (that goes in image blocks). */
 function summary(r: Result, drop: string[] = ['previews']) {
   const o: Record<string, unknown> = {};
   for (const [k, v] of Object.entries(r)) if (!drop.includes(k) && !(Array.isArray(v) && !v.length && (k === 'logs' || k === 'warnings'))) o[k] = v;
   return o;
 }
 
-/** Run a tool body; a thrown error becomes an error result the model can read. */
 async function guard(f: () => Promise<ToolResult>): Promise<ToolResult> {
   pending++;
   try { return await f(); } catch (e) { return { content: [text(String((e as Error)?.message ?? e))], isError: true }; } finally { pending--; }
 }
-/** Tool calls being answered now: the server does not exit under them when its input ends. */
 let pending = 0;
 
-// ---- video jobs: `reel video` run detached (cli/jobs.ts), so a job outlives the server that started it ----
-
-/**
- * The `reel video` command line for video_start's arguments. Without `out` the CLI picks the default for the format
- * (out/video.mp4, out/video.hevc.mp4, out/video.draft.mp4, out/png/frame_NNNNNN.png, ...).
- */
 export function videoArgs(a: Record<string, any>, proj: string): string[] {
   const args = ['video', '--project', proj, '--json', '--progress'];
   if (a.out) args.push('--out', path.resolve(a.out));
@@ -88,10 +74,8 @@ function startVideo(a: Record<string, any>): JobView {
   const out = a.out ? path.resolve(a.out) : '(the format\'s default under out/; the result names the file)';
   return startJob(['bun', path.join(ENGINE, 'cli/reel.ts'), ...videoArgs(a, proj)], { project: proj, out, wait: !!a.wait });
 }
-/** A job for the model: what it needs, without the bookkeeping. */
 const jobOut = ({ started: _s, project: _p, ...v }: JobView) => v;
 
-/** A project tool (narrate, align, analyze, mix) run to completion: its output and exit code. */
 async function tool(name: string, proj: string, args: string[]): Promise<ToolResult> {
   const r = await run(['bun', path.join(ENGINE, 'cli/reel.ts'), name, '--project', projectDir(proj), ...args], { quiet: true, nothrow: true });
   const out = r.text(), err = r.stderr, code = r.exitCode;
@@ -103,7 +87,6 @@ export async function serveMcp() {
     instructions: 'reel renders deterministic WebGL videos from a project folder (reel.config.ts and scenes/*.ts). Author by editing those files; use these tools to look: project_info first, then render_still / motion_strip / contact_sheet to see frames, check_video to find layout and render problems, video_start to export, review_notes for what a person asked to change in a render (resolve_note once fixed). Every tool takes the project folder. Renders go through a warm background renderer per project, so repeated calls are fast, and it picks up file edits on the next call.',
   });
 
-  // (arguments are strict, like the CLI's flags: a misspelt `size` is an error, not a check of the wrong frame)
   const register = server.registerTool.bind(server);
   server.registerTool = ((name: string, cfg: { inputSchema: z.ZodRawShape }, cb: never) => register(name, { ...cfg, inputSchema: z.strictObject(cfg.inputSchema) }, cb)) as typeof server.registerTool;
 
@@ -202,7 +185,7 @@ export async function serveMcp() {
       mix: z.boolean().optional().describe('The finished file: render, then mix the track, music and cues at the loudness target (mp4, mov, webm).'), subtitles: z.boolean().optional().describe('Like mix, with the timed words as a soft subtitle track.'),
     },
   }, (a) => guard(async () => {
-    reqOf('still', a, {}); // (the flags checked here, before a process is started)
+    reqOf('still', a, {});
     return { content: [text(jobOut(startVideo(a)))] };
   }));
 
@@ -259,7 +242,6 @@ export async function serveMcp() {
     description: "The finished sound under a rendered video, into a new file of the same container (.mp4 with AAC, .mov with PCM, .webm with Opus): the project's track (narration or song, from its lossless file), the music beds and cue sounds of mix.json and the config's timeline sounds, brought to the loudness target (default -14 LUFS, -1 dBTP), encoded once; the picture is copied. `from` must match the render's start when it was a partial render, and `props` the render's props. (video_start with mix: true renders and mixes in one job.)",
     inputSchema: { project, input: z.string().describe('The rendered .mp4, .mov or .webm.'), output: z.string().describe('The mixed file to write (.mp4, .mov or .webm).'), from: z.number().min(0).optional(), props: page.props },
   }, (a) => guard(async () => {
-    // (the cues the mix needs, from the project as it is now)
     const ev = await call(reqOf('events', a, {}));
     if (!ev.ok) return { content: [text(summary(ev))], isError: true };
     return tool('mix', a.project, [path.resolve(a.input), path.resolve(a.output), ...(a.from !== undefined ? ['--from', String(a.from)] : [])]);
@@ -297,13 +279,9 @@ export async function serveMcp() {
     return { content: [text(listed(proj, patchNote(proj, a.id, { status: a.reopen ? 'open' : 'done' })))] };
   }));
 
-  // (video jobs are detached: they finish whether or not this server is still here)
   for (const sig of ['SIGINT', 'SIGTERM'] as const) process.on(sig, () => process.exit(0));
   const transport = new StdioServerTransport();
   transport.onclose = () => process.exit(0);
-  // (the client went away without a goodbye: the transport does not notice its input ending, and the server
-  // would outlive it)
-  // (calls already sent are answered first: a script may pipe its requests in and close)
   let leaving = false;
   const leave = () => {
     if (leaving) return;

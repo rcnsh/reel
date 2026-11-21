@@ -1,9 +1,3 @@
-// A 3D stage: a three.js scene and camera rendered into a scene's HDR target in linear light, with what the engine's
-// sub-frame sampler can add for free: anti-aliasing (the projection jittered by a sub-pixel per sub-frame), depth
-// of field (the camera moved over its lens aperture, the focal plane held), soft shadows (each soft light moved
-// over its area) and motion blur (every pose is a function of time, evaluated per sub-frame). A render of one
-// sample (previews, stills, check) uses 4x MSAA instead, with shadow maps blurred by PCF. Tone mapping is the
-// engine's post; the stage hands it linear HDR.
 import * as THREE from 'three';
 import { ALPHA, isBg, makeRT, SUB_FRAME, W, H } from '../engine/gl';
 import { LIN } from '../engine/palette';
@@ -15,10 +9,6 @@ import { corners, projectBox, projectPoint, type ScreenPoint } from './project';
 import { environment } from './load';
 
 export interface StageOptions {
-  /**
-   * What is behind the objects: a palette key or a CSS hex colour (default 'bg'), 'environment' (the environment map
-   * itself, blurred by `backgroundBlur`), or null for transparent (a stage on a track above 0).
-   */
   background?: string | null;
   /** Blur of an environment background, 0 to 1 (default 0.3). */
   backgroundBlur?: number;
@@ -26,25 +16,16 @@ export interface StageOptions {
   fov?: number;
   near?: number;
   far?: number;
-  /**
-   * 'auto' (default): 4x MSAA in renders of one sample, and the projection jittered by a sub-pixel per sub-frame
-   * when there are several (exports with motion blur). 'jitter': never MSAA. 'none': neither.
-   */
   antialias?: 'auto' | 'jitter' | 'none';
-  /** Shadow maps (default true); `mapSize` per light (default 2048). */
   shadows?: boolean | { mapSize?: number };
-  /** World units per metre, for the lens maths of depth of field (default 1). */
   unitsPerMetre?: number;
   /** A name for findings (default 'stage'). */
   label?: string;
 }
 
-/** Options of a light made by the stage's rigs or added with stage.soft(). */
 export interface SoftLight { light: THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight; softness: number }
 
-/** The adaptive sub-frames a clip with a stage stops at unless the clip sets its own `maxSamples`. */
 export const STAGE_MAX_SAMPLES = 108;
-/** A soft light's shadow-map blur (texels) in a sub-frame, where the moving light makes the penumbra. */
 const SUB_FRAME_SHADOW_RADIUS = 1;
 
 const colour = (c: string) => {
@@ -52,11 +33,6 @@ const colour = (c: string) => {
   return new THREE.Color(c);
 };
 
-/**
- * A three.js scene and camera that render into a reel scene's target. Make it as a field of a scene (or in
- * init()), add objects to `stage.scene`, light it (`studio()`, `overhead()`, `outdoor()`, or lights of your own),
- * and in render(): `stage.camera(rig(f.lt))`, animate, then `stage.render(out)`.
- */
 export class Stage3D {
   readonly scene = new THREE.Scene();
   readonly cam: THREE.PerspectiveCamera;
@@ -74,8 +50,6 @@ export class Stage3D {
 
   constructor(private ctx: SceneCtx, o: StageOptions = {}) {
     this.o = o;
-    // depth of field, soft shadows and anti-aliasing jitter keep glossy highlights changing from step to step, so
-    // adaptive sampling would run every frame to 324; at 1:1 in 4K, 108 cannot be told from it
     ctx.capSamples(STAGE_MAX_SAMPLES);
     this.renderer = ctx.renderer;
     this.label = o.label ?? 'stage';
@@ -84,7 +58,6 @@ export class Stage3D {
     const bg = o.background === undefined ? 'bg' : o.background;
     this.bgEnv = bg === 'environment';
     this.bg = bg === null || this.bgEnv ? null : colour(bg);
-    // (a transparent render leaves the theme's background out, as clearRT does)
     if (ALPHA && this.bg && isBg([this.bg.r, this.bg.g, this.bg.b])) this.bg = null;
     if (o.shadows !== false) {
       this.renderer.shadowMap.enabled = true;
@@ -92,12 +65,6 @@ export class Stage3D {
     }
   }
 
-  // ---- environment and lights ----
-
-  /**
-   * Image-based lighting: 'studio' (soft boxes in a grey room, no file) or an `.hdr` / `.exr` in the project,
-   * prefiltered for physically based materials. `intensity` scales it (default 1). Await it in init().
-   */
   async environment(src: 'studio' | string, intensity = 1) {
     const e = await environment(this.renderer, src);
     this.envs.push(e);
@@ -110,19 +77,12 @@ export class Stage3D {
     }
   }
 
-  /**
-   * Make a light cast soft shadows: in a render of several sub-frames it moves over a disk `softness` world units
-   * across (perpendicular to where it points), so its shadows' penumbras grow with the distance from the caster as
-   * with a real area light, and its shadow map's own blur (`shadow.radius`) drops to a texel; in a render of one
-   * sample the light stays put and only that blur softens it.
-   */
   soft(light: THREE.DirectionalLight | THREE.SpotLight | THREE.PointLight, softness: number) {
     this.softs = this.softs.filter((s) => s.light !== light);
     this.softs.push({ light, softness });
     return light;
   }
 
-  /** A shadow-casting directional light from `position` towards `target`, its shadow camera fitted to `radius`. */
   private sun(color: THREE.ColorRepresentation, intensity: number, position: Vec3, target: Vec3, radius: number, softness: number, shadows: boolean) {
     const l = new THREE.DirectionalLight(color, intensity);
     l.position.set(...position);
@@ -157,10 +117,6 @@ export class Stage3D {
     return { key, fill, rim: back };
   }
 
-  /**
-   * Soft light from above: one broad overhead light (shadows straight down, very soft), a hemisphere of the theme's
-   * background and foreground colours, and the studio environment.
-   */
   async overhead(o: { target?: Vec3; radius?: number; intensity?: number; softness?: number } = {}) {
     const t = o.target ?? [0, 0, 0], r = o.radius ?? 1, k = o.intensity ?? 1;
     const top = this.sun(0xffffff, 2.2 * k, [t[0] + r * 0.3, t[1] + r * 5, t[2] + r * 0.2], t, r * 1.6, (o.softness ?? 1.2) * r, true);
@@ -183,7 +139,6 @@ export class Stage3D {
     const sky = colour(o.sky ?? '#8fb8e8'), ground = colour('bg');
     const hemi = new THREE.HemisphereLight(sky, ground, 0.9 * k);
     this.scene.add(hemi);
-    // the sky as an environment too, so metals and gloss reflect it
     const pmrem = new THREE.PMREMGenerator(this.renderer), dome = new THREE.Scene();
     const geo = new THREE.SphereGeometry(10, 32, 16), cols: number[] = [];
     const pos = geo.attributes.position!;
@@ -215,15 +170,11 @@ export class Stage3D {
     return m;
   }
 
-  /** Name an object for `reel check`: its projected box is reported (off the frame, behind the camera, too small). */
   labelled<T extends THREE.Object3D>(obj: T, name: string): T {
     obj.userData.label = name;
     return obj;
   }
 
-  // ---- the camera ----
-
-  /** Place the camera for this sub-frame (call it in render(), from a rig: `stage.camera(orbit({ … })(f.lt))`). */
   camera(pose: CameraPose) {
     this.pose = pose;
     const c = this.cam;
@@ -231,7 +182,6 @@ export class Stage3D {
     c.up.set(0, 1, 0);
     c.lookAt(...pose.target);
     if (pose.roll) c.rotateZ((pose.roll * Math.PI) / 180);
-    // (a pose without a field of view is the stage's own, whatever pose came before: frames render in any order)
     c.fov = pose.fov ?? this.o.fov ?? 35;
     c.updateProjectionMatrix();
     c.updateMatrixWorld();
@@ -245,44 +195,32 @@ export class Stage3D {
     return { focus, radius };
   }
 
-  // ---- rendering ----
-
-  /** The target the stage renders into this sub-frame (its MSAA one in a render of one sample, when antialias is 'auto'). */
   private target() {
     if (SUB_FRAME.index < 0 && (this.o.antialias ?? 'auto') === 'auto') return (this.msaa ??= makeRT(W, H, { samples: 4 }));
     return this.rt;
   }
 
-  /**
-   * Render the stage and composite it over `out` (alpha over, premultiplied; a stage with an opaque background
-   * replaces out). Call it once per render(), after placing the camera and posing the objects.
-   */
   render(out: THREE.WebGLRenderTarget, o: { opacity?: number } = {}) {
     const r = this.renderer, c = this.cam, k = SUB_FRAME.index, tgt = this.target();
-    // (what check sees is the camera without jitter)
     if (reporting()) this.report(o.opacity ?? 1);
     const pos = c.position.clone(), quat = c.quaternion.clone(), pm = c.projectionMatrix.clone();
     const lights = this.softs.map((s) => ({ s, p: s.light.position.clone(), radius: s.light.shadow.radius }));
     const prevC = r.getClearColor(new THREE.Color()), prevA = r.getClearAlpha();
-    // (restored whatever happens: a light left at radius 1 would be taken as its own radius on the next render)
     try {
       if (k >= 0) {
         const e = c.projectionMatrix.elements;
-        // depth of field: the camera moves over its lens disk; the projection shifts so the focal plane stays put
         const { focus, radius } = this.lens();
         if (radius > 0) {
           const [lx, ly] = lensSample(k).map((v) => v * radius) as [number, number];
           c.translateX(lx); c.translateY(ly); c.updateMatrixWorld();
           e[8]! -= (e[0]! * lx) / focus; e[9]! -= (e[5]! * ly) / focus;
         }
-        // anti-aliasing: a sub-pixel shift of the projection
         if ((this.o.antialias ?? 'auto') !== 'none') {
           const [jx, jy] = subPixel(k), size = new THREE.Vector2();
           r.getDrawingBufferSize(size);
           e[8]! -= (2 * jx) / size.x; e[9]! -= (2 * jy) / size.y;
         }
         c.projectionMatrixInverse.copy(c.projectionMatrix).invert();
-        // soft shadows: each soft light moves over its disk, perpendicular to where it points
         for (const { s, p } of lights) {
           if (!s.softness) continue;
           const [u, v] = lightSample(k), aim = new THREE.Vector3();
@@ -292,8 +230,6 @@ export class Stage3D {
           a.normalize();
           const b = new THREE.Vector3().crossVectors(dir, a);
           s.light.position.copy(p).addScaledVector(a, (u * s.softness) / 2).addScaledVector(b, (v * s.softness) / 2);
-          // (the moving light alone makes the penumbra: three's PCF blur is dithered by screen position, the same
-          // in every sub-frame, so it would widen the penumbra and leave a fixed pattern no sampling averages out)
           s.light.shadow.radius = Math.min(s.light.shadow.radius, SUB_FRAME_SHADOW_RADIUS);
         }
       }
@@ -305,7 +241,6 @@ export class Stage3D {
       r.render(this.scene, c);
     } finally {
       r.setClearColor(prevC, prevA);
-      // back to the pose as placed
       c.position.copy(pos); c.quaternion.copy(quat); c.updateMatrixWorld();
       c.projectionMatrix.copy(pm); c.projectionMatrixInverse.copy(pm).invert();
       for (const { s, p, radius } of lights) { s.light.position.copy(p); s.light.shadow.radius = radius; }
@@ -314,10 +249,6 @@ export class Stage3D {
     this.ctx.comp.draw(r, tgt.texture, out, { mode: opaque ? 'replace' : 'normal', opacity: o.opacity ?? 1, premult: false });
   }
 
-  /**
-   * Where a point of the world (or an object's origin) is on screen for the camera as placed: logical px, to pin a
-   * label, a line or an HTML layer to it. Call it after stage.camera(pose).
-   */
   project(point: Vec3 | THREE.Object3D): ScreenPoint {
     const v = Array.isArray(point) ? new THREE.Vector3(...point) : point.getWorldPosition(new THREE.Vector3());
     const depth = -v.clone().applyMatrix4(this.cam.matrixWorldInverse).z;
@@ -325,12 +256,10 @@ export class Stage3D {
     return { x: ((v.x + 1) / 2) * W, y: ((1 - v.y) / 2) * H, depth, behind: depth <= 1e-9 };
   }
 
-  /** The view-projection matrix of the camera as placed (no jitter). */
   viewProjection() {
     return this.vp.multiplyMatrices(this.cam.projectionMatrix, this.cam.matrixWorldInverse);
   }
 
-  /** Report to `reel check`: the labelled objects' boxes, text on planes, and how many objects the camera sees. */
   private report(opacity: number) {
     const vp = this.viewProjection().elements, frustum = new THREE.Frustum().setFromProjectionMatrix(this.vp);
     let visible = 0;
@@ -353,7 +282,6 @@ export class Stage3D {
     report({ kind: 'stage', label: this.label, x: 0, y: 0, w: W, h: H, visible, alpha: opacity });
   }
 
-  /** Free the stage's targets, environments and everything in its scene. Call from the scene's dispose(). */
   dispose() {
     this.rt.dispose();
     this.msaa?.dispose();
@@ -372,10 +300,4 @@ export class Stage3D {
 /** The theme's colour for a palette key or a CSS colour, as a three.js colour in linear sRGB. */
 export const themeColor = colour;
 
-/**
- * Where a point of the world is on screen from a camera pose, in logical px: what `stage.project(point)` gives for
- * a stage whose camera is at `pose`, without the stage. For a clip on another track that pins labels to a stage's
- * objects: both import one rig and call it with the stage clip's time (`f.vt - this.ctx.clip('<stage clip>').start`).
- * `fov` is the stage's (default 35, as Stage3D's); a pose's own `fov` wins.
- */
 export const screenPoint = (pose: CameraPose, point: Vec3, o: { fov?: number } = {}): ScreenPoint => projectPoint(pose, point, o.fov ?? 35, W, H);

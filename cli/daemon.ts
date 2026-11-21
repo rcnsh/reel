@@ -1,18 +1,3 @@
-// The warm renderer: one background process per project that keeps its dev server, a headless Chrome and its
-// pages open between commands, so a still takes a fraction of a second instead of seconds. The CLI and the MCP
-// server start it on demand (call()), it reloads its pages when the project's files change (cli/renderer.ts
-// looks before every request) and stops itself
-// after an idle period (REEL_DAEMON_IDLE seconds, default 900).
-//
-// It listens on 127.0.0.1 with a random port and token, written with its pid and the engine's version to a
-// state file in the temp folder. A client whose engine version differs (the engine's code, the protocol or
-// the Chrome it would launch changed) stops it and starts a fresh one.
-//
-// Requests run in two lanes, each one at a time in arrival order: checks in one, everything else (stills, sheets,
-// strips, info, events) in the other, so a still does not wait behind a minutes-long check. perf, which times the
-// GPU, takes both lanes and runs alone.
-// The lanes share the dev server and Chrome; each request leases a page of its own (cli/renderer.ts), so the two
-// never draw into one page, and at most two pages render at once.
 import { spawn } from 'node:child_process';
 import { closeSync, existsSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -21,11 +6,9 @@ import { ENGINE } from './server';
 import { findChrome, glBackend } from './chrome';
 import type { Op, Req, Result } from './ops';
 
-/** Bumped when the request or state format changes. */
 const PROTOCOL = 1;
 const DIR = path.join(tmpdir(), 'reel-daemons');
 
-/** The engine as the warm renderer sees it: its code (by mtime and size), the protocol and the Chrome it runs. */
 export function engineVersion(): string {
   let chrome = '';
   try { chrome = findChrome().path; } catch {}
@@ -41,7 +24,6 @@ export function engineVersion(): string {
   };
   walk(path.join(ENGINE, 'src'));
   walk(path.join(ENGINE, 'cli'));
-  // (patches/: the patched dependencies, whose edits bun.lock does not record)
   const patches = path.join(ENGINE, 'patches');
   const patchFiles = existsSync(patches) ? readdirSync(patches).sort().map((f) => `patches/${f}`) : [];
   for (const f of ['index.html', 'package.json', 'bun.lock', ...patchFiles]) if (existsSync(path.join(ENGINE, f))) { const s = statSync(path.join(ENGINE, f)); parts.push(`${f}:${s.mtimeMs}:${s.size}`); }
@@ -61,23 +43,19 @@ function readState(file: string): State | null {
 }
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
-/** The lane a request runs in: sweeps of many frames, everything quick, or (perf, which times the GPU) both at once. */
 export const laneOf = (op: Op): 'long' | 'quick' | 'both' => (op === 'check' ? 'long' : op === 'perf' ? 'both' : 'quick');
 
-/** HTTP to a daemon. Throws when it does not answer. */
 async function ask(s: State, route: string, body?: unknown): Promise<any> {
   const r = await fetch(`http://127.0.0.1:${s.port}${route}`, {
     method: body === undefined ? 'GET' : 'POST',
     headers: { 'x-reel-token': s.token, 'content-type': 'application/json' },
     body: body === undefined ? undefined : JSON.stringify(body),
-    // (a check of a long video takes minutes: no client-side timeout)
     timeout: false,
   } as RequestInit);
   if (!r.ok) throw new Error(`warm renderer: HTTP ${r.status} ${await r.text()}`);
   return r.json();
 }
 
-/** Stop a daemon and wait for its process to end (killed after 10 s). */
 async function stopState(s: State, file: string) {
   await ask(s, '/stop', {}).catch(() => {});
   for (let i = 0; i < 200 && alive(s.pid); i++) await sleep(50);
@@ -85,7 +63,6 @@ async function stopState(s: State, file: string) {
   if (readState(file)?.pid === s.pid) rmSync(file, { force: true });
 }
 
-/** The project's daemon, started (or restarted, when stale or dead) as needed. */
 async function ensure(project: string): Promise<State> {
   mkdirSync(DIR, { recursive: true });
   const f = files(project), version = engineVersion();
@@ -94,7 +71,6 @@ async function ensure(project: string): Promise<State> {
     if (s.version === version) return s;
     await stopState(s, f.state);
   } else if (s) rmSync(f.state, { force: true });
-  // start one (if another client started it meanwhile, ours sees the lock, exits, and we use theirs)
   const log = openSync(f.log, 'w');
   const child = spawn('bun', [path.join(ENGINE, 'cli/reel.ts'), 'daemon', 'run', '--project', project], { detached: true, stdio: ['ignore', log, log], env: process.env, cwd: project });
   child.unref();
@@ -116,13 +92,11 @@ function lockHeld(lock: string) {
   try { const pid = Number(readFileSync(lock, 'utf8')); return pid > 0 && alive(pid); } catch { return false; }
 }
 
-/** Run a request on the project's warm renderer (starting it if needed). */
 export async function call(req: Req): Promise<Result> {
   let s = await ensure(req.project);
   try {
     return await ask(s, '/run', req);
   } catch (e) {
-    // (it died under us, or never answered: start a fresh one and try once more)
     if (alive(s.pid)) { try { process.kill(s.pid, 'SIGKILL'); } catch {} }
     rmSync(files(req.project).state, { force: true });
     s = await ensure(req.project);
@@ -132,7 +106,6 @@ export async function call(req: Req): Promise<Result> {
 
 export interface DaemonStatus { project: string; pid: number; port: number; started: number; uptime: number; idle: number; requests: number; pages: number; busy: boolean; running: number; stale: boolean; log: string }
 
-/** Every running daemon (dead entries are cleaned up). */
 export async function status(): Promise<DaemonStatus[]> {
   if (!existsSync(DIR)) return [];
   const version = engineVersion(), out: DaemonStatus[] = [];
@@ -146,7 +119,6 @@ export async function status(): Promise<DaemonStatus[]> {
   return out;
 }
 
-/** Stop the daemon of `project`, or every one. Returns the projects stopped. */
 export async function stop(project: string | null): Promise<string[]> {
   if (!existsSync(DIR)) return [];
   const stopped: string[] = [];
@@ -160,11 +132,9 @@ export async function stop(project: string | null): Promise<string[]> {
   return stopped;
 }
 
-/** `reel daemon run`: be the project's warm renderer until stopped or idle. False when another one already is. */
 export async function serve(project: string): Promise<boolean> {
   mkdirSync(DIR, { recursive: true });
   const f = files(project);
-  // one per project: whoever creates the lock file runs; a lock left by a dead process is taken over
   for (;;) {
     try { writeFileSync(f.lock, String(process.pid), { flag: 'wx' }); break; } catch {
       if (lockHeld(f.lock)) { console.log(`another warm renderer runs for ${project}`); return false; }
@@ -193,7 +163,6 @@ export async function serve(project: string): Promise<boolean> {
   const server = Bun.serve({
     hostname: '127.0.0.1',
     port: 0,
-    // (a request may render for minutes before it answers)
     idleTimeout: 0,
     async fetch(req) {
       if (req.headers.get('x-reel-token') !== token) return new Response('bad token', { status: 403 });
@@ -222,12 +191,10 @@ export async function serve(project: string): Promise<boolean> {
   writeFileSync(f.state, JSON.stringify({ pid: process.pid, port: server.port!, token, version, project, started } satisfies State));
   console.log(`warm renderer for ${project} on 127.0.0.1:${server.port} (pid ${process.pid})`);
   for (const sig of ['SIGINT', 'SIGTERM', 'SIGHUP'] as const) process.on(sig, () => void shutdown(sig));
-  // idle: nothing asked for a while; gone: the project folder was removed
   setInterval(() => {
     if (!running && Date.now() - last > idleLimit) void shutdown(`idle for ${Math.round(idleLimit / 1000)} s`);
     if (!existsSync(path.join(project, 'reel.config.ts'))) void shutdown('the project is gone');
   }, 5000).unref();
-  // warm up while the first request is being written: the server, Chrome and a page at the project's format
   lanes.quick = lanes.quick.then(() => r.page({ scale: 1 }).then((h) => r.release(h)).catch(() => {}));
   return true;
 }

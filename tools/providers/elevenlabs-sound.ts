@@ -1,5 +1,3 @@
-// Sound effects and music from ElevenLabs (ELEVENLABS_API_KEY): the sound-generation and music endpoints. Only the
-// prompt and the duration are sent.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fetchRetry } from '../http';

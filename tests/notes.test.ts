@@ -1,5 +1,3 @@
-// Review notes: the store (add, edit, merge with a concurrent edit, resolve, delete, a corrupt file) and the
-// `reel notes` subcommands on a project whose timeline is cached (so no browser is needed).
 import { afterAll, expect, test } from 'bun:test';
 import { mkdirSync, readFileSync, realpathSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -39,19 +37,15 @@ test('add, edit, resolve and delete notes; the file is sorted by time and readab
 test('a change merges into the file as it is now: a concurrent edit by another writer is kept', () => {
   const p = tempDir('reel-notes-');
   const a = addNote(p, base);
-  // the page loaded the notes ...
   const seen = readNotes(p);
-  // ... then an agent edits the file by hand: rewords a, adds a note of its own
   const disk = JSON.parse(readFileSync(notesPath(p), 'utf8'));
   disk.notes[0].text = 'reworded by the agent';
   disk.notes.push({ ...disk.notes[0], id: 'agnt', t: 3, frame: 90, text: 'added by hand' });
   writeFileSync(notesPath(p), JSON.stringify(disk));
-  // ... and the page resolves a, from what it saw
   expect(seen[0]!.text).toBe('first');
   patchNote(p, a.id, { status: 'done' });
   const now = readNotes(p);
   expect(now.map((n) => [n.id, n.text, n.status])).toEqual([[a.id, 'reworded by the agent', 'done'], ['agnt', 'added by hand', 'open']]);
-  // a note deleted meanwhile is reported, not brought back
   updateNotes(p, (ns) => { ns.splice(ns.findIndex((n) => n.id === 'agnt'), 1); });
   expect(() => patchNote(p, 'agnt', { text: 'x' })).toThrow(/no note agnt/);
   expect(readNotes(p).length).toBe(1);
@@ -121,16 +115,12 @@ test('the newest render under out/ is the default; drafts are known by name or c
   expect(isDraft('/x/out/video.mp4', '')).toBe(false);
 });
 
-// ---- the CLI ----
-
-/** A project whose timeline is cached, so `reel notes add` needs no browser. */
 function project() {
   const p = realpathSync(tempDir('reel-notes-cli-'));
   writeFileSync(path.join(p, 'reel.config.ts'), `import { defineVideo } from 'reel/config';\nexport default defineVideo({ size: [1280, 720], fps: 25, timeline: () => [] });\n`);
   writeTimelineCache(p, { size: [1280, 720], fps: 25, duration: 4, timeline: TIMELINE });
   return p;
 }
-// (no Chrome to be had: a stale cache would show as a warning, never a render)
 const NO_CHROME = { CHROME_PATH: '/nonexistent/chrome', REEL_NO_DAEMON: '1' };
 
 test('reel notes add, list, done and reopen', async () => {
@@ -175,7 +165,6 @@ test('reel notes: bad command lines exit 2, a missing note or a corrupt file exi
 
 test('reel notes add without a timeline: the note is still added, with a warning and no clips', async () => {
   const p = project();
-  // (the config changed since the cache: stale, and the renderer cannot start)
   writeFileSync(path.join(p, 'reel.config.ts'), readFileSync(path.join(p, 'reel.config.ts'), 'utf8') + '\n');
   const r = await reel(['notes', 'add', '--t', '1', 'x', '--json', '--project', p], ENGINE, NO_CHROME);
   expect(r.code).toBe(0);

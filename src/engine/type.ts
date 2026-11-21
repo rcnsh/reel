@@ -1,22 +1,14 @@
-// Typography: font registry (Canvas2D via FontFace + outlines via opentype.js),
-// glyph layout, text outlines as Path2D, and point sampling of text for particle effects.
 import * as opentype from 'opentype.js';
 import { htmlFamilies } from './html';
 import { uncounted } from './report';
 
-/**
- * Font keys. Archivo comes in static width instances (w = wdth*10) x weights so we can
- * animate width in discrete steps: 620, 750, 875, 1000, 1125, 1250 and weights 300/500/700/900.
- */
 export const ARCHIVO_WIDTHS = [620, 750, 875, 1000, 1125, 1250] as const;
 export const ARCHIVO_WEIGHTS = [300, 500, 700, 900] as const;
 
-/** `features`: OpenType features switched on for the face (Canvas2D has no font-feature-settings). */
 type FontDef = { family: string; file: string; features?: string };
 const DEFS: FontDef[] = [];
 for (const w of ARCHIVO_WIDTHS) for (const wt of ARCHIVO_WEIGHTS) DEFS.push({ family: `Archivo-${w}-${wt}`, file: `Archivo-w${w}-${wt}.ttf` });
 for (const w of [750, 1000]) for (const wt of [400, 800]) DEFS.push({ family: `ArchivoItalic-${w}-${wt}`, file: `ArchivoItalic-w${w}-${wt}.ttf` });
-// Cormorant defaults to old-style figures ("10" reads as "IO" at display sizes): lining figures instead
 for (const wt of [400, 600]) {
   DEFS.push({ family: `Cormorant-${wt}`, file: `Cormorant-${wt}.ttf`, features: '"lnum" 1' });
   DEFS.push({ family: `CormorantItalic-${wt}`, file: `CormorantItalic-${wt}.ttf`, features: '"lnum" 1' });
@@ -25,9 +17,7 @@ for (const [n, f] of [['300', 'Light'], ['400', 'Regular'], ['500', 'Medium'], [
   DEFS.push({ family: `Plex-${n}`, file: `src/IBMPlexMono-${f}.ttf` });
 DEFS.push({ family: 'PlexItalic-400', file: 'src/IBMPlexMono-Italic.ttf' });
 
-/** Convenience family names. */
 export const F = {
-  /** Archivo at nearest available width/weight. width in [62..125] (percent), weight 300..900 */
   archivo(width = 100, weight = 700): string {
     const w = nearest(ARCHIVO_WIDTHS as unknown as number[], width * 10);
     const wt = nearest(ARCHIVO_WEIGHTS as unknown as number[], weight);
@@ -51,19 +41,13 @@ function nearest(list: number[], v: number) {
   return best;
 }
 
-/** CSS font string for Canvas2D. */
 export const font = (family: string, sizePx: number) => `${sizePx}px "${family}"`;
 
 const otCache = new Map<string, opentype.Font>();
 const bufCache = new Map<string, ArrayBuffer>();
 
-/** A font face for HTML layers: a family name CSS uses, its file (a URL) and the range it covers. */
 export interface FontFaceDef { family: string; url: string; weight?: string; stretch?: string; style?: 'normal' | 'italic'; featureSettings?: string }
 
-/**
- * The engine's fonts under the names CSS knows them by, for HTML layers: Archivo and Cormorant Garamond as their
- * variable fonts (every weight, and Archivo's widths as font-stretch 62% to 125%), IBM Plex Mono by weight.
- */
 export const ENGINE_HTML_FONTS: FontFaceDef[] = [
   { family: 'Archivo', url: 'fonts/src/Archivo[wdth,wght].ttf', weight: '100 900', stretch: '62% 125%' },
   { family: 'Archivo', url: 'fonts/src/Archivo-Italic[wdth,wght].ttf', weight: '100 900', stretch: '62% 125%', style: 'italic' },
@@ -73,13 +57,7 @@ export const ENGINE_HTML_FONTS: FontFaceDef[] = [
   { family: 'IBM Plex Mono', url: 'fonts/src/IBMPlexMono-Italic.ttf', weight: '400', style: 'italic' as const },
 ];
 
-/**
- * Load the fonts before any scene is made: the engine's static instances for Canvas2D (families such as
- * 'Archivo-1000-700', see F), the engine's families for HTML layers, and the project's own fonts (its `fonts/`
- * folder, listed by the dev server at /@reel/fonts.json). A font that does not load is an error.
- */
 export async function loadFonts(): Promise<void> {
-  // (a page served without the CLI's dev server has no project fonts)
   const r = await fetch('/@reel/fonts.json').catch(() => null);
   const listed = r && (r.headers.get('content-type') ?? '').includes('json') ? (await r.json()) as { fonts?: FontFaceDef[]; error?: string } : null;
   if (listed?.error) throw new Error(`the project's fonts: ${listed.error}`);
@@ -105,7 +83,6 @@ export async function loadFonts(): Promise<void> {
   await document.fonts.ready;
 }
 
-/** opentype.js Font for outline work (lazy-parsed). */
 export function ot(family: string): opentype.Font {
   let f = otCache.get(family);
   if (!f) {
@@ -139,13 +116,6 @@ function mctx() {
   return measureCtx;
 }
 
-/**
- * Per-glyph horizontal layout with the font's kerning, for drawing glyphs one by one.
- * Glyph i sits at the width of text[0..i] minus its own advance, so the kerning between it and the
- * previous glyph moves *it* (the width of text[0..i) alone leaves that pair out: every kern would land
- * one glyph late, e.g. the Y–o kern of "Your" pushing the u into the o). `w` is the glyph's own advance.
- * `tracking` is extra letter spacing in px.
- */
 export function layout(text: string, family: string, size: number, tracking = 0): TextLayout {
   const c = mctx();
   c.font = font(family, size);
@@ -168,11 +138,6 @@ export function layout(text: string, family: string, size: number, tracking = 0)
   };
 }
 
-/**
- * x (px) of glyph `index` in `text` set as one kerned run — where to start drawing text[index..] when a
- * word is split into separately drawn pieces (sung/unsung colours, a clipped wipe). Measuring
- * text[0..index) instead would drop the kern between the two pieces. Past the end: the run's width.
- */
 export function glyphX(text: string, index: number, family: string, size: number, tracking = 0): number {
   const chars = Array.from(text);
   if (index <= 0) return 0;
@@ -196,7 +161,6 @@ export function smart(s: string): string {
     .replace(/"/g, '”');
 }
 
-/** Typewriter quotes back (mono UI text that shows a lyric as typed input or code). */
 export const plain = (s: string) => s.replace(/[‘’]/g, "'").replace(/[“”]/g, '"').replace(/…/g, '...');
 
 export function measure(text: string, family: string, size: number, tracking = 0) {
@@ -205,17 +169,11 @@ export function measure(text: string, family: string, size: number, tracking = 0
   return c.measureText(text).width + Math.max(0, Array.from(text).length - 1) * tracking;
 }
 
-/** Largest font size (<= max) at which text fits in maxWidth. */
 export function fitSize(text: string, family: string, maxWidth: number, max = 400, tracking = 0) {
   const w = measure(text, family, 100, tracking * 100 / max);
   return Math.min(max, (100 * maxWidth) / Math.max(1, w));
 }
 
-/**
- * Outline of text as opentype commands at (x, baselineY). Glyphs are placed one by one at the
- * Canvas2D-measured positions (so outlines line up with fillText) — this also sidesteps
- * opentype.js's unsupported GSUB lookups (e.g. Archivo's ccmp) that crash font.getPath().
- */
 export function textPathCommands(text: string, family: string, size: number, x = 0, y = 0, tracking = 0) {
   const f = ot(family);
   const lay = layout(text, family, size, tracking);
@@ -224,7 +182,6 @@ export function textPathCommands(text: string, family: string, size: number, x =
   return cmds;
 }
 
-/** Outline of text as a Path2D at (x, baselineY). */
 export function textPath2D(text: string, family: string, size: number, x = 0, y = 0, tracking = 0): Path2D {
   const p = new opentype.Path();
   p.commands = textPathCommands(text, family, size, x, y, tracking);

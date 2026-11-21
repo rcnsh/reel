@@ -1,7 +1,3 @@
-// Single-stroke (engraving/plotter) fonts: EMS/Hershey SVG fonts rendered as polylines,
-// so text can be *written* progressively by a moving point (the spark). The fonts carry no kerning
-// and no curly quotes: pairs are kerned optically (see `pairKern`) and ’ ‘ “ ” … are built from their
-// own ' and . glyphs.
 import { type V2, polylineLengths } from './util';
 import { reportDrawn, reporting, type DrawnBox } from './report';
 
@@ -17,15 +13,12 @@ export const STROKE_FONTS = {
 } as const;
 export type StrokeFontName = keyof typeof STROKE_FONTS;
 
-/** Connected scripts: kerning would break the joins between letters. */
 const SCRIPTS = new Set<StrokeFontName>(['script', 'hscript']);
 
 interface SGlyph { adv: number; strokes: V2[][] }
 interface SFont {
   upm: number; ascent: number; descent: number; xh: number; cap: number; glyphs: Map<string, SGlyph>; missingAdv: number;
-  /** Measured from the outlines (the files' x-height / cap-height attributes are placeholders). */
   base: number; xTop: number; capTop: number;
-  /** Profile bands: [yLo, yLo + ROWS*dy] covers every glyph's ink. */
   yLo: number; dy: number;
   prof: Map<string, Profile | null>; kern: Map<string, number>; target: { lc: number; uc: number } | null;
 }
@@ -49,7 +42,6 @@ const inkBox = (strokes: V2[][]) => {
 };
 const moved = (g: SGlyph, dx: number, dy = 0): V2[][] => g.strokes.map((s) => s.map((p) => ({ x: p.x + dx, y: p.y + dy })));
 
-/** Curly quotes and the ellipsis, built from the font's own ' and . (in Hershey the ' is already comma-shaped). */
 function addTypographic(f: SFont) {
   const G = f.glyphs, q = G.get("'"), dot = G.get('.');
   if (q && q.strokes.length) {
@@ -70,23 +62,13 @@ function addTypographic(f: SFont) {
   }
 }
 
-// ------------------------------------------------------------------ optical kerning
-// The fonts' sidebearings already space plain pairs (nn, oo, ...); what they lack is kerning for shapes
-// that leave a hole — overhangs and diagonals (To, Yo, We, AV, LT, r., ...). For those pairs, the ink is
-// reduced to left/right profiles (extreme x per horizontal band, widened steeply so a T's arm shades
-// the bands under it) and the right glyph moves in until the closest approach over the zone both
-// letters share (x-height for lowercase, cap height otherwise) comes most of the way to the font's own
-// n/o pairs.
-const ROWS = 90; // bands over the glyphs' vertical extent
-const SHADE = 0.4; // ink d units above/below a band counts as SHADE*d further out in it
-/** Glyphs whose right side overhangs or slants (they can kern with what follows). */
+const ROWS = 90;
+const SHADE = 0.4;
 const OPEN_R = new Set('AFLPTVWYKXfrvwyk7\'"\u2019\u201D'.split(''));
-/** Glyphs whose left side slants or tucks under (they can kern with what precedes). */
 const OPEN_L = new Set('AJTVWYXvwyj.,\'"\u2019\u201D\u2026'.split(''));
-const CLEAR = 0.1; // em: the inks never come closer than this (measured at 45°, so diagonals count)
-/** Only part of the way: equal closest approach would pack diagonals and rounds tighter than the eye wants. */
+const CLEAR = 0.1;
 const STRENGTH = 0.6;
-interface Profile { l: Float32Array; r: Float32Array; l45: Float32Array; r45: Float32Array } // NaN where no ink
+interface Profile { l: Float32Array; r: Float32Array; l45: Float32Array; r45: Float32Array }
 
 function profile(f: SFont, ch: string): Profile | null {
   if (f.prof.has(ch)) return f.prof.get(ch)!;
@@ -108,7 +90,6 @@ function profile(f: SFont, ch: string): Profile | null {
         for (let j = 0; j <= n; j++) put(a.x + ((b.x - a.x) * j) / n, a.y + ((b.y - a.y) * j) / n);
       }
     }
-    // widen: a band sees the ink of its neighbours, set back in proportion to their vertical distance
     const widen = (k: number) => {
       const lw = new Float32Array(ROWS).fill(NaN), rw = new Float32Array(ROWS).fill(NaN);
       for (let i = 0; i < ROWS; i++) {
@@ -130,7 +111,6 @@ function profile(f: SFont, ch: string): Profile | null {
 const isLower = (ch: string) => ch !== ch.toUpperCase() && ch === ch.toLowerCase();
 const isLetter = (ch: string) => /[\p{L}\p{N}]/u.test(ch);
 
-/** Closest approach (font units) of b to a, set at a's advance, over the zone they share. */
 function approach(f: SFont, a: string, b: string): number | null {
   const pa = profile(f, a), pb = profile(f, b);
   if (!pa || !pb) return null;
@@ -146,7 +126,6 @@ function approach(f: SFont, a: string, b: string): number | null {
   return m === Infinity ? null : m;
 }
 
-/** Optical kern (font units, <= 0) between two adjacent glyphs; 0 unless one of them leaves a hole. */
 function pairKern(f: SFont, a: string, b: string): number {
   if (a === ' ' || b === ' ' || !(OPEN_R.has(a) || OPEN_L.has(b))) return 0;
   if (!isLetter(a) && !isLetter(b)) return 0;
@@ -162,7 +141,6 @@ function pairKern(f: SFont, a: string, b: string): number {
   if (m !== null) {
     const lower = isLower(a) || isLower(b) || !isLetter(a) || !isLetter(b);
     k = Math.max(-0.15 * f.upm, Math.min(0, STRENGTH * ((lower ? f.target.lc : f.target.uc) - m)));
-    // clearance over the full height (descenders, accents and arms included)
     const pa = profile(f, a)!, pb = profile(f, b)!, adv = f.glyphs.get(a)!.adv;
     let near = Infinity;
     for (let i = 0; i < ROWS; i++) {
@@ -205,7 +183,6 @@ function parseSvgFont(txt: string): SFont {
   };
 }
 
-/** These fonts only use M/L (absolute) commands; y is up in font units. */
 function parsePath(d: string): V2[][] {
   const out: V2[][] = [];
   const tok = d.match(/[MLml]|-?\d*\.?\d+(?:e-?\d+)?/g) ?? [];
@@ -225,23 +202,16 @@ function parsePath(d: string): V2[][] {
 export interface StrokeText {
   /** Polylines in px, origin at left baseline, y down. */
   strokes: V2[][];
-  /** For each stroke: index of the char it belongs to. */
   charOf: number[];
-  /** Cumulative length at the start of each stroke & total (for progressive writing). */
   startLen: number[];
   lens: Float32Array[];
   total: number;
   width: number;
-  /** Char index -> [startLen, endLen] of its strokes (for syncing writing to word timings). */
   charRange: [number, number][];
   size: number;
   capHeight: number;
 }
 
-/**
- * Lay out a string in a stroke font at `size` px (em size). Letter pairs are kerned optically unless
- * `kern` is false (default: on, except for the connected scripts).
- */
 export function strokeText(text: string, fontName: StrokeFontName = 'script', size = 100, tracking = 0, kern = !SCRIPTS.has(fontName)): StrokeText {
   const f = fonts.get(fontName);
   if (!f) throw new Error(`stroke font not loaded: ${fontName}`);
@@ -269,7 +239,6 @@ export function strokeText(text: string, fontName: StrokeFontName = 'script', si
     r[0] = Math.min(r[0], startLen[i]!);
     r[1] = Math.max(r[1], startLen[i]! + (lens[i]![lens[i]!.length - 1] ?? 0));
   });
-  // chars without strokes (spaces) inherit the position of the previous char's end
   let last = 0;
   for (const r of charRange) {
     if (r[0] === Infinity) { r[0] = last; r[1] = last; }
@@ -278,10 +247,6 @@ export function strokeText(text: string, fontName: StrokeFontName = 'script', si
   return { strokes, charOf, startLen, lens, total: acc, width: x - tracking, charRange, size, capHeight: f.cap * s };
 }
 
-/**
- * Draw the first `len` px of a StrokeText into a Canvas2D context (already transformed).
- * Returns the pen position (the "spark" head) or null if nothing drawn.
- */
 export function drawStrokeText(c: CanvasRenderingContext2D, st: StrokeText, len: number): { x: number; y: number; angle: number } | null {
   let head: { x: number; y: number; angle: number } | null = null;
   c.beginPath();
@@ -308,11 +273,6 @@ export function drawStrokeText(c: CanvasRenderingContext2D, st: StrokeText, len:
   return head;
 }
 
-/**
- * Report to `reel check` the text just drawn with `drawStrokeText(c, st, len)` (same context, same transform):
- * the box around the strokes written so far, so a line half written is measured where its ink is, with its
- * colour from strokeStyle and globalAlpha. Free outside a check.
- */
 export function reportStrokeText(c: CanvasRenderingContext2D, st: StrokeText, len: number, text: string, o: Pick<DrawnBox, 'label' | 'exempt' | 'color' | 'alpha'> = {}) {
   if (!reporting()) return;
   let x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
@@ -325,10 +285,6 @@ export function reportStrokeText(c: CanvasRenderingContext2D, st: StrokeText, le
   reportDrawn(c, text, [x0 - pad, y0 - pad, x1 + pad, y1 + pad], st.size, c.strokeStyle, o);
 }
 
-/**
- * Map time -> written length so each char is written while its word is spoken or sung.
- * `charTimes[i]` = [start, end] time for char i (e.g. derived from word timings).
- */
 export function writtenLength(st: StrokeText, charTimes: [number, number][], t: number): number {
   let len = 0;
   for (let i = 0; i < st.charRange.length; i++) {

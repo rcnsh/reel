@@ -1,9 +1,7 @@
-// A bar chart of samples per frame by how fast the picture moves, and a counter.
 import type * as THREE from 'three';
 import { Scene, type Frame, BarChart, Counter, clearRT, LIN, W, H, split } from 'reel';
 import { BOTTOM, TOP } from './_script';
 
-// the chart and the counter side by side across the content area, a gap between them
 const [chartBox, countBox] = split({ x: W * 0.08, y: H * TOP, w: W * 0.84, h: H * (BOTTOM - TOP) }, 'h', [0.5, 0.3], W * 0.04);
 
 export default class Samples extends Scene {

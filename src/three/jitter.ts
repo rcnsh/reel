@@ -1,8 +1,3 @@
-// Low-discrepancy jitter indexed by the motion-blur sub-frame (SUB_FRAME.index): sub-pixel offsets for
-// anti-aliasing, points on a lens aperture for depth of field, points on an area light for soft shadows. Every
-// prefix of each sequence is evenly spread, so a frame that adaptive sampling stops after 4, 12 or 36 sub-frames
-// has averaged a fair sample of each. The sequences differ from one another (and from the ternary order of the
-// sub-frames' times), so the jitters do not line up with each other or with time. Pure.
 
 const fract = (x: number) => x - Math.floor(x);
 
@@ -27,8 +22,6 @@ export function concentric(u: number, v: number): [number, number] {
   return [r * Math.cos(phi), r * Math.sin(phi)];
 }
 
-/** Point of sub-frame k on the unit lens disk (Halton bases 2 and 3). */
 export const lensSample = (k: number) => concentric(halton(k + 1, 2), halton(k + 1, 3));
 
-/** Point of sub-frame k on a unit area light's disk (Halton bases 5 and 7). */
 export const lightSample = (k: number) => concentric(halton(k + 1, 5), halton(k + 1, 7));

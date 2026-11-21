@@ -1,4 +1,3 @@
-// Which GL backend Chrome renders with, per platform, and its flags.
 import { expect, test } from 'bun:test';
 import { glArgs, glBackend, parseMissingLibs } from '../cli/chrome';
 import { chromeArgs } from '../cli/renderer';

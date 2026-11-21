@@ -1,12 +1,7 @@
-// A decoder for 16-bit PNGs, which the browser decodes to 8 bits a channel (an <img>, createImageBitmap, a float16
-// canvas and ImageDecoder alike): a dark gradient or a graded photo keeps its 65536 levels as linear floats. Handles
-// what a 16-bit PNG usually is (grey or RGB, with or without alpha, not interlaced) in sRGB, linear, a gamma, or
-// Display P3 by cICP; anything else is left to the browser (null).
 
 export interface Png16 {
   width: number;
   height: number;
-  /** Linear Rec.709 RGB and straight alpha, 4 floats a pixel, row 0 at the top. */
   data: Float32Array;
 }
 
@@ -14,7 +9,6 @@ interface Chunks { width: number; height: number; depth: number; colorType: numb
 
 const SIG = [137, 80, 78, 71, 13, 10, 26, 10];
 
-/** The PNG's bit depth, or 0 when the bytes are not a PNG. */
 export function pngDepth(b: Uint8Array): number {
   return b.length > 25 && SIG.every((v, i) => b[i] === v) ? b[24]! : 0;
 }
@@ -42,17 +36,13 @@ async function inflate(parts: Uint8Array[]): Promise<Uint8Array> {
 }
 
 const srgbToLinear = (x: number) => (x <= 0.04045 ? x / 12.92 : ((x + 0.055) / 1.055) ** 2.4);
-// Display P3 (D65) to Rec.709 primaries, both linear
 const P3_TO_709 = [1.2249401, -0.2249404, 0, -0.0420569, 1.0420571, 0, -0.0196376, -0.0786361, 1.0982735];
 
-/** Decode a 16-bit PNG to linear floats, or null when it is not one this handles (the browser's decode is then right). */
 export async function decodePng16(b: Uint8Array): Promise<Png16 | null> {
   if (pngDepth(b) !== 16) return null;
   const c = chunks(b);
   const channels = ({ 0: 1, 2: 3, 4: 2, 6: 4 } as Record<number, number>)[c.colorType];
   if (!channels || c.interlace !== 0 || !c.idat.length) return null;
-  // the transfer and primaries: cICP first (as the PNG spec orders them), then sRGB, then an ICC profile (the
-  // browser's), then gAMA, and sRGB when nothing says
   let decode: (x: number) => number = srgbToLinear, p3 = false;
   if (c.cicp) {
     const [prim, tf] = c.cicp as [number, number];
@@ -66,7 +56,6 @@ export async function decodePng16(b: Uint8Array): Promise<Png16 | null> {
   const raw = await inflate(c.idat);
   const { width: w, height: h } = c, bpp = channels * 2, stride = w * bpp;
   if (raw.length < h * (stride + 1)) throw new Error('the PNG is truncated');
-  // undo the per-row filters in place, into rows without their filter byte
   const px = new Uint8Array(h * stride);
   for (let y = 0; y < h; y++) {
     const f = raw[y * (stride + 1)]!, src = y * (stride + 1) + 1, row = y * stride, prev = row - stride;

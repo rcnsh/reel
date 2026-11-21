@@ -1,8 +1,4 @@
 #!/usr/bin/env bun
-// reel: render a video project (a folder with a reel.config.ts) in headless Chrome. `reel --help` lists the
-// commands and flags (cli/args.ts). Every rendering command takes --project <folder> (default: the current
-// folder) and --json (one JSON object on stdout: { ok, errors, logs, warnings, ... }). Exit codes: 0 done,
-// 1 something failed (scene errors included), 2 a bad command line or no project.
 import { readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -15,14 +11,12 @@ const argv = process.argv.slice(2);
 const mode = argv[0] ?? '';
 if (!mode || mode === '--help' || mode === '-h' || mode === 'help') { console.log(HELP); process.exit(mode ? 0 : 1); }
 
-/** A bad command line or project: exit 2 (with --json, the report shape on stdout as well). */
 const fail = (msg: string): never => {
   if (argv.includes('--json')) console.log(JSON.stringify({ ok: false, errors: [msg], logs: [], warnings: [] }, null, 1));
   console.error(`reel: ${msg}`);
   process.exit(2);
 };
 
-// the project tools keep their own flags: hand the rest of the line to them
 const TOOLS: Record<string, string[]> = {
   narrate: ['bun', path.join(ENGINE, 'tools/narrate.ts')],
   align: ['bun', path.join(ENGINE, 'tools/align.ts')],
@@ -40,9 +34,6 @@ if (TOOLS[mode]) {
   let project = path.resolve(dir);
   if (!help) try { project = projectDir(dir); } catch (e) { fail((e as Error).message); }
   const proc = spawnChild([...TOOLS[mode]!, ...rest], { stdio: ['inherit', 'inherit', 'inherit'], env: { ...process.env, REEL_PROJECT: project } });
-  // (reel waits while the tool cleans up after a stop, rather than ending first and having the watchdog cut that
-  // short: the terminal's Ctrl-C and hang-up reach the tool by themselves, a SIGTERM is passed on, and reel gives up
-  // waiting after a few seconds)
   for (const sig of ['SIGINT', 'SIGHUP', 'SIGTERM'] as const) process.on(sig, () => {
     if (sig === 'SIGTERM') proc.kill(sig);
     setTimeout(() => process.exit(128 + os.constants.signals[sig]), 5000).unref();
@@ -54,22 +45,18 @@ let P!: ReturnType<typeof parseCommand>;
 try { P = parseCommand(argv); } catch (e) { fail((e as Error).message); }
 let A = P.values;
 if (A.help) { console.log(HELP); process.exit(0); }
-// (the GL backend travels by environment: to the warm renderer, whose engine version includes it, and video's browsers)
 if (typeof A.gl === 'string') {
   process.env.REEL_GL = A.gl;
   try { (await import('./chrome')).glBackend(); } catch (e) { fail(`--gl ${A.gl}: ${(e as Error).message.replace(/^REEL_GL=\S+: /, '')}`); }
 }
-// (--props names a file or holds the JSON: read here, so a request carries the JSON itself)
 if (typeof A.props === 'string') {
   const raw = A.props;
   try { A.props = readProps(raw, (f) => readFileSync(path.resolve(f), 'utf8')); } catch (e) { fail((e as Error).message); }
 }
 const json = !!A.json;
 const say = (s: string) => { if (!json) console.log(s); };
-/** A path given on the command line, absolute (requests travel to the warm renderer, whose folder differs). */
 const abs = (p: unknown) => (typeof p === 'string' ? path.resolve(p) : undefined);
 
-/** Print a result and exit with its code. */
 function finish(res: Result, human: (r: Result) => void): never {
   if (json) console.log(JSON.stringify(res, null, 1));
   else {
@@ -89,9 +76,7 @@ if (mode === 'init') {
   const project = path.resolve(P.positionals[0]!);
   Object.assign(out, { project, files });
   if (A.narrated) {
-    // time the script with a scratch voice, so the project has its words and length before the first render
     const cmd = ['bun', path.join(ENGINE, 'tools/narrate.ts')], env = { ...process.env, REEL_PROJECT: project };
-    // (with --json its output is kept for the error, not printed)
     const r = json ? await run(cmd, { quiet: true, nothrow: true, env }) : { exitCode: await spawnChild(cmd, { stdio: ['ignore', 'inherit', 'inherit'], env }).exited, stderr: '' };
     if (r.exitCode !== 0) out.errors.push(`reel narrate failed in ${project}: the project is written but has no timing yet; run \`reel narrate\` there once the error ${json ? 'below' : 'above'} is fixed, or \`reel align <recording>\`${json ? `:\n${r.stderr.trim().slice(-1500)}` : ''}`);
   }
@@ -113,7 +98,6 @@ if (mode === 'golden') {
   const { goldenDir, pruneGoldens, renderGoldens } = await import('./golden');
   const { files, errors } = await renderGoldens(goldenDir());
   const removed = pruneGoldens(goldenDir()).map((f) => path.join(goldenDir(), f));
-  // Pruning does not wait on the renders (a listed golden is never pruned), so the removals print even when one failed.
   if (!json) for (const f of removed) console.error(`removed ${f} (no longer in goldens.json)`);
   finish({ ok: !errors.length, errors, logs: [], warnings: [], files: [...files.values()], removed }, () => console.log([...files.values()].join('\n')));
 }
@@ -188,7 +172,6 @@ if (mode === 'daemon') {
     let project: string | null = null;
     if (!A.all) try { project = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { fail(`${(e as Error).message}, or --all`); }
     res.stopped = await d.stop(project);
-    // (--all also sweeps what dead exports and servers left: spool and frame folders, Vite's stale optimizer folders)
     if (A.all) res.swept = (await import('./scratch')).sweep([(await import('node:os')).tmpdir()], path.join(ENGINE, 'node_modules/.vite'));
     finish(res, () => {
       console.log((res.stopped as string[]).length ? `stopped ${(res.stopped as string[]).join(', ')}` : 'no warm renderer was running');
@@ -199,7 +182,6 @@ if (mode === 'daemon') {
 }
 
 let PROJECT = '';
-// (diff of two files needs no project)
 const needsProject = !(mode === 'diff' && A.t === undefined);
 try { PROJECT = projectDir(typeof A.project === 'string' ? A.project : '.'); } catch (e) { if (needsProject) fail((e as Error).message); }
 
@@ -271,9 +253,7 @@ if (mode === 'notes') {
 if (mode === 'dev') {
   const { startServer } = await import('./server');
   let srv;
-  // (5173 when it is free, else the next free port: the URL printed is this project's)
   const port = num(A, 'port', 5173);
-  // (read and checked with the other flags, above)
   const props = A.props as string | undefined;
   try { srv = await startServer(PROJECT, { port, strictPort: A.port !== undefined, hmr: true, theme: A.theme as string | undefined, props }); } catch (e) { fail((e as Error).message); }
   console.log(`${srv!.url}${props ? `  (with --props; ?props=<JSON> in the URL overrides them)` : ''}  (space plays, arrows seek, , and . step a frame, [ and ] jump clips, l loops, h hides the UI)`);
@@ -291,7 +271,6 @@ function printCheck(x: Result) {
 
 const hist = (h: Record<string, number>) => Object.entries(h).sort((a, b) => +a[0] - +b[0]).map(([k, v]) => `${k}:${v}`).join(' ');
 
-/** The logical frame size a page will have: --size, else the config's, read outside the browser (null when the config does not load: the renderer reports that). */
 async function frameSize(page: PageOpts): Promise<[number, number] | null> {
   if (page.w && page.h) return [page.w, page.h];
   try {
@@ -303,7 +282,6 @@ async function frameSize(page: PageOpts): Promise<[number, number] | null> {
 let req!: Req;
 try {
   const page = pageOf(A), shutter = num(A, 'shutter', 0.5);
-  // (a scale that does not pack is refused here, before a browser starts; only half size can miss)
   if (page.scale === 0.5) { const s = await frameSize(page); if (s) checkScale(s[0], s[1], page.scale); }
   let samples = samplesOf(A);
   if (mode === 'video') {
@@ -313,19 +291,15 @@ try {
     const format = F.formatOf(A.format as string | undefined, abs(A.out));
     if (A.audio && A.noaudio) throw new UsageError('--audio and --noaudio contradict each other');
     if (A.wait && A.force) throw new UsageError('--wait and --force contradict each other: --wait queues for the export slot, --force runs beside the export that holds it');
-    // the project's export defaults (the config's `export`), under the flags given
-    // (a config that does not load is reported by the renderer, with its line)
     const cfg = await (await import('./server')).loadConfig(PROJECT).catch(() => null);
     const given = A;
     A = F.withExportDefaults(A, cfg?.export, format);
     if (A.samples !== given.samples) samples = samplesOf(A);
     const enc = F.encodeOptsOf(A, format);
     if (A.draft) {
-      // a quick look: half size (the layout of the full size), one sample, the fastest encoder; named and tagged a draft
       if (A.samples !== undefined || A.scale !== undefined) throw new UsageError('--draft renders at half size with one sample: leave out --samples and --scale');
       samples = 1;
       enc.draft = F.draftEncoder();
-      // (half size when the frame's halves pack into the readback, else full size: still one sample)
       const s = await frameSize(page);
       page.scale = s ? F.draftScale(s[0], s[1]) : 1;
       enc.comment = `reel draft: ${page.scale === 0.5 ? 'half size' : 'full size'}, one sample, not for delivery`;
@@ -339,7 +313,6 @@ try {
       const m = await r.meta();
       const sc = page.scale, plan = F.planOf(format, enc, page.fps ?? m.format.fps, [(page.w ?? m.format.w) * sc, (page.h ?? m.format.h) * sc]);
       const out = F.draftName(abs(A.out) ?? F.defaultOut(PROJECT, format), !!A.draft);
-      // (with --mix the picture is rendered to a scratch file beside the output and the mix writes the output)
       const { partialOf, onAbort } = await import('./scratch');
       if (mixed) { const p = pic = partialOf(out); offPic = onAbort(() => rmSync(p, { force: true })); }
       const X = await import('./exports');
@@ -350,7 +323,6 @@ try {
         })
         : X.claimExport(PROJECT, out, !!A.force);
       if (A.wait && A.progress) console.error(JSON.stringify({ queued: false }));
-      // (the subtitles first: a project without timed words fails before it renders, not after)
       const subs = A.subtitles ? (await import('../tools/subtitles')).writeSubtitles(PROJECT, { from: num(A, 'from', 0), to: num(A, 'to') }).srt : undefined;
       const v = await exportVideo({
         url: m.url, project: PROJECT, fmt: { w: page.w ?? m.format.w, h: page.h ?? m.format.h, fps: page.fps ?? m.format.fps, scale: page.scale }, only: page.only, theme: page.theme, props: page.props,
@@ -361,7 +333,6 @@ try {
           else if (!json) process.stdout.write(`\r${p.frames}/${p.total} frames  ${p.fps.toFixed(1)} fps  eta ${p.eta.toFixed(0)}s   `);
         },
       });
-      // (null: scene errors, and the previous output left as it was)
       const file = v.file && !mixed ? (format.kind === 'sequence' ? F.sequencePattern(v.file, format) : v.file) : undefined;
       if (A.draft) res.draft = { encoder: v.encoder ?? (enc.draft === 'videotoolbox' ? 'VideoToolbox H.264 (raw pipe)' : 'x264 ultrafast (raw pipe)'), scale: page.scale, samples: 1 };
       Object.assign(res, { gl: (await import('./chrome')).glBackend(), file, format: format.id, pixels: plan.pixels, alpha: plan.alpha, fps: plan.fps, frames: v.frames, seconds: v.seconds, workers: v.workers, subFrames: v.subFrames });
@@ -379,7 +350,6 @@ try {
       if (e instanceof UsageError) throw e;
       res.errors.push(...r.explain([String((e as Error)?.message ?? e)]));
     } finally {
-      // (the picture a mix is made from is scratch, whatever happened)
       if (pic) rmSync(pic, { force: true });
       await r.close(); release(); offPic();
     }
@@ -387,7 +357,6 @@ try {
     finish(res, () => {});
   }
   req = { op: mode as Req['op'], project: PROJECT, page, samples, shutter, args: argsOf(A) };
-  // (a deep or transparent readback needs a page made for it)
   if (mode === 'perf' && /16/.test(req.args.pixels)) page.bits = 10;
   if (mode === 'perf' && /rgba/.test(req.args.pixels)) page.alpha = true;
 } catch (e) {
@@ -395,7 +364,6 @@ try {
   throw e;
 }
 
-/** The op's arguments from its flags. */
 function argsOf(v: Values): Record<string, unknown> {
   const maxSize = v['max-size'] !== undefined ? int(v, 'max-size', 0, 16) : undefined;
   switch (mode) {
@@ -423,7 +391,6 @@ function argsOf(v: Values): Record<string, unknown> {
   }
 }
 
-/** Run a request on the project's warm renderer, or (--no-daemon, --headed) on a renderer of this command's own. */
 async function render(q: Req): Promise<Result> {
   if (!A['no-daemon'] && !A.headed && !process.env.REEL_NO_DAEMON) {
     const { call } = await import('./daemon');

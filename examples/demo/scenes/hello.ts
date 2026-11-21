@@ -1,5 +1,3 @@
-// Demo plate: a shader background (the theme's bg with engraved hatching in its fg) and the line set in type as
-// it is spoken, by a text block that wraps and fits it to the frame.
 import type * as THREE from 'three';
 import { Scene, type Frame, FSPass, TextBlock, Words, esc, safeBox } from 'reel';
 
@@ -7,13 +5,12 @@ export default class Hello extends Scene {
   bg = new FSPass(/* glsl */ `
     uniform float t;
     void main() {
-      vec2 p = FRAG_PX / 1080.0; // (a fixed unit, so the texture keeps its size at any frame size)
+      vec2 p = FRAG_PX / 1080.0;
       float shade = 0.18 + 0.12 * snoise(vec3(p * 2.0, t * 0.1));
       vec3 col = mix(C_BG, C_FG, hatch(p.x * 90.0 + p.y * 40.0, shade) * 0.35);
       fragColor = vec4(col, 1.0);
     }`, { t: { value: 0 } });
 
-  // the line typed as it is spoken: the part not yet said is laid out but hidden, so the text never reflows
   line = this.ctx.words.get('function of time');
   text = new TextBlock({
     html: (f) => {

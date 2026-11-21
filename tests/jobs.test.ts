@@ -1,5 +1,3 @@
-// Video jobs on disk (cli/jobs.ts): detached commands any process can follow and cancel by id. Stand-in commands
-// print what `reel video --json --progress` prints, so these run without Chrome.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, rmSync } from 'node:fs';
 import path from 'node:path';
@@ -11,7 +9,6 @@ const before = process.env.REEL_EXPORTS_DIR;
 beforeAll(() => { dir = tempDir('reel-jobs-'); process.env.REEL_EXPORTS_DIR = dir; });
 afterAll(() => { if (before === undefined) delete process.env.REEL_EXPORTS_DIR; else process.env.REEL_EXPORTS_DIR = before; rmSync(dir, { recursive: true, force: true }); });
 
-/** A stand-in for `reel video`: the progress lines of `frames` frames, `ms` apart, then the result on stdout. */
 const fake = (frames: number, ms: number, o: { queuedMs?: number; code?: number } = {}) => ['bun', '-e', `
   const say = (o) => console.error(JSON.stringify(o));
   if (${o.queuedMs ?? 0}) { say({ queued: true, running: 'pid 1, other -> x.mp4, for 3 s', ahead: 0 }); await Bun.sleep(${o.queuedMs ?? 0}); say({ queued: false }); }
@@ -51,7 +48,6 @@ test('a queued job shows the export ahead, then runs', async () => {
   expect(s.state).toBe('queued');
   const q = await until(s.job, (x) => !!x.queue);
   expect(q.queue).toEqual({ running: 'pid 1, other -> x.mp4, for 3 s', ahead: 0 });
-  // (waiting returns at the change, not at the timeout)
   const t0 = Date.now();
   const w = await waitJob(s.job, 20);
   expect(Date.now() - t0).toBeLessThan(5000);
@@ -63,7 +59,6 @@ test('waiting returns when progress moves, and at the timeout when nothing does'
   const s = startJob(fake(40, 100), { project: '/p', out: '/x.mp4' });
   const first = await until(s.job, (x) => !!x.progress);
   const w = await waitJob(s.job, 20);
-  // (a twentieth of 40 frames is 2)
   expect(w.progress!.frames - first.progress!.frames).toBeGreaterThanOrEqual(2);
   expect(w.progress!.frames).toBeLessThan(40);
   await cancelJob(s.job);
@@ -79,7 +74,6 @@ test('cancel stops the command and the job reads cancelled', async () => {
   const s = startJob(['sleep', '30'], { project: '/p', out: '/x.mp4' });
   const c = await cancelJob(s.job);
   expect(c.state).toBe('cancelled');
-  // (cancelling an ended job changes nothing)
   expect((await cancelJob(s.job)).state).toBe('cancelled');
 });
 
@@ -102,7 +96,6 @@ test('a command that outlives its killed shell still reads running and is cancel
   const v = await until(g.job, (x) => x.state !== 'running');
   expect(v.state).toBe('failed');
   expect(v.output).toContain('ended without a result');
-  // (a dead job's clock stops)
   const sec = v.seconds;
   await Bun.sleep(1200);
   expect(jobView(g.job).seconds).toBe(sec);
@@ -110,7 +103,6 @@ test('a command that outlives its killed shell still reads running and is cancel
 
 test('another process finds, follows and cancels a job it did not start; the list has every job, newest first', async () => {
   const s = startJob(['sleep', '30'], { project: '/q', out: '/y.mp4' });
-  // (async: the shell is this process's child, reaped only while its event loop runs)
   const other = Bun.spawn(['bun', '-e', `
     const J = await import(${JSON.stringify(path.join(ENGINE, 'cli/jobs.ts'))});
     const seen = J.jobView(${JSON.stringify(s.job)}).state;

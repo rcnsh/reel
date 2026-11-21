@@ -1,6 +1,3 @@
-// What the CLI, the warm renderer and the MCP server ask a project's page to do. A request is plain data (it
-// crosses a socket to the warm renderer): the op, the project, how to open the page, the sampling and the op's
-// arguments, with every path in it absolute. Each op returns the fields it adds to the result.
 import { existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import type { AdaptiveSampling } from '../src/engine/engine';
@@ -19,7 +16,6 @@ export interface Req {
   shutter: number;
   args: Record<string, any>;
 }
-/** What every command prints with --json; `errors` (scene, shader and page errors) make it exit 1, `usage` 2. */
 export interface Result { ok: boolean; errors: string[]; logs: string[]; warnings: string[]; usage?: boolean; [k: string]: unknown }
 
 export type ClipInfo = import('../src/check').ClipSpan;
@@ -30,20 +26,17 @@ export const meta = (h: PageHandle): Promise<PageMeta> => h.page.evaluate(() => 
   return { duration: R.duration, timeline: R.timeline, cues: R.cues, sounds: R.sounds, track: R.track, theme: R.theme, props: R.props, W: R.W, H: R.H, fps: R.fps, scale: R.scale };
 });
 
-/** `dir/base.png`, or `dir/base-2.png`, `-3` … when that is taken: stills and sheets never overwrite each other. */
 export function freeName(dir: string, base: string, ext = '.png') {
   let f = path.join(dir, base + ext);
   for (let i = 2; existsSync(f); i++) f = path.join(dir, `${base}-${i}${ext}`);
   return f;
 }
 
-/** A still's name: the clips on screen (the theme's overlay only when alone) and the time, `hello_2.500s`. */
 export function stillName(clips: string[], t: number) {
   const ids = clips.length > 1 ? clips.filter((c) => c !== 'overlay') : clips;
   return `${ids.map((c) => c.replace(/[^\w.-]+/g, '-')).join('+') || 'nothing'}_${t.toFixed(3)}s`;
 }
 
-/** Frame times n evenly spaced from `from` to `to`, both included. */
 export const spaced = (from: number, to: number, n: number) => Array.from({ length: n }, (_, i) => from + ((to - from) * i) / Math.max(1, n - 1));
 
 interface Ctx { r: Renderer; req: Req; warn: (s: string) => void; error: (s: string) => void; wrote: (file: string) => void }
@@ -76,7 +69,6 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     for (const t of a.times) {
       const subFrames: number = await h.page.evaluate(([t, s, sh]) => (window as any).__reel.still(t, s, sh), [t, req.samples, req.shutter] as const);
       const clips: string[] = await h.page.evaluate((t) => (window as any).__reel.clipsAt(t), t);
-      // (the pixel buffer the video export reads, not a screenshot of the page)
       const png: string = await h.page.evaluate((o) => (window as any).__reel.png(o), { maxSize: a.maxSize });
       const file = one ? a.out! : freeName(dir, stillName(clips, t));
       writeB64(ctx, file, png);
@@ -91,7 +83,6 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     const m = await meta(h);
     let times: number[];
     if (a.cuts) {
-      // 4 frames around every cut: 2 before, 2 after
       const starts = [...new Set(m.timeline.map((e) => e.start))].sort((x, y) => x - y).filter((s) => s > 0);
       if (!starts.length) throw new UsageError('sheet --cuts: the timeline has no cuts');
       times = starts.flatMap((s) => [s - 0.1, s - 1 / m.fps, s + 1 / m.fps, s + 0.1]);
@@ -125,19 +116,15 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
     const { req } = ctx, a = req.args as { from?: number; to?: number; step?: number; safe?: number; minText?: number; frozen?: number; out?: string; preview?: boolean; maxImages?: number };
     const m = await meta(h);
     const palette: Record<string, string> = await h.page.evaluate(() => (window as any).__reel.palette);
-    // --only: the clips not loaded draw nothing, so only the loaded clips' frames are checked
     const only = req.page.only?.split(',');
     const times = checkTimes(m.timeline, m.duration, m.fps, a.from ?? 0, a.to ?? m.duration, a.step ?? 0.5, only);
     if (!times.length) throw new UsageError(`check: no frames between ${a.from ?? 0} and ${a.to ?? m.duration} s${only ? ` in --only ${only.join(',')}` : ''}`);
-    // one session: every time rendered and measured in this page, errors attributed to the frame that raised them
     const samples: Sample[] = [], seen = new Set<string>();
     const fresh = (errors: string[]) => { const f = errors.filter((e) => !seen.has(e)); for (const e of f) seen.add(e); return f; };
     for (const t of times) {
       const r: Omit<Sample, 't'> = await h.page.evaluate(([t, s, sh]) => (window as any).__reel.inspect(t, s, sh), [t, req.samples, req.shutter] as const);
       samples.push({ ...r, t, errors: fresh(r.errors) });
     }
-    // some of the times again, out of order: a frame that is a pure function of t comes out the same
-    // (a scene error raised only by the second render is that error, not a different frame)
     for (const i of recheckOrder(samples.map((s) => (judgeable(s, m.timeline) ? s.clips : null)))) {
       const s = samples[i]!;
       const r: Pick<Sample, 'stats' | 'errors'> & { failed: boolean } = await h.page.evaluate(([t, sm, sh]) => (window as any).__reel.recheck(t, sm, sh), [s.t, req.samples, req.shutter] as const);
@@ -145,12 +132,10 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
       if (!r.failed) s.again = r.stats;
     }
     const minSide = Math.min(m.W, m.H);
-    // (timeline problems the page found while loading: a transition with no overlap to play over)
     const warnings: { clip: string; message: string }[] = await h.page.evaluate(() => (window as any).__reel.warnings ?? []);
     const findings: Finding[] = findingsOf(samples, {
       W: m.W, H: m.H, safe: a.safe ?? 0.05, minText: a.minText ?? Math.round(minSide * 0.022), frozen: a.frozen ?? 3, clips: m.timeline, palette, warnings, only,
     });
-    // a crop of the worst frame of each finding (the whole frame, small, for frame-wide ones)
     const dir = a.out ?? path.join(req.project, 'out/check');
     if (!a.out && existsSync(dir)) for (const f of readdirSync(dir)) if (f.endsWith('.png')) rmSync(path.join(dir, f));
     const previews: string[] = [];
@@ -166,7 +151,6 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
       writeB64(ctx, f.image, png);
       if (a.preview) previews.push(png);
     }
-    // generated assets declared in assets.json whose files are not there yet (renders show a placeholder)
     for (const x of missingAssets(req.project)) findings.push({
       kind: 'missingAsset', severity: 'warning', t: 0, until: m.duration, frames: 0, at: 0, clip: '', text: x.out,
       message: `asset '${x.id}' (${describe(x)}) is declared in assets.json but ${x.out} does not exist: run \`reel assets\` with the provider's key, or make it from its prompt and save it there`,
@@ -178,7 +162,6 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
   },
 
   async events(h, ctx) {
-    // sound-mix cues: the timeline (clip starts), every cue() a scene recorded and the sounds on the timeline
     const { duration, timeline, cues, sounds } = await meta(h);
     const out = ctx.req.args.out ?? path.join(ctx.req.project, 'data/cues.json');
     mkdirSync(path.dirname(out), { recursive: true });
@@ -189,8 +172,6 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
 
   async perf(h, ctx) {
     const { req } = ctx;
-    // render: renderFrame returning (the CPU side, and with --samples auto the GPU too: the sampler waits for each
-    // step's error); gpu: the GPU work still queued after that, waited for with a fence; readback: the copy out alone
     return h.page.evaluate(async ({ from, to, samples, shutter, pixels }) => {
       const P = (window as any).__reel, dt = 1 / P.fps, E = P.engine;
       const ms: number[] = [];
@@ -228,7 +209,6 @@ const OPS: Record<Op, (h: PageHandle, ctx: Ctx) => Promise<Record<string, unknow
   },
 };
 
-/** Frames in a labelled grid, written to `out`; with `preview`, also a copy at most that size (base64). */
 async function grid(h: PageHandle, ctx: Ctx, times: number[], cols: number, cell: number, out: string, a: { maxSize?: number; preview?: number }) {
   const g: { png: string; width: number; height: number; cells: unknown[] } = await h.page.evaluate((o) => (window as any).__reel.grid(o), {
     times, cols, cell, samples: ctx.req.samples, shutter: ctx.req.shutter, maxSize: a.maxSize,
@@ -239,10 +219,6 @@ async function grid(h: PageHandle, ctx: Ctx, times: number[], cols: number, cell
   return res;
 }
 
-/**
- * Run a request on the renderer. A page that crashed or closed under it is replaced and the request run once
- * more; anything else that throws becomes an error of the result.
- */
 export async function run(r: Renderer, req: Req, wrote: (file: string) => void = () => {}): Promise<Result> {
   const res: Result = { ok: true, errors: [], logs: [], warnings: [] };
   const ctx: Ctx = { r, req, warn: (s) => res.warnings.push(s), error: (s) => res.errors.push(s), wrote };
@@ -252,7 +228,6 @@ export async function run(r: Renderer, req: Req, wrote: (file: string) => void =
     try {
       h = await r.page(req.page);
       Object.assign(res, await OPS[req.op](h, ctx));
-      // (the frame rendered, so a caller sees which size it looked at)
       res.frame = `${h.fmt.w}x${h.fmt.h}${h.fmt.scale !== 1 ? ` at scale ${h.fmt.scale}` : ''}, ${h.fmt.fps} fps`;
       res.errors.push(...await h.errors());
       res.logs.push(...h.logs);

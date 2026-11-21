@@ -1,5 +1,3 @@
-// `reel video` end to end in every output format family: a second of a small project with a sound track, the stream
-// checked with ffprobe (codec, pixel format, colour tags, alpha, sound) and a decoded frame checked for transparency.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -37,26 +35,22 @@ function probe(file: string): Stream[] {
   const r = Bun.spawnSync(['ffprobe', '-v', 'error', '-show_streams', '-of', 'json', file]);
   return JSON.parse(r.stdout.toString()).streams;
 }
-/** The alpha of the top-left pixel of frame `n` (the theme's background, which a transparent render leaves out). */
 function cornerAlpha(file: string, decoder?: string, n = 5) {
   const r = Bun.spawnSync(['ffmpeg', '-loglevel', 'error', ...(decoder ? ['-c:v', decoder] : []), '-i', file, '-vf', `select=eq(n\\,${n}),format=rgba`, '-frames:v', '1', '-f', 'rawvideo', '-']);
   return r.stdout[3];
 }
 async function render(name: string, ...flags: string[]) {
-  // (--wait: queued behind the run's other exports rather than failing; the run has a slot of its own, tests/setup.ts)
   const r = await reel(['video', '--project', proj.dir, '--out', out(name), '--json', '--wait', ...flags]);
   expect(r.err).not.toContain('ERRORS');
   expect(r.code).toBe(0);
   return r.json();
 }
 const bt709 = (s: Stream) => [s.color_range, s.color_space, s.color_primaries, s.color_transfer];
-/** A finished file's integrated loudness and true peak, measured by ffmpeg's ebur128 on its decoded sound. */
 function r128(file: string) {
   const e = Bun.spawnSync(['ffmpeg', '-nostdin', '-hide_banner', '-i', file, '-map', 'a', '-af', 'ebur128=peak=true:framelog=quiet', '-f', 'null', '-']).stderr.toString();
   const at = (k: string) => { const v = e.slice(e.lastIndexOf('Summary:')).match(new RegExp(`${k}:\\s+(-?[\\d.]+|-inf)`))![1]!; return v === '-inf' ? -Infinity : Number(v); };
   return { integrated: at('I'), truePeak: at('Peak') };
 }
-/** The mix lands on its target: within 1 LU, the true peak at or under its ceiling. */
 function onTarget(file: string, integrated = -14, truePeak = -1) {
   const m = r128(file);
   expect(Math.abs(m.integrated - integrated)).toBeLessThanOrEqual(1);
@@ -81,7 +75,6 @@ test.skipIf(!hasChrome)('HEVC Main10 and ProRes 422 HQ: 10-bit from the deep rea
   const [v] = probe(out('h.mp4'));
   expect([v!.codec_name, v!.pix_fmt, v!.profile]).toEqual(['hevc', 'yuv420p10le', 'Main 10']);
   expect(bt709(v!)).toEqual(['tv', 'bt709', 'bt709', 'bt709']);
-  // the background's luma is the still's grey in limited range (swscale's gain on 16-bit input divided out)
   const still = await reel(['still', '--project', proj.dir, '--no-daemon', '--t', '0.5', '--out', out('bg.png')]);
   expect(still.code).toBe(0);
   const grey = readPng(out('bg.png')).data[0]!;
@@ -105,12 +98,10 @@ test.skipIf(!hasChrome)('ProRes 4444 and VP9 WebM carry alpha: the background is
   expect([w!.codec_name, w!.tags?.alpha_mode ?? w!.tags?.ALPHA_MODE]).toEqual(['vp9', '1']);
   expect(o!.codec_name).toBe('opus');
   expect(cornerAlpha(out('a.webm'), 'libvpx-vp9')).toBe(0);
-  // the mix goes into the container with its own codec
   const m = await render('m.webm', '--mix');
   expect(m.loudness).toBeTruthy();
   expect(probe(out('m.webm')).map((x) => x.codec_name)).toEqual(['vp9', 'opus']);
   onTarget(out('m.webm'));
-  // --opaque: the same formats with the background
   await render('o.webm', '--opaque');
   expect(probe(out('o.webm'))[0]!.tags?.alpha_mode ?? '0').not.toBe('1');
 }, 90_000);
@@ -118,7 +109,6 @@ test.skipIf(!hasChrome)('ProRes 4444 and VP9 WebM carry alpha: the background is
 test.skipIf(!hasChrome)('the mix lands on its loudness target: -14 LUFS and -1 dBTP by default, or what mix.json says', async () => {
   const m = await render('loud.mp4', '--mix');
   onTarget(out('loud.mp4'));
-  // (what it reports is what the file measures)
   expect(Math.abs(m.loudness.integrated - r128(out('loud.mp4')).integrated)).toBeLessThanOrEqual(0.2);
   await Bun.write(path.join(proj.dir, 'mix.json'), JSON.stringify({ loudness: { integrated: -20, truePeak: -3 } }));
   try {
@@ -149,16 +139,13 @@ test.skipIf(!hasChrome)('image sequences: PNG with alpha, 16-bit PNG, JPEG and l
   await render('j/f.jpg', '--quality', '90');
   expect(probe(out('j/f_000009.jpg'))[0]!.pix_fmt).toBe('yuvj444p');
   await render('x/f.exr', '--alpha', '--from', '0.5');
-  // (frames are numbered by their place in the video: a render from 0.5 s at 10 fps starts at 5)
   expect(existsSync(out('x/f_000005.exr'))).toBe(true);
   const [x] = probe(out('x/f_000005.exr'));
   expect([x!.codec_name, x!.color_transfer]).toEqual(['exr', 'linear']);
-  // (ffmpeg 8 decodes half floats as gbrapf16le, older ones widen them to 32-bit: the file's channel list says)
   expect(x!.pix_fmt).toMatch(/^gbrapf(16|32)le$/);
   expect(exrChannels(out('x/f_000005.exr'))).toEqual([['A', 1], ['B', 1], ['G', 1], ['R', 1]]);
 }, 90_000);
 
-/** An EXR's channels and pixel types (0 uint, 1 half, 2 float), from its header's channels attribute. */
 function exrChannels(file: string): [string, number][] {
   const b = readFileSync(file);
   let i = b.indexOf('channels\0chlist\0') + 16 + 4;

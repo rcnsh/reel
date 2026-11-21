@@ -1,9 +1,3 @@
-// reel init <folder>: a new video project that renders straight away. It writes reel.config.ts, one scene, a
-// tsconfig.json that extends this checkout's tsconfig.project.json (so `reel`, `reel/config` and three.js typecheck
-// without an install), a package.json whose scripts run this checkout's CLI, a .gitignore, a CLAUDE.md and the
-// engine's agent skills in .claude/skills (copied: a project keeps the version it was made with until
-// `reel skills update`).
-// --narrated adds narration.txt and mix.json and voices the script (reel narrate, Kokoro by default).
 import { cpSync, existsSync, mkdirSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { formatOf } from '../src/config';
@@ -12,13 +6,10 @@ import { ENGINE } from './server';
 
 export interface InitOptions { size: [number, number]; fps: number; theme: string; narrated: boolean }
 
-/** A path as one shell word (package.json scripts run through a shell, and the engine's path may hold spaces). */
 const sh = (p: string) => (/^[\w@%+=:,./-]+$/.test(p) ? p : `'${p.replace(/'/g, `'\\''`)}'`);
 
-/** Files a folder may already hold and still count as empty. */
 const IGNORABLE = new Set(['.git', '.DS_Store']);
 
-/** Check the options; throws with a message for the command line. */
 export function initOptions(o: { size?: string; fps?: string; theme?: string; narrated?: boolean }): InitOptions {
   let size: [number, number] = [1920, 1080];
   if (o.size !== undefined) {
@@ -34,7 +25,6 @@ export function initOptions(o: { size?: string; fps?: string; theme?: string; na
   return { size, fps, theme, narrated: !!o.narrated };
 }
 
-/** Write the project into `dir` (created if missing; refused if it holds anything). Returns the files written. */
 export function initProject(dir: string, o: InitOptions): string[] {
   const root = path.resolve(dir);
   if (existsSync(root)) {
@@ -71,14 +61,9 @@ export function initProject(dir: string, o: InitOptions): string[] {
   return [...written, ...installSkills(root)];
 }
 
-/** The engine's skills: skills/<name>/SKILL.md and the files beside it. */
 export const SKILLS = path.join(ENGINE, 'skills');
 export const skillNames = () => readdirSync(SKILLS, { withFileTypes: true }).filter((e) => e.isDirectory() && existsSync(path.join(SKILLS, e.name, 'SKILL.md'))).map((e) => e.name).sort();
 
-/**
- * Copy the engine's skills into `project`/.claude/skills, replacing those folders whole (a file the engine
- * dropped goes too); other skills there are left alone. Returns the files written.
- */
 export function installSkills(project: string): string[] {
   const out: string[] = [];
   for (const name of skillNames()) {

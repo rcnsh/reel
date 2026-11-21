@@ -49,9 +49,7 @@ def H(): return rng.normal(0, a.human / 1000) if a.human else 0
 beats, downs = [], []
 NB = a.bars * 4
 def bt(k):
-    # time of beat k (fractional ok): period ramps from P to P*(1-drift) across the song
     return a.lead + P * (k - a.drift * k * k / (2 * NB))
-# lead-in: a pad swelling into the first bar (no drums)
 n = int(a.lead * SR)
 if n > 0:
     pad = sum(tone(f, n, 'sin', 9) for f in chords[0]) * np.linspace(0, 1, n) * 0.12
@@ -78,7 +76,6 @@ for bar in range(a.bars):
         if drums or b == 0:
             add(tone(bassn[bar % 4], int(P * 0.9 * SR), 'saw', 0.4) * 0.18, tb + H())
     if a.vocal and drums:
-        # a vowel-like melody: a few notes per bar with formant-ish harmonics and vibrato
         for k, (off, f) in enumerate([(0, 440), (1.5, 494), (2, 523), (3, 494)]):
             nn = int(P * 0.9 * SR); t = np.arange(nn) / SR; vib = 1 + 0.01 * np.sin(2 * np.pi * 5.5 * t)
             v = sum(np.sin(2 * np.pi * f * h * np.cumsum(vib) / SR) * g for h, g in [(1, 1), (2, .5), (3, .6), (4, .2), (5, .3)])

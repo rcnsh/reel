@@ -1,5 +1,3 @@
-// A donut (or pie) chart: slices swept clockwise from 12 o'clock as progress runs 0 to 1, drawn as SVG paths in
-// an HTML layer, with a legend (or labels around the ring) and a value in the middle.
 import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
 import { cssColor, esc, HtmlComponent, safeBox, UNIT, val, type Anim } from './common';
@@ -21,10 +19,6 @@ export function donutSlices(values: number[]): Slice[] {
   });
 }
 
-/**
- * Shares as whole percents (or with `digits` decimals) that add up to exactly 100: each rounded down, and the
- * remaining units given to the largest remainders (ties to the earlier). All zero gives zeros.
- */
 export function percents(values: number[], digits = 0): number[] {
   const total = values.reduce((a, v) => a + v, 0), unit = 10 ** digits;
   if (!(total > 0)) return values.map(() => 0);
@@ -58,35 +52,19 @@ export function arcPath(cx: number, cy: number, r0: number, r1: number, a0: numb
 
 export interface DonutChartOptions extends ProgressOptions {
   data: { label: string; value: number; color?: string }[];
-  /** The hole's radius as a share of the ring's (default 0.6); 0 makes a pie. */
   hole?: number;
-  /** A title above the chart. */
   title?: string;
-  /** What a slice's label shows beside its name: its share (default), its value, or both. */
   show?: 'share' | 'value' | 'both';
-  /** A value's text (default formatNumber); `shareDigits`: decimals of the percents (default 0). */
   format?: (v: number) => string;
   shareDigits?: number;
-  /** Labels in a legend beside or under the ring (default), around the ring at each slice, or none. */
   labels?: 'legend' | 'around' | 'none';
-  /**
-   * The text in the hole (a donut only). Default: the highlighted slice's share counting up, or the total counting
-   * up; '' for none. `caption` goes under it (default the highlighted slice's name).
-   */
   center?: Anim<string>;
   caption?: string;
-  /** The index of a slice to pick out: it moves out a little and the others are dimmed. */
   highlight?: number;
   /** The gap between slices in logical px (default 0.4% of the short side; 0 for none). */
   gap?: number;
 }
 
-/**
- * A donut chart, or with `hole: 0` a pie: slices sweep in clockwise from 12 o'clock as progress runs 0 to 1, each
- * slice's label appearing as the sweep reaches it, and a value in the hole. Colours: each slice's `color`, else
- * seriesColor(i) (accent, a light accent, fg, …). Classes: `.title`, `.body`, `.ring`, `.slice`, `.center` > `.num`,
- * `.cap`; `.legend` > `.key` > `i` (the swatch), `.name`, `.val`; `.tag` (a label around the ring).
- */
 export class DonutChart extends HtmlComponent {
   private o: DonutChartOptions;
   private slices: Slice[];
@@ -103,10 +81,8 @@ export class DonutChart extends HtmlComponent {
     const shareText = (i: number) => `${formatNumber(pct[i]!, o.shareDigits ?? 0)}%`;
     const valText = (i: number) => show === 'share' ? shareText(i) : show === 'value' ? fmt(o.data[i]!.value) : `${fmt(o.data[i]!.value)} · ${shareText(i)}`;
 
-    // layout: the ring beside its legend in a wide box, above it in a tall one; around-labels take room on both sides
     const titleH = o.title ? Math.round(fs * 2.4) : 0, w = box.w, h = box.h - titleH;
     const longest = Math.max(1, ...o.data.map((d, i) => `${d.label} ${valText(i)}`.length)) * fs * 0.52;
-    // (the legend: a row of 1.1 font sizes per slice, half a font size between rows, 1.6 between it and the ring)
     const wide = w >= h * 1.25, n = o.data.length, legendH = n * fs * 1.1 + Math.max(0, n - 1) * Math.round(fs * 0.5) + Math.round(fs * 1.6);
     let d: number;
     if (labels === 'around') d = Math.min(h - fs * 3, w - 2 * (longest + fs * 1.6));
@@ -118,7 +94,6 @@ export class DonutChart extends HtmlComponent {
     const cap = o.caption ?? (o.highlight !== undefined ? o.data[o.highlight]?.label : undefined);
 
     const legend = labels !== 'legend' ? '' : `<div class="legend">${o.data.map((s, i) => `<div class="key"><i style="background: ${colors[i]}"></i><span class="name">${esc(s.label)}</span><span class="val">${esc(valText(i))}</span></div>`).join('')}</div>`;
-    // (a slice of nothing has no tag: it would sit on its neighbour's edge)
     const tags = labels !== 'around' ? '' : o.data.map((s, i) => {
       if (slices[i]!.share <= 0) return '';
       const [x, y] = polar(cx, cy, r1 + out + fs * 0.6, (slices[i]!.start + slices[i]!.end) / 2), right = x >= cx - 0.5;
@@ -149,13 +124,11 @@ export class DonutChart extends HtmlComponent {
     this.slices = slices;
     this.geo = { cx, cy, r0, r1, gap: o.gap ?? Math.max(2, UNIT * 0.004), out: o.highlight !== undefined ? out : 0 };
     const total = o.data.reduce((a, s) => a + s.value, 0), hi = o.highlight !== undefined ? o.highlight : -1;
-    // the default centre: the highlighted slice's share or the total, counting up with the sweep
     this.centerText = (f, p) => {
       if (o.center !== undefined) return val(o.center, f);
       if (hi >= 0) return `${formatNumber(pct[hi]! * p, o.shareDigits ?? 0)}%`;
       return fmt(total * p);
     };
-    // the number's size: fits the hole by its length at the end of the sweep (so it does not jump as it counts)
     const longestCenter = o.center === undefined ? (hi >= 0 ? `${formatNumber(pct[hi]!, o.shareDigits ?? 0)}%` : fmt(total)) : null;
     this.numSize = (s) => Math.round(Math.min(r0 * 0.5, (r0 * 1.6) / Math.max(1, (longestCenter ?? s).length * 0.62)));
   }
@@ -164,14 +137,12 @@ export class DonutChart extends HtmlComponent {
     const p = progressOf(this.o, f, this.window(f)[0]), { cx, cy, r0, r1, gap, out } = this.geo, n = this.slices.length;
     this.layer.$$('path').forEach((e, i) => {
       const s = this.slices[i]!, mid = (s.start + s.end) / 2;
-      // (the gap is a fixed width at the outer edge: half of it off each end of every slice, none for a lone slice)
       const g = n > 1 && s.share < 1 ? gap / (2 * Math.PI * r1) / 2 : 0;
       const a0 = s.start + g, a1 = Math.min(s.end - g, p);
       const push = i === this.o.highlight ? out * ease.outCubic(clamp((p - s.end) / 0.1 + 1)) : 0;
       const [dx, dy] = [push * Math.sin(mid * 2 * Math.PI), -push * Math.cos(mid * 2 * Math.PI)];
       this.layer.set(e, { attr: { d: arcPath(cx + dx, cy + dy, r0, r1, a0, a1) || 'M0 0' } });
     });
-    // a slice's label appears as the sweep reaches it
     const reveal = (i: number) => ease.outCubic(clamp((p - this.slices[i]!.start) / 0.08)).toFixed(3);
     this.layer.$$('.key').forEach((e, i) => this.layer.set(e, { vars: { k: p > 0 ? reveal(i) : 0 } }));
     this.layer.$$('.tag').forEach((e) => this.layer.set(e, { vars: { k: p > 0 ? reveal(Number(e.dataset.i)) : 0 } }));

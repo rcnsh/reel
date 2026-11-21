@@ -1,6 +1,3 @@
-// `reel subtitles`: SRT and VTT from the project's timed words (data/words.json). Each line of the words becomes one
-// or more cues of at most two lines of MAX characters and SPAN seconds, broken where a reader pauses; `reel video
-// --subtitles` adds the SRT to the finished file as a soft track. The cue building is pure, so it is unit-tested.
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { parseArgs } from 'node:util';
@@ -8,15 +5,11 @@ import { parseArgs } from 'node:util';
 export interface Cue { start: number; end: number; lines: string[] }
 interface W { w: string; start: number; end: number }
 
-/** Characters per subtitle line, seconds a cue may last at most and at least, and seconds it holds after its last word. */
 export const LIMITS = { max: 42, span: 7, min: 1, hold: 0.4, gap: 0.04 };
 
-/** Text broken into at most two lines of `max` characters, balanced, preferring a break after punctuation. */
 export function breakLines(text: string, max = LIMITS.max): string[] {
   if (text.length <= max) return [text];
   const words = text.split(' ');
-  // (one word: CJK, which has no spaces, breaks between characters; anything else stays whole, never an empty line,
-  // which would end the cue in an SRT file)
   if (words.length === 1) {
     const ch = [...text];
     return CJK.test(text) ? [ch.slice(0, Math.ceil(ch.length / 2)).join(''), ch.slice(Math.ceil(ch.length / 2)).join('')] : [text];
@@ -32,14 +25,8 @@ export function breakLines(text: string, max = LIMITS.max): string[] {
 }
 
 const CJK = /[\u3040-\u30ff\u3400-\u9fff\uac00-\ud7af\uf900-\ufaff]/;
-/** Whether text breaks into at most two lines of `max` characters. */
 const fits = (text: string, max: number) => breakLines(text, max).every((l) => l.length <= max);
 
-/**
- * Cues from timed lines: each line's words in runs that break into two lines of `max` characters and last `span` seconds,
- * a run ending early after a word that closes a clause when it is already long; each cue from its first word to
- * `hold` after its last, at least `min` long, ending `gap` before the next one.
- */
 export function buildCues(lines: { words: W[] }[], o = LIMITS): Cue[] {
   const runs: W[][] = [];
   for (const l of lines) {
@@ -59,7 +46,6 @@ export function buildCues(lines: { words: W[] }[], o = LIMITS): Cue[] {
   return cues.filter((c) => c.end > c.start);
 }
 
-/** Cues of a render from `from` to `to`: shifted to its start, cut at its ends. */
 export function window(cues: Cue[], from = 0, to = Infinity): Cue[] {
   if (!(to > from)) throw new Error(`--from ${from} --to ${to}: an empty range, nothing to subtitle`);
   return cues.filter((c) => c.end > from && c.start < to).map((c) => ({ ...c, start: Math.max(0, c.start - from), end: Math.min(to, c.end) - from }));
@@ -72,7 +58,6 @@ const stamp = (t: number, sep: string) => {
 export const toSrt = (cues: Cue[]) => cues.map((c, i) => `${i + 1}\n${stamp(c.start, ',')} --> ${stamp(c.end, ',')}\n${c.lines.join('\n')}\n`).join('\n');
 export const toVtt = (cues: Cue[]) => `WEBVTT\n\n${cues.map((c) => `${stamp(c.start, '.')} --> ${stamp(c.end, '.')}\n${c.lines.join('\n')}\n`).join('\n')}`;
 
-/** Write <out>/subtitles.srt and .vtt (default out/subtitles in the project) from data/words.json. */
 export function writeSubtitles(root: string, o: { from?: number; to?: number; out?: string } = {}) {
   const f = path.join(root, 'data/words.json');
   if (!existsSync(f)) throw new Error(`${f} is missing: subtitles come from the timed words (reel narrate or reel align)`);

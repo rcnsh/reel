@@ -1,16 +1,11 @@
-// A project's fonts: every font file in its `fonts/` folder becomes a family HTML layers can name, described from
-// the file itself (its typographic family name, weight or weight range, width, italic). `reel font add` fetches a
-// Google Fonts family, with its licence, from the google/fonts repository.
 import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import * as fontkit from 'fontkit';
 import type { FontFaceDef } from '../src/engine/type';
 
 const FONT_FILE = /\.(ttf|otf|woff2?)$/i;
-/** OS/2 usWidthClass to CSS font-stretch. */
 const WIDTHS: Record<number, string> = { 1: '50%', 2: '62.5%', 3: '75%', 4: '87.5%', 5: '100%', 6: '112.5%', 7: '125%', 8: '150%', 9: '200%' };
 
-/** The font files under `dir`, relative to it. */
 function fontFiles(dir: string, rel = ''): string[] {
   if (!existsSync(dir)) return [];
   const out: string[] = [];
@@ -22,7 +17,6 @@ function fontFiles(dir: string, rel = ''): string[] {
   return out.sort();
 }
 
-/** One font file as a face: its family (the typographic family name), weight, width and style. */
 export function describeFont(file: string, url: string): FontFaceDef {
   let f: fontkit.Font;
   try {
@@ -40,21 +34,15 @@ export function describeFont(file: string, url: string): FontFaceDef {
   return { family, url, weight, stretch, style: italic ? 'italic' : 'normal' };
 }
 
-/** Every font in the project's fonts/ folder, as the page loads them (served from the project's folder). */
 export function projectFonts(project: string): FontFaceDef[] {
   const dir = path.join(project, 'fonts');
   return fontFiles(dir).map((r) => describeFont(path.join(dir, r), `/fonts/${r}`));
 }
 
-/** The google/fonts folder name of a family: lower case, letters and digits only ('Space Grotesk' -> spacegrotesk). */
 export const googleSlug = (family: string) => family.toLowerCase().replace(/[^a-z0-9]/g, '');
 
 interface GhEntry { name: string; type: string; download_url: string | null }
 
-/**
- * Download a Google Fonts family (its font files and its licence) from the google/fonts repository on GitHub into
- * `<project>/fonts/<slug>/`. Returns the files written and the families they hold.
- */
 export async function addGoogleFont(project: string, family: string): Promise<{ dir: string; files: string[]; families: string[] }> {
   const slug = googleSlug(family);
   if (!slug) throw new Error(`'${family}' is not a font family name`);
@@ -69,7 +57,6 @@ export async function addGoogleFont(project: string, family: string): Promise<{ 
     break;
   }
   if (!entries) throw new Error(`no family '${family}' in Google Fonts (looked for google/fonts ofl/${slug}, apache/${slug}, ufl/${slug}; the name is the one fonts.google.com shows)`);
-  // (static instances live in a static/ subfolder beside the variable fonts: the variable ones cover them)
   const wanted = entries.filter((e) => e.type === 'file' && e.download_url && (FONT_FILE.test(e.name) || /^(OFL|LICENSE|UFL)(\.txt)?$/i.test(e.name)));
   if (!wanted.some((e) => FONT_FILE.test(e.name))) throw new Error(`google/fonts ${licence}/${slug} holds no font files`);
   const dir = path.join(project, 'fonts', slug);

@@ -1,14 +1,12 @@
-// Timed words (data/words.json: narration, sung lyrics or captions, in lines) with queries for rendering text in step with them.
 import { smart } from './type';
 import { fetchJSON } from './audio';
 
 export interface Word {
-  w: string; // display token (punctuation attached, typographic quotes: don’t, ’cause)
+  w: string;
   start: number;
   end: number;
   conf?: number;
   syl?: [number, number][];
-  /** filled in by Words: */
   line: number;
   index: number; // index within line
   gi: number; // global word index
@@ -25,8 +23,6 @@ export class Words {
   lines: Line[];
   words: Word[];
   constructor(j: { lines: Omit<Line, 'words'> & { words: Omit<Word, 'line' | 'index' | 'gi'>[] }[] | any[] }) {
-    // display text gets curly apostrophes and quotes (the data keeps the typed ones); mono UI
-    // text that wants them straight uses plain()
     this.lines = (j.lines as any[]).map((l, li) => ({
       ...l,
       i: li,
@@ -37,7 +33,6 @@ export class Words {
     this.words.forEach((w, i) => (w.gi = i));
   }
 
-  /** `src`: the JSON's path in the project, false for none; by default data/words.json if the project has one. */
   static async load(src?: string | false): Promise<Words> {
     if (src === false) return new Words({ lines: [] });
     const j = await fetchJSON(src ?? 'data/words.json');
@@ -63,11 +58,9 @@ export class Words {
     });
   }
 
-  /** The line being sung at t (or null in gaps). */
   lineAt(t: number): Line | null {
     return this.lines.find((l) => t >= l.start && t < l.end) ?? null;
   }
-  /** Most recent line that started at or before t. */
   lastLine(t: number): Line | null {
     let best: Line | null = null;
     for (const l of this.lines) if (l.start <= t) best = l;
@@ -79,12 +72,10 @@ export class Words {
   linesIn(t0: number, t1: number): Line[] {
     return this.lines.filter((l) => l.end > t0 && l.start < t1);
   }
-  /** Lines whose text includes `s` (case-insensitive; straight or curly quotes, `...` or `…`, any dash, spaced or not). Handy for finding a line by content. */
   find(s: string): Line[] {
     const q = fold(s);
     return this.lines.filter((l) => fold(l.text).includes(q));
   }
-  /** First line containing `s`; throws if missing (fail loudly while authoring). */
   get(s: string, nth = 0): Line {
     const l = this.find(s)[nth];
     if (!l) throw new Error(`no line of the words contains '${s}'`);
@@ -123,21 +114,19 @@ export class Words {
     return (t - w.start) / Math.max(1e-3, w.end - w.start);
   }
 
-  /** Progress through a whole line in characters (0..text.length), for per-glyph wipes. */
   static lineCharProgress(l: Line, t: number): number {
     let chars = 0;
     for (const w of l.words) {
       const p = Words.wordProgress(w, t);
       chars += p * w.w.length;
       if (p < 1) break;
-      chars += 1; // the space
+      chars += 1;
     }
     return Math.min(chars, l.text.length);
   }
 }
 
 export const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9()]/g, '');
-/** Case and typography folded away: curly quotes to straight, `…` to `...`, every dash to `-` (spaces around it dropped). */
 const fold = (s: string) =>
   s.toLowerCase().replace(/[\u2018\u2019]/g, "'").replace(/[\u201C\u201D]/g, '"').replace(/\u2026/g, '...')
     .replace(/\s*(?:--|[-\u2010-\u2015\u2212])\s*/g, '-');

@@ -1,25 +1,14 @@
-// Writing a timed narration: the plates' audio laid end to end with the pauses asked for, as the project's track
-// (audio/narration.flac, lossless) with data/words.json and data/audio.json. What `reel narrate` and
-// `reel align` both end with.
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { SR, writeAudio } from './audio-io';
 import { narrationAudioJSON, timing, type Plate, type TimedWord } from './script';
 
-/** The narration's track, relative to the project. */
 export const TRACK = 'audio/narration.flac';
 
-/** Pauses in seconds: before the first word, between plates, and after the last word. */
 export interface Pauses { lead: number; hold: number; tail: number }
 
-/** A plate's audio (mono, at SR) and its script words' times within it. */
 export interface PlateAudio { pcm: Float32Array; words: TimedWord[] }
 
-/**
- * The plates laid end to end: `lead` seconds before the first word, at least `hold` between one plate's last word
- * and the next one's first (silence a part already has at its ends counts), `tail` after the last word, with
- * 10 ms fades where parts meet. Pure: returns the samples and every word in video time.
- */
 export function assemble(parts: PlateAudio[], p: Pauses): { pcm: Float32Array; words: TimedWord[][]; duration: number } {
   const F = Math.round(0.01 * SR);
   const gaps = parts.map((part, k) => {
@@ -45,7 +34,6 @@ export function assemble(parts: PlateAudio[], p: Pauses): { pcm: Float32Array; w
   return { pcm, words, duration: n / SR };
 }
 
-/** Assemble the plates and write the track, data/words.json and data/audio.json. Returns what was written. */
 export async function writeNarration(root: string, plates: Plate[], parts: PlateAudio[], pauses: Pauses, notes: string) {
   const a = assemble(parts, pauses);
   const { lines, sections } = timing(plates, a.words, a.duration);
@@ -57,7 +45,6 @@ export async function writeNarration(root: string, plates: Plate[], parts: Plate
   return { duration: a.duration, lines, sections };
 }
 
-/** A summary of the timing for the terminal: each plate's span. */
 export function report(r: { duration: number; lines: unknown[]; sections: { name: string; start: number; end: number }[] }) {
   const out = [`duration ${r.duration.toFixed(2)} s, ${r.lines.length} lines`];
   for (const s of r.sections) out.push(`  ${s.name.padEnd(12)} ${s.start.toFixed(2).padStart(7)} to ${s.end.toFixed(2).padStart(7)}  (${(s.end - s.start).toFixed(2)} s)`);

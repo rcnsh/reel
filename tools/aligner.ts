@@ -1,6 +1,3 @@
-// Forced alignment from the tools: known text against speech, through tools/forced_align.py (Qwen3-ForcedAligner,
-// MLX on Apple Silicon, PyTorch elsewhere), then matched back to the script's words and snapped to the pauses in
-// the audio.
 import { mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { run } from '../cli/children';
@@ -8,10 +5,6 @@ import { snapToPauses, timeScript } from './align-words';
 import { levels, SR, writeAudio } from './audio-io';
 import type { TimedWord } from './script';
 
-/**
- * Time each passage's script words in its samples (mono, at SR). `work` is a scratch folder. One model load
- * aligns them all; the first run fetches the model (about 1.2 GB).
- */
 export async function forcedAlign(passages: { pcm: Float32Array; words: { w: string }[] }[], work: string, language = 'English'): Promise<TimedWord[][]> {
   if (!passages.length) return [];
   mkdirSync(work, { recursive: true });
@@ -31,7 +24,6 @@ export async function forcedAlign(passages: { pcm: Float32Array; words: { w: str
   });
 }
 
-/** Script words timed from a voice's or an aligner's tokens, their edges snapped to the pauses in the samples. */
 export function refine(words: { w: string }[], tokens: TimedWord[], pcm: Float32Array): TimedWord[] {
   const len = pcm.length / SR;
   return snapToPauses(timeScript(words, tokens, 0, len), levels(pcm));

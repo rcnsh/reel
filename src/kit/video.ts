@@ -1,6 +1,3 @@
-// A video file in a box: decoded frame by frame with WebCodecs from the MP4's own samples (mp4box), so the frame
-// shown at a time depends on that time alone, never on a <video> element's clock. Trim, speed, loop, cover or
-// contain, stacked alpha, held or blended frames; the clip's sound goes to the mix.
 import * as THREE from 'three';
 import { createFile, DataStream, Endianness, type ISOFile } from 'mp4box';
 import { awaitBeforeFirstFrame, notLate } from '../engine/html';
@@ -11,38 +8,22 @@ import { safeBox, windowOf, type Box, type ComponentOptions } from './common';
 import { framesAt, videoSounds, type FrameSpan, type VideoTiming } from './video-time';
 
 export interface VideoClipOptions extends Omit<ComponentOptions, 'css'> {
-  /** The video, a path in the project: an MP4 or MOV of H.264, HEVC, VP9 or AV1. */
   src: string;
-  /** The part of the file played, in its own seconds [from, to] (default all of it). */
   trim?: [number, number];
-  /** Source seconds per second of the clip (default 1; 0.5 is slow motion, 2 double speed). */
   speed?: number;
-  /** Play the trim again from its start when it ends (default false: hold its last frame). */
   loop?: boolean;
-  /** 'cover' (default) fills the box and crops; 'contain' shows all of it. */
   fit?: 'cover' | 'contain';
-  /** Corner radius in px (default 0). */
   radius?: number;
-  /** A pan and zoom over the window, as ImageBox's. */
   kenBurns?: boolean | { from?: Framing; to?: Framing };
-  /**
-   * 'nearest' (default): the frame on display at each moment, as a player shows it. 'blend': each frame mixed into
-   * the next by how far the moment is between them, which smooths a slowed or low-rate clip.
-   */
   frames?: 'nearest' | 'blend';
-  /** Stacked alpha: the frame holds the colour and, below it or to its right, a grey matte (white opaque). */
   alpha?: 'below' | 'right';
-  /** The file's own sound in the mix (default true when it has one), or its gain in dB. */
   sound?: boolean | { db: number };
-  /** Decoded frames kept on the GPU, in MB (default 384). */
   cacheMB?: number;
-  /** The video's name in `reel check` findings. */
   alt?: string;
 }
 
 interface Sample { pts: number; dur: number; sync: boolean; data: Uint8Array; ts: number }
 
-/** The MP4's video track: its decoder config and samples in decode order, and its frames in presentation order. */
 interface Track { config: VideoDecoderConfig; width: number; height: number; samples: Sample[]; frames: FrameSpan[]; order: number[]; rank: number[]; hasAudio: boolean }
 
 async function parseMp4(bytes: ArrayBuffer, src: string): Promise<Track> {
@@ -70,7 +51,6 @@ async function parseMp4(bytes: ArrayBuffer, src: string): Promise<Track> {
   const u8 = new Uint8Array(bytes);
   const raw = file.getTrackSamplesInfo(vt.id);
   if (!raw.length) throw new Error('the video track has no frames');
-  // presentation times from the first shown frame (an edit list's B-frame delay drops out)
   const t0 = Math.min(...raw.map((s) => s.cts));
   const samples: Sample[] = raw.map((s) => ({ pts: (s.cts - t0) / s.timescale, dur: s.duration / s.timescale, sync: s.is_sync, data: u8.subarray(s.offset, s.offset + s.size), ts: Math.round(((s.cts - t0) / s.timescale) * 1e6) }));
   const order = samples.map((_, i) => i).sort((a, b) => samples[a]!.pts - samples[b]!.pts), rank: number[] = [];
@@ -78,11 +58,6 @@ async function parseMp4(bytes: ArrayBuffer, src: string): Promise<Track> {
   return { rank, config, width: vt.track_width || vt.video!.width, height: vt.track_height || vt.video!.height, samples, frames: order.map((i) => ({ pts: samples[i]!.pts, dur: samples[i]!.dur })), order, hasAudio: info.audioTracks.length > 0 };
 }
 
-/**
- * A video fitted to a box, as a scene's field: `clip = new VideoClip({ src: 'assets/shot.mp4', trim: [2, 6] })`,
- * then `clip.draw(renderer, out, f)` in render() (the scene's prepare(f) must call `await clip.prepare(f, this.ctx.renderer)`).
- * Every frame is decoded from the keyframe before it, so a frame reached by a seek is the frame reached by playing.
- */
 export class VideoClip {
   readonly box: Box;
   private o: VideoClipOptions;
@@ -95,11 +70,8 @@ export class VideoClip {
   private renderer: THREE.WebGLRenderer | null = null;
   private busy: Promise<void> = Promise.resolve();
   private failed: Error | null = null;
-  /** The clip time of the output frame being rendered (prepare's), which picks the frame for its sub-frames. */
   private centre = NaN;
-  /** The decoded frames' size, from the first (the track header's display size can differ: pixel aspect, crop). */
   private texSize: [number, number] | null = null;
-  /** Its clip plays the scene backwards: frames are wanted in falling order, so the decode keeps those before. */
   private backward = false;
 
   constructor(o: VideoClipOptions) {
@@ -132,14 +104,8 @@ export class VideoClip {
     return this.o.alpha === 'below' ? [t.width, t.height / 2] : this.o.alpha === 'right' ? [t.width / 2, t.height] : [t.width, t.height];
   }
 
-  /** The source's length in seconds, once loaded. */
   get duration() { const l = this.track?.frames.at(-1); return l ? l.pts + l.dur : 0; }
 
-  /**
-   * Decode the frame this output frame shows: `await clip.prepare(f, this.ctx.renderer)` in the scene's prepare.
-   * The frame is chosen at the output frame's own time, for all of its sub-frames, as a player shows one frame
-   * per refresh (the source's own motion blur is in its frames); the box's motion still blurs across them.
-   */
   async prepare(f: Frame, renderer: THREE.WebGLRenderer) {
     this.renderer = renderer;
     this.centre = f.lt;
@@ -156,7 +122,6 @@ export class VideoClip {
 
   private bytesPerFrame() { const [w, h] = this.texSize ?? [this.track!.width, this.track!.height]; return w * h * 4 * 1.34; }
 
-  /** Make sure frames `need` (presentation indices) are on the GPU, decoding the groups of pictures they are in. */
   private async ensure(need: number[]) {
     if (this.failed) throw this.failed;
     const t = this.track!;
@@ -164,8 +129,6 @@ export class VideoClip {
     const missing = need.filter((i) => !this.cache.has(i));
     if (!missing.length) { for (const i of need) this.touch(i); return; }
     const cap = Math.max(need.length + 2, Math.floor(((this.o.cacheMB ?? 384) * 2 ** 20) / this.bytesPerFrame()));
-    // frames worth keeping from the decode: the ones needed, then the ones a playing export shows next (after them,
-    // or before them on a reversed clip: those decode on the way to the ones needed anyway)
     const keep = new Set(need), ahead = Math.max(0, Math.min(cap - need.length, Math.floor(cap / 2)));
     if (this.backward) {
       const low = Math.min(...need);
@@ -174,7 +137,6 @@ export class VideoClip {
       const top = Math.max(...need);
       for (let i = top + 1; i < Math.min(t.frames.length, top + 1 + ahead); i++) keep.add(i);
     }
-    // group the missing frames by keyframe (in decode order) and decode each group once
     const groups = new Map<number, number>();
     for (const i of missing) {
       const d = t.order[i]!;
@@ -187,10 +149,6 @@ export class VideoClip {
     if (still.length) throw new Error(`video '${this.o.src}': frames ${still.join(', ')} did not decode`);
   }
 
-  /**
-   * Decode from keyframe sample k (decode order) through sample `last` and on to the last sample of its group that
-   * a frame in `keep` needs, keeping those frames.
-   */
   private async decodeGroup(k: number, last: number, keep: Set<number>, cap: number) {
     const t = this.track!;
     let group = k + 1;
@@ -213,7 +171,6 @@ export class VideoClip {
   }
 
   private decoderFor(output: (f: VideoFrame) => void) {
-    // (one decoder per group: a fresh one needs nothing from the last, so a group decodes the same after any other)
     this.decoder?.close();
     const dec = new VideoDecoder({ output, error: (e) => { this.failed = new Error(`video '${this.o.src}': ${e.message}`); } });
     dec.configure(this.track!.config);
@@ -223,7 +180,6 @@ export class VideoClip {
 
   private touch(i: number) { const tx = this.cache.get(i); if (tx) { this.cache.delete(i); this.cache.set(i, tx); } }
 
-  /** Upload a decoded frame into an sRGB texture with mipmaps, evicting the least recently used frames over `cap`. */
   private store(i: number, frame: VideoFrame, cap: number) {
     const r = this.renderer;
     if (!r) throw new Error('VideoClip.prepare(f, renderer) has not been given the renderer');
@@ -251,7 +207,6 @@ export class VideoClip {
       gl.texParameteri(gl.TEXTURE_2D, gl.TEXTURE_WRAP_T, gl.CLAMP_TO_EDGE);
     }
     r.state.bindTexture(gl.TEXTURE_2D, tex);
-    // (through three's state cache, as the HTML layers do; the browser converts the frame's YUV to sRGB)
     const st = r.state as unknown as { pixelStorei(name: number, value: number | boolean): void };
     st.pixelStorei(gl.UNPACK_FLIP_Y_WEBGL, false);
     st.pixelStorei(gl.UNPACK_PREMULTIPLY_ALPHA_WEBGL, false);

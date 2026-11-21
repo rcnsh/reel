@@ -1,12 +1,8 @@
-// What a 3D stage reports to `reel check`: the screen rectangle of a box in the world, seen through a camera. Pure
-// (a column-major view-projection matrix in, a rectangle in logical px out), so it is unit-tested.
 import type { CameraPose, Vec3 } from './camera';
 
-/** The 8 corners of an axis-aligned box from its min and max corners. */
 export const corners = (min: Vec3, max: Vec3): Vec3[] =>
   [0, 1, 2, 3, 4, 5, 6, 7].map((i) => [i & 1 ? max[0] : min[0], i & 2 ? max[1] : min[1], i & 4 ? max[2] : min[2]]);
 
-/** The 12 edges of a box, as pairs of indices into corners(). */
 const EDGES: [number, number][] = [[0, 1], [2, 3], [4, 5], [6, 7], [0, 2], [1, 3], [4, 6], [5, 7], [0, 4], [1, 5], [2, 6], [3, 7]];
 
 export interface Projected {
@@ -37,7 +33,6 @@ export function projectBox(pts: Vec3[], m: ArrayLike<number>, W: number, H: numb
   if (!vis.length) return { x: 0, y: 0, w: 0, h: 0, behind: true, partial: false };
   const partial = vis.length < clip.length;
   if (partial && pts.length === 8) {
-    // where an edge crosses w = EPS
     for (const [a, b] of EDGES) {
       if (front[a] === front[b]) continue;
       const A = clip[a]!, B = clip[b]!, k = (EPS - A[3]!) / (B[3]! - A[3]!);
@@ -49,13 +44,11 @@ export function projectBox(pts: Vec3[], m: ArrayLike<number>, W: number, H: numb
     const w = Math.max(EPS, c[3]!), sx = ((c[0]! / w + 1) / 2) * W, sy = ((1 - c[1]! / w) / 2) * H;
     x0 = Math.min(x0, sx); x1 = Math.max(x1, sx); y0 = Math.min(y0, sy); y1 = Math.max(y1, sy);
   }
-  // (a clipped corner projects towards infinity: keep the rectangle finite, a frame beyond each edge at most)
   const lim = (v: number, s: number) => Math.min(2 * s, Math.max(-s, v));
   x0 = lim(x0, W); x1 = lim(x1, W); y0 = lim(y0, H); y1 = lim(y1, H);
   return { x: x0, y: y0, w: x1 - x0, h: y1 - y0, behind: false, partial };
 }
 
-/** Where a point of the world lands on screen. */
 export interface ScreenPoint {
   /** Logical px, origin top left (may be outside the frame). */
   x: number; y: number;
@@ -65,18 +58,11 @@ export interface ScreenPoint {
   behind: boolean;
 }
 
-/**
- * Where `point` (world coordinates) lands on a W x H frame seen from `pose` with a vertical field of view of `fov`
- * degrees (the pose's own `fov` wins): the same camera Stage3D.camera(pose) places, without its jitter. Pure, so a
- * clip on another track can compute where a stage's object is from the rig both share.
- */
 export function projectPoint(pose: CameraPose, point: Vec3, fov: number, W: number, H: number): ScreenPoint {
   const [px, py, pz] = pose.position, [tx, ty, tz] = pose.target;
-  // the camera's axes as three's lookAt makes them: back (it looks along -back), right, up
   let bx = px - tx, by = py - ty, bz = pz - tz;
   const bl = Math.hypot(bx, by, bz) || 1;
   bx /= bl; by /= bl; bz /= bl;
-  // right = up(0, 1, 0) x back (looking straight up or down, three nudges the back axis the same way)
   if (bx === 0 && bz === 0) { bz += 1e-4; const l = Math.hypot(bx, by, bz); bx /= l; by /= l; bz /= l; }
   let rx = bz, ry = 0, rz = -bx;
   const rl = Math.hypot(rx, ry, rz) || 1;

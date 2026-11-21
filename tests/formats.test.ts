@@ -1,4 +1,3 @@
-// The output formats: which one a command line means, what each asks of the page, and the ffmpeg command for each.
 import { expect, test } from 'bun:test';
 import { UsageError } from '../cli/args';
 import { withExportDefaults, deepGainOf, defaultOut, draftEncoder, draftName, draftScale, GAIN_Y, encodeOptsOf, FORMATS, ffmpegArgs, formatOf, planOf, sequencePattern, webpArgs, type EncodeOpts, type FormatId } from '../cli/formats';
@@ -18,7 +17,6 @@ test('the format comes from --format, else the --out extension, else H.264', () 
   expect(() => formatOf('hevc', '/x/a.mov')).toThrow('a hevc file is .mp4');
   expect(() => formatOf('png16', '/x/f.jpg')).toThrow('.png files');
   expect(() => formatOf('toString', undefined)).toThrow('--format toString');
-  // a video or loop file without an extension; a sequence takes the format's
   expect(() => formatOf('h264', '/x/video')).toThrow('needs its extension, .mp4');
   expect(() => formatOf('gif', '/x/loop')).toThrow('needs its extension, .gif');
   expect(formatOf('png', '/x/frames/f').id).toBe('png');
@@ -37,7 +35,6 @@ test('each format asks the page for the readback, depth and alpha it needs', () 
   expect(p('png', { alpha: true })).toEqual(['rgba8', 8, true, 'rgba']);
   expect(p('png16', { alpha: true })).toEqual(['rgba16', 16, true, 'rgba64le']);
   expect(p('exr')).toEqual(['linear', 8, false, 'rgbaf16le']);
-  // 8-bit 4:2:0 reads back yuv420p converted on the GPU when the size packs (width a multiple of 8, height of 4)
   const q = (id: FormatId, size: [number, number], o = {}) => planOf(FORMATS[id], o, 30, size).pixels;
   expect(q('h264', [1920, 1080])).toBe('yuv420');
   expect(q('h264', [1080, 1920])).toBe('yuv420');
@@ -46,7 +43,6 @@ test('each format asks the page for the readback, depth and alpha it needs', () 
   expect(q('webm', [1920, 1080], { alpha: false })).toBe('yuv420');
   expect(q('webm', [1920, 1080])).toBe('rgba8');
   expect(q('gif', [1920, 1080])).toBe('rgb8');
-  // loops cap the frame rate, never raise it
   expect(planOf(FORMATS.gif, {}, 60).fps).toBe(25);
   expect(planOf(FORMATS.webp, {}, 24).fps).toBe(24);
   expect(planOf(FORMATS.gif, { maxFps: 12 }, 30).fps).toBe(12);
@@ -67,7 +63,6 @@ test('flags become encoder options, checked against the format', () => {
   expect(() => encodeOptsOf({ alpha: true, opaque: true }, FORMATS.webm)).toThrow('contradict');
   expect(() => encodeOptsOf({ x265: 'a=1' }, FORMATS.h264)).toThrow('--x265 goes with hevc');
   expect(() => encodeOptsOf({ quality: '101' }, FORMATS.jpeg)).toThrow('1 to 100');
-  // x264 and x265 stop at 51, libvpx at 63
   expect(() => encodeOptsOf({ crf: '60' }, FORMATS.h264)).toThrow('0 to 51 for h264');
   expect(() => encodeOptsOf({ crf: '52' }, FORMATS.hevc)).toThrow('0 to 51 for hevc');
   expect(encodeOptsOf({ crf: '60' }, FORMATS.webm).crf).toBe(60);
@@ -99,11 +94,8 @@ test("16-bit frames have swscale's gain divided out before the YUV conversion; 8
     expect(a).toContain('vflip,lutrgb=r=val*0.9960987:g=val*0.9960987:b=val*0.9960987,scale=in_range=pc');
   }
   for (const [id, o] of [['h264', {}], ['h264', { chroma: '444' }], ['png16', {}], ['exr', {}], ['webm', {}]] as [FormatId, EncodeOpts][]) expect(deep(id, o).a).not.toContain('lutrgb');
-  // (an ffmpeg without the gain gets nothing added)
   const plan = planOf(FORMATS.hevc, {}, 30);
   expect(ffmpegArgs(plan, {}, { width: 64, height: 64, fps: 30, out: '/o/x.mp4', deepGain: 1 }).join(' ')).not.toContain('lutrgb');
-  // the gain from the limited-range luma of the grey: 55626 is what both a static ffmpeg 7 and Homebrew's ffmpeg 9
-  // give through toYuv709 (a static ffmpeg 7 gives the grey back exactly in full range, so a full-range probe saw 1)
   expect(deepGainOf(GAIN_Y)).toBeCloseTo(1, 9);
   expect(deepGainOf(55626)).toBeCloseTo(65535 / 65280, 4);
   expect(deepGainOf(0)).toBe(1);
@@ -124,7 +116,6 @@ test('each format has its codec, pixel format and sound', () => {
   expect(args('webm')).toContain('-c:a libopus');
   expect(args('webm', { alpha: false })).toContain('-pix_fmt yuv420p');
   expect(args('webm')).not.toContain('movflags');
-  // loops and sequences carry no sound
   for (const id of ['gif', 'webp', 'png', 'png16', 'jpeg', 'exr'] as FormatId[]) { expect(args(id)).not.toContain('-c:a'); expect(args(id)).not.toContain('t.flac'); }
   expect(args('gif')).toContain('scale=640:360:flags=lanczos,split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a');
   expect(args('gif', { maxSize: 2000 })).not.toContain('scale=');
@@ -168,7 +159,6 @@ test('drafts are named and encoded as drafts', () => {
   expect(draftName('/o/video.mp4', true)).toBe('/o/video.draft.mp4');
   expect(draftName('/o/video.draft.mp4', true)).toBe('/o/video.draft.mp4');
   expect(draftName('/o/video.mp4', false)).toBe('/o/video.mp4');
-  // half size when the half frame packs into the readback, else full size
   expect(draftScale(1920, 1080)).toBe(0.5);
   expect(draftScale(1080, 1920)).toBe(0.5);
   expect(draftScale(1080, 1350)).toBe(1);
@@ -196,9 +186,7 @@ test('frames converted on the GPU are only tagged, or repacked for nv12', () => 
 test("a project's export defaults sit under the flags, for the formats that take them", () => {
   const d = { crf: 22, preset: 'veryfast' as const, noaudio: true, samples: 1 };
   expect(withExportDefaults({}, d, formatOf('h264', undefined))).toEqual({ crf: '22', preset: 'veryfast', noaudio: true, samples: '1' });
-  // a flag wins
   expect(withExportDefaults({ crf: '18', samples: 'auto' }, d, formatOf('h264', undefined))).toMatchObject({ crf: '18', samples: 'auto' });
-  // gif has no crf or preset; a draft takes one sample; --mix makes the sound
   const gif = withExportDefaults({}, d, formatOf('gif', undefined));
   expect(gif.crf).toBeUndefined();
   expect(gif.preset).toBeUndefined();
@@ -207,11 +195,9 @@ test("a project's export defaults sit under the flags, for the formats that take
   expect(withExportDefaults({ mix: true }, d, formatOf('h264', undefined)).noaudio).toBeUndefined();
   expect(encodeOptsOf(withExportDefaults({}, d, formatOf('h264', undefined)), formatOf('h264', undefined))).toMatchObject({ crf: 22, preset: 'veryfast' });
   expect(withExportDefaults({ crf: '18' }, undefined, formatOf('h264', undefined))).toEqual({ crf: '18' });
-  // VP9's crf is another scale: the config's is not applied; --audio keeps the sound; adaptive flags keep their own samples
   expect(withExportDefaults({}, d, formatOf('webm', undefined)).crf).toBeUndefined();
   expect(withExportDefaults({ audio: true }, d, formatOf('h264', undefined)).noaudio).toBeUndefined();
   expect(withExportDefaults({ 'min-samples': '8' }, d, formatOf('h264', undefined)).samples).toBeUndefined();
-  // a bad value names the config, not a flag nobody typed
   expect(() => withExportDefaults({}, { crf: 70 }, formatOf('h264', undefined))).toThrow('reel.config.ts export.crf 70: expected a number from 0 to 51');
   expect(() => withExportDefaults({}, { samples: 0 }, formatOf('h264', undefined))).toThrow('reel.config.ts export.samples 0');
 });

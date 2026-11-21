@@ -1,5 +1,3 @@
-// The command line: the help text, the flags each command takes, and checks of their values. Pure (no I/O), so
-// the CLI and its tests share it.
 import { parseArgs } from 'node:util';
 import type { AdaptiveSampling } from '../src/engine/engine';
 import { parseProps } from '../src/config';
@@ -153,14 +151,12 @@ diff over its threshold), 2 bad command line or no project.`;
 const str = { type: 'string' } as const, bool = { type: 'boolean' } as const;
 type Opt = typeof str | typeof bool;
 
-/** Flags of every command that renders through a page. */
 const RENDER: Record<string, Opt> = {
   project: str, json: bool, help: bool, only: str, samples: str, 'min-samples': str, 'max-samples': str, tol: str, refine: str,
   shutter: str, scale: str, size: str, fps: str, theme: str, props: str, headed: bool, 'no-daemon': bool, gl: str,
 };
 const IMAGE: Record<string, Opt> = { out: str, 'max-size': str };
 
-/** Each command's flags (beyond RENDER for the rendering ones) and whether it takes positionals. */
 export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Opt>; positionals?: [min: number, max: number] }> = {
   info: { render: true, opts: {} },
   still: { render: true, opts: { t: str, alpha: bool, ...IMAGE } },
@@ -184,13 +180,11 @@ export const COMMANDS: Record<string, { render: boolean; opts: Record<string, Op
   init: { render: false, opts: { size: str, fps: str, theme: str, narrated: bool, json: bool, help: bool }, positionals: [1, 1] },
 };
 
-/** A bad command line: the CLI exits 2. */
 export class UsageError extends Error {}
 
 export type Values = Record<string, string | boolean | undefined>;
 export interface Parsed { mode: string; values: Values; positionals: string[] }
 
-/** Parse a command line for one of COMMANDS (strict: an unknown flag or a missing value is a UsageError). */
 export function parseCommand(argv: string[]): Parsed {
   const mode = argv[0] ?? '';
   const spec = COMMANDS[mode];
@@ -207,7 +201,6 @@ export function parseCommand(argv: string[]): Parsed {
   return { mode, values, positionals };
 }
 
-/** A numeric flag, or `d` when absent. */
 export function num(v: Values, k: string, d: number): number;
 export function num(v: Values, k: string, d?: undefined): number | undefined;
 export function num(v: Values, k: string, d?: number) {
@@ -218,14 +211,12 @@ export function num(v: Values, k: string, d?: number) {
   return x;
 }
 
-/** A whole number flag at least `min`. */
 export function int(v: Values, k: string, d: number, min = 1) {
   const x = num(v, k, d);
   if (!Number.isInteger(x) || x < min) throw new UsageError(`--${k} ${v[k]}: expected a whole number of at least ${min}`);
   return x;
 }
 
-/** A list of numbers: `--t 1,2.5,3`. */
 export function list(v: Values, k: string): number[] {
   const raw = v[k];
   if (raw === undefined) return [];
@@ -235,7 +226,6 @@ export function list(v: Values, k: string): number[] {
   return out;
 }
 
-/** `--size WxH`: a width that is a multiple of 4 and an even height (the packed readback and yuv420). */
 export function sizeOf(s: string): [number, number] {
   const m = /^(\d+)x(\d+)$/.exec(s);
   const w = m ? Number(m[1]) : NaN, h = m ? Number(m[2]) : NaN;
@@ -243,13 +233,8 @@ export function sizeOf(s: string): [number, number] {
   return [w, h];
 }
 
-/** Whether a frame of w x h logical px at `scale` still packs into the readback: the physical width a multiple of 4, the height even. */
 export const scaleFits = (w: number, h: number, scale: number) => (w * scale) % 4 === 0 && (h * scale) % 2 === 0;
 
-/**
- * Refuse a `--scale` that does not fit a frame of w x h logical px, naming a frame size that would (only 0.5 can
- * miss: every size already packs at 1 to 4). Checked before a browser starts.
- */
 export function checkScale(w: number, h: number, scale: number) {
   if (scaleFits(w, h, scale)) return;
   const m = Math.round(1 / scale);
@@ -257,10 +242,6 @@ export function checkScale(w: number, h: number, scale: number) {
   throw new UsageError(`--scale ${scale}: a ${w}x${h} frame would be ${w * scale}x${h * scale}, and the readback needs a width that is a multiple of 4 and an even height; ${fw}x${fh} (--size ${fw}x${fh}) renders at --scale ${scale}, or leave out --scale for full size`);
 }
 
-/**
- * REEL_TILE_MASK=subs|merge: where per-tile refinement masks stopped tiles, overriding the GL backend's choice
- * (the frame is the same; for measuring which is faster).
- */
 export function tileMaskOf(env: Record<string, string | undefined> = process.env): { mask?: 'subs' | 'merge' } {
   const m = env.REEL_TILE_MASK;
   if (!m) return {};
@@ -268,7 +249,6 @@ export function tileMaskOf(env: Record<string, string | undefined> = process.env
   return { mask: m };
 }
 
-/** The motion-blur sampling flags: a fixed count, or adaptive. */
 export function samplesOf(v: Values, env: Record<string, string | undefined> = process.env): number | AdaptiveSampling {
   const mask = tileMaskOf(env);
   if (v.refine !== undefined && v.refine !== 'tiles' && v.refine !== 'frame') throw new UsageError(`--refine ${v.refine}: expected tiles or frame`);
@@ -277,23 +257,16 @@ export function samplesOf(v: Values, env: Record<string, string | undefined> = p
   return int(v, 'samples', 1);
 }
 
-/** What a page is opened with: the format overrides, the clips to load, a built-in theme and the props (JSON text). */
 export interface PageOpts { w?: number; h?: number; fps?: number; scale: number; only?: string; theme?: string; props?: string; alpha?: boolean; bits?: number }
 
-/** Props as JSON text, checked to be a JSON object, made compact. `what` names them in an error. */
 export function propsOf(text: string, what = '--props'): string {
   try { return JSON.stringify(parseProps(text, what)); } catch (e) { throw new UsageError((e as Error).message); }
 }
 
-/**
- * `--props`: inline JSON when it starts with `{`, else the path of a JSON file, which `read` reads (the CLI passes
- * a file reader; this module does no I/O). Returns them as propsOf does.
- */
 export function readProps(raw: string, read: (file: string) => string): string {
   if (raw.trim().startsWith('{')) return propsOf(raw);
   let text: string;
   try { text = read(raw); } catch (e) { throw new UsageError(`--props ${raw}: neither a JSON object nor a file that can be read (${(e as Error).message})`); }
-  // (a byte order mark, which some editors write, is not JSON)
   return propsOf(text.replace(/^\uFEFF/, ''), `--props ${raw}`);
 }
 
@@ -311,7 +284,6 @@ export function pageOf(v: Values): PageOpts {
     o.only = v.only;
   }
   if (typeof v.theme === 'string') o.theme = v.theme;
-  // (JSON text already checked: readProps for the CLI, the MCP server's own schema)
   if (typeof v.props === 'string') o.props = v.props;
   if (v.alpha === true) o.alpha = true;
   return o;

@@ -1,4 +1,3 @@
-// The MCP server end to end: a real MCP client (the official SDK) starts `reel mcp` over stdio and calls its tools.
 import { afterAll, beforeAll, expect, test } from 'bun:test';
 import { existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -14,7 +13,6 @@ import { fixture, hasChrome, middleColor, OFF_FRAME, PROPS, reel, REEL, scratchC
 
 const demo = scratchCopy('demo'), layers = scratchCopy('layers'), wide = fixture('offframe', OFF_FRAME), props = fixture('props', PROPS);
 let client: Client;
-// (the servers' video jobs, and their claim on the export slot, stay in a folder of the test's own)
 const exportsDir = mkdtempSync(path.join(tmpdir(), 'reel-mcp-exports-'));
 const env = { ...process.env, REEL_EXPORTS_DIR: exportsDir } as Record<string, string>;
 
@@ -24,7 +22,6 @@ beforeAll(async () => {
 });
 afterAll(async () => {
   await client?.close();
-  // (a job a failed test left behind is stopped: jobs outlive their server)
   const was = process.env.REEL_EXPORTS_DIR;
   process.env.REEL_EXPORTS_DIR = exportsDir;
   try { for (const j of listJobs()) if (j.state === 'running' || j.state === 'queued') await cancelJob(j.job); } finally { if (was === undefined) delete process.env.REEL_EXPORTS_DIR; else process.env.REEL_EXPORTS_DIR = was; }
@@ -143,9 +140,7 @@ test.skipIf(!hasChrome)('check_video finds a line running off the frame, and pas
 test.skipIf(!hasChrome)('a video job outlives the server that started it: a new server follows it with wait_s and lists it', async () => {
   const out = `${layers.dir}/out/mcp.mp4`;
   const s = await call('video_start', { project: layers.dir, to: 0.5, preset: 'ultrafast', out, wait: true });
-  // (queued until the machine's export slot is free, then running)
   expect(['queued', 'running']).toContain(s.json.state);
-  // the client goes away and a new server starts
   await client.close();
   client = new Client({ name: 'reel-test', version: '1.0.0' });
   await client.connect(new StdioClientTransport({ command: 'bun', args: [REEL, 'mcp'], env, stderr: 'inherit' }));
@@ -155,7 +150,6 @@ test.skipIf(!hasChrome)('a video job outlives the server that started it: a new 
   for (; calls < 40 && (st.json.state === 'running' || st.json.state === 'queued'); calls++) {
     const t0 = Date.now();
     st = await call('video_status', { job: s.json.job, wait_s: 30 });
-    // (each wait ends at a change, long before its 30 s)
     expect(Date.now() - t0).toBeLessThan(25_000);
   }
   expect(st.json.state).toBe('done');

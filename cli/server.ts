@@ -1,7 +1,3 @@
-// The dev server a project is rendered through: Vite serving the engine's page (index.html, src/main.ts) with the
-// project folder mapped in. The project's config is `@project/reel.config`, its scenes import the engine as
-// `reel` (and its scenes as `reel/scenes/<name>`), and its files (audio/, data/, assets/ ...) are served from the
-// site root. The config's format and theme reach the page as compile-time constants (__REEL_FORMAT__, __REEL_THEME__).
 import type { ViteDevServer } from 'vite';
 import { existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync, createReadStream, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -19,23 +15,14 @@ const TYPES: Record<string, string> = {
   '.ttf': 'font/ttf', '.otf': 'font/otf', '.woff': 'font/woff', '.woff2': 'font/woff2', '.txt': 'text/plain; charset=utf-8', '.hdr': 'application/octet-stream', '.exr': 'image/x-exr', '.bin': 'application/octet-stream',
   '.ktx2': 'image/ktx2', '.m4v': 'video/mp4', '.aac': 'audio/aac', '.opus': 'audio/ogg', '.aif': 'audio/aiff', '.aiff': 'audio/aiff', '.lottie': 'application/zip', '.csv': 'text/csv; charset=utf-8',
 };
-/** Files a scene loads from the project: one that is missing is a 404 (not the page, which a dev server would send). */
 const MEDIA = new Set(Object.keys(TYPES).filter((x) => x !== '.json' && x !== '.txt'));
 
-/**
- * The folder of the project to work on: `dir`, which must hold a reel.config.ts. Symlinks are resolved, so one
- * project reached by two paths (/tmp and /private/tmp on macOS) shares one warm renderer.
- */
 export function projectDir(dir: string) {
   const p = path.resolve(dir);
   if (!existsSync(path.join(p, 'reel.config.ts'))) throw new Error(`no reel.config.ts in ${p} (pass --project <folder>)`);
   return realpathSync(p);
 }
 
-/**
- * The project's config, read outside the browser: its top level is plain data and `timeline` is not called. The
- * file is compiled with its `reel` imports pointed at this engine, so a project need not have it installed.
- */
 export async function loadConfig(project: string): Promise<VideoConfig> {
   const src = await Bun.file(path.join(project, 'reel.config.ts')).text();
   let compiled: string;
@@ -45,7 +32,6 @@ export async function loadConfig(project: string): Promise<VideoConfig> {
   }
   const js = compiled
     .replace(/(from\s*|import\s*\(\s*)(["'])reel(\/config|\/scenes\/[\w-]+)?\2/g, (_, pre: string, q: string, sub?: string) => `${pre}${q}${path.join(ENGINE, sub === '/config' ? 'src/config.ts' : sub ? `src${sub}.ts` : 'src/index.ts')}${q}`);
-  // (beside the config, so its relative imports resolve; removed once loaded)
   const file = path.join(project, `.reel.config.${Bun.hash(js).toString(36)}.mjs`);
   writeFileSync(file, js);
   let mod;
@@ -54,11 +40,6 @@ export async function loadConfig(project: string): Promise<VideoConfig> {
   return mod.default as VideoConfig;
 }
 
-/**
- * The monorepo a project sits in, for the dev server to serve its sources and packages: Vite's workspace root, but
- * only when it really is one (a pnpm-workspace.yaml, a lerna.json or a package.json with workspaces). Without a
- * marker Vite falls back to the nearest package.json, which may be a stray one in the home folder.
- */
 export function workspaceOf(project: string, search: (dir: string) => string): string[] {
   const root = search(project);
   if (root === project) return [];
@@ -68,11 +49,6 @@ export function workspaceOf(project: string, search: (dir: string) => string): s
   return has('pnpm-workspace.yaml') || has('lerna.json') || workspaces ? [root] : [];
 }
 
-/**
- * The packages the engine's page imports, pre-bundled by Vite when its server starts. Every one is listed (a test
- * checks `src/` against it): one Vite finds on its own while a page loads makes it bundle again mid-load and answer
- * the page's older imports with 504 Outdated Optimize Dep.
- */
 export const PREBUNDLED = [
   'three', 'opentype.js', 'mp4box', 'lottie-web/build/player/esm/lottie_light_canvas.min.js',
   ...['GLTFLoader', 'DRACOLoader', 'KTX2Loader', 'HDRLoader', 'EXRLoader'].map((l) => `three/examples/jsm/loaders/${l}.js`),
@@ -81,15 +57,8 @@ export const PREBUNDLED = [
   ...['bash', 'cpp', 'css', 'diff', 'glsl', 'go', 'javascript', 'json', 'python', 'rust', 'sql', 'typescript', 'xml', 'yaml'].map((l) => `highlight.js/lib/languages/${l}`),
 ];
 
-/** Where the dev servers keep their pre-bundled packages: a folder per project, under the engine's node_modules. */
 export const VITE_CACHE = path.join(ENGINE, 'node_modules/.vite/reel');
 
-/**
- * The Vite cache folder of `project`, its own so that servers of different projects running at once (warm
- * renderers, tests, another session) never bundle into the same folder: Vite's bundle hash includes the project's
- * path, so with one shared folder each server would replace the others' files under their pages. Folders whose
- * project folder is gone (tests' scratch copies) are removed on the way. Projects outside this repo get one here too.
- */
 export function viteCacheDir(project: string, root = VITE_CACHE) {
   try {
     for (const d of readdirSync(root)) {
@@ -104,27 +73,17 @@ export function viteCacheDir(project: string, root = VITE_CACHE) {
   return dir;
 }
 
-/** A module Vite could not transform (a syntax error in a scene): the file, and the error with its code frame. */
 export interface ModuleError { file: string; message: string }
 
-/**
- * Start the server for `project`. `hmr: false` for renders: a file saved mid-render must not reload the page.
- * `port: 0` picks a free port; a port with `strictPort: false` falls back to the next free one. `theme` names a
- * built-in theme to use instead of the config's, `props` the preview's props (JSON text, set in the page as
- * window.__REEL_PROPS__; render pages get theirs from openPage). `onModuleError` takes the modules Vite fails to transform
- * (the page only learns that a dynamic import failed); without it they are printed.
- */
 export async function startServer(project: string, opts: { port?: number; strictPort?: boolean; hmr?: boolean; theme?: string; props?: string; onModuleError?: (e: ModuleError) => void } = {}): Promise<{ url: string; server: ViteDevServer; format: ReturnType<typeof formatOf>; theme: ResolvedTheme; stop: () => Promise<void> }> {
   const config = await loadConfig(project);
   const format = formatOf(config);
   const theme = resolveTheme(opts.theme ?? config.theme ?? 'neutral');
-  // (imported here: a command that only talks to the warm renderer never loads Vite)
   const { createServer, createLogger, searchForWorkspaceRoot } = await import('vite');
   const logger = createLogger('error');
   let moduleFailed = false;
   const logError = logger.error.bind(logger);
   logger.error = (msg, o) => {
-    // (err.loc is not used: for a transform error it points into Vite's own code; the message has the code frame)
     const err = o?.error as { id?: string; message?: string } | null | undefined;
     if (err?.id) moduleFailed = true;
     if (opts.onModuleError && err?.id && err.message) {
@@ -147,24 +106,19 @@ export async function startServer(project: string, opts: { port?: number; strict
         { find: /^reel$/, replacement: path.join(ENGINE, 'src/index.ts') },
         { find: /^@project\//, replacement: project + '/' },
       ],
-      // (a project outside this repo has no node_modules of its own: its scenes get the engine's three.js)
       dedupe: ['three'],
     },
     optimizeDeps: { include: PREBUNDLED },
-    // (a render server keeps the page's console to itself: the CLI reports it per request)
-    // (a project inside a monorepo reads its workspace's sources and node_modules, as Vite's own default allows)
     server: { port: opts.port || 0, strictPort: !!opts.port && opts.strictPort !== false, hmr: opts.hmr ?? false, forwardConsole: !!opts.hmr, fs: { allow: [ENGINE, project, ...workspaceOf(project, searchForWorkspaceRoot)] } },
     build: { target: 'esnext' },
     plugins: [{
       name: 'reel-props',
-      // (`<` escaped: the JSON may hold '</script>')
       transformIndexHtml: () => opts.props ? [{ tag: 'script', children: `window.__REEL_PROPS__ = ${JSON.stringify(opts.props).replace(/</g, '\\u003c')};`, injectTo: 'head-prepend' }] : [],
     }, {
       name: 'reel-project-files',
       configureServer(s) {
         s.middlewares.use((req, res, next) => {
           const rel = decodeURIComponent((req.url ?? '/').split('?')[0]!);
-          // the project's fonts (its fonts/ folder), described from the files, for the page to load
           if (rel === '/@reel/fonts.json') {
             res.setHeader('Content-Type', 'application/json');
             res.setHeader('Cache-Control', 'no-store');
@@ -173,18 +127,15 @@ export async function startServer(project: string, opts: { port?: number; strict
           }
           if (rel === '/' || rel.startsWith('/@') || rel.startsWith('/src/') || rel.startsWith('/node_modules/')) return next();
           const file = path.join(project, rel);
-          // (inside the project only, never its config or sources: those go through Vite's transform)
           if (!file.startsWith(project + path.sep) || /\.(ts|tsx|js|mjs)$/.test(file)) return next();
           if (!existsSync(file) || !statSync(file).isFile()) {
             if (!MEDIA.has(path.extname(file).toLowerCase()) || rel.startsWith('/public/')) return next();
-            // (unless the engine's public/ serves it: its fonts)
             if (existsSync(path.join(ENGINE, 'public', rel))) return next();
             res.statusCode = 404; res.setHeader('Content-Type', 'text/plain'); res.end(`${rel.slice(1)} is not in the project`); return;
           }
           res.setHeader('Content-Type', TYPES[path.extname(file).toLowerCase()] ?? 'application/octet-stream');
           res.setHeader('Cache-Control', 'no-store');
           res.setHeader('Accept-Ranges', 'bytes');
-          // (byte ranges: the preview's <audio> and <video> cannot seek without them)
           const size = statSync(file).size, m = /^bytes=(\d*)-(\d*)$/.exec(req.headers.range ?? '');
           if (!m || (!m[1] && !m[2])) { res.setHeader('Content-Length', size); createReadStream(file).pipe(res); return; }
           const start = m[1] ? Number(m[1]) : Math.max(0, size - Number(m[2])), end = m[1] && m[2] ? Math.min(Number(m[2]), size - 1) : size - 1;
@@ -199,8 +150,6 @@ export async function startServer(project: string, opts: { port?: number; strict
   });
   await server.listen();
   if (opts.hmr) {
-    // (the preview: after a module failed, a file that appears may be the import it could not resolve, which
-    // Vite's resolver remembers as missing until the server starts again; the page then reloads by itself)
     server.watcher.add(project);
     server.watcher.on('add', (f) => {
       if (!moduleFailed || !f.startsWith(project + path.sep) || /(^|\/)(out|node_modules|\.git)\//.test(path.relative(project, f) + '/')) return;

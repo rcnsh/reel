@@ -1,6 +1,3 @@
-// Images from OpenAI's image API (OPENAI_API_KEY; model gpt-image-1 unless REEL_IMAGE_MODEL names another):
-// one synchronous request per image, the size nearest the asset's aspect, then fitted to the asset by reel assets.
-// Only the prompt is sent.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fetchRetry } from '../http';
@@ -8,7 +5,6 @@ import type { AssetProvider } from './provider';
 
 export const API = 'https://api.openai.com/v1/images/generations';
 
-/** The API size nearest an aspect ratio. */
 export function sizeFor([w, h]: [number, number]) {
   const r = w / h;
   return r > 1.2 ? '1536x1024' : r < 1 / 1.2 ? '1024x1536' : '1024x1024';

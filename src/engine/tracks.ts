@@ -1,15 +1,7 @@
-// Per-track compositing: a track's grade (exposure, saturation, contrast, tint, fade, flash, blur on its own
-// picture before it is stacked), track mattes (one track cut out by another's alpha or luma) and the blend modes
-// that read the tracks below (overlay, soft-light, hard-light, difference, color-dodge). The checks are pure, so
-// a config's mistakes are tested without a browser; the passes work on premultiplied linear HDR.
 import * as THREE from 'three';
 import { FSPass, PW, PH, SCALE } from './gl';
 import { HEX, TONE, colorLinear, glslName, isColor } from './palette';
 
-/**
- * A track's grade: what it does to the track's own picture (its clips and their transitions, composited) before
- * the track is drawn over the ones below. Every field is optional; a missing one does nothing.
- */
 export interface Grade {
   /** Gain on the colour (default 1; 2 is a stop brighter). */
   exposure?: number;
@@ -21,36 +13,26 @@ export interface Grade {
   tint?: string | [number, number, number];
   /** 0..1: the track fades out: to transparent on a track above 0 (and in a transparent render), to black on track 0. */
   fade?: number;
-  /** Light in the theme's light colour added where the track has coverage, 0..1+ (default 0). */
   flash?: number;
   /** A Gaussian blur of the track, its standard deviation in logical px (as CSS `blur()`), 0 to 100 (default 0). */
   blur?: number;
 }
 
-/** How a matte cuts its track: by the matte track's coverage or its brightness, kept or inverted. */
 export type MatteMode = 'alpha' | 'alpha-inverted' | 'luma' | 'luma-inverted';
 export const MATTE_MODES: readonly MatteMode[] = ['alpha', 'alpha-inverted', 'luma', 'luma-inverted'];
 
-/**
- * A track matte: the track is shown only where the next track above (or below) it has coverage (`alpha`) or
- * brightness (`luma`), or only where it has none (`-inverted`). The matte track is not drawn while it is one.
- */
 export interface Matte {
   mode: MatteMode;
-  /** The neighbouring track whose picture is the matte (default 'above'). */
   from?: 'above' | 'below';
 }
 
 /** Blend modes the Compositor draws with fixed-function blending (and 'replace', which hides what is below). */
 export const SIMPLE_BLENDS = ['normal', 'add', 'screen', 'multiply', 'max', 'replace'] as const;
-/** Blend modes that read the tracks below in a shader (see BlendPass for their maths in linear HDR). */
 export const SHADER_BLENDS = ['overlay', 'soft-light', 'hard-light', 'difference', 'color-dodge'] as const;
 export type ShaderBlend = (typeof SHADER_BLENDS)[number];
-/** How a track is drawn over the tracks below. */
 export type TrackBlend = (typeof SIMPLE_BLENDS)[number] | ShaderBlend;
 const BLENDS: readonly string[] = [...SIMPLE_BLENDS, ...SHADER_BLENDS];
 
-/** A track's own settings (the config's `tracks`); a clip's `blend`, `opacity`, `grade` and `matte` go over them. */
 export interface TrackSettings {
   blend?: TrackBlend;
   opacity?: number;
@@ -63,7 +45,6 @@ const TRACK_KEYS = ['blend', 'opacity', 'grade', 'matte'] as const satisfies rea
 const isObj = (o: unknown): o is Record<string, unknown> => !!o && typeof o === 'object' && !Array.isArray(o);
 const num = (v: unknown, lo: number, hi: number) => typeof v === 'number' && Number.isFinite(v) && v >= lo && v <= hi;
 
-/** A grade, checked: a misspelt key or a value out of range is an error naming `where`. */
 export function gradeOf(g: unknown, where: string): Grade {
   const fail = (m: string): never => { throw new Error(`${where}: grade ${JSON.stringify(g)}: ${m}`); };
   if (!isObj(g)) return fail(`expected an object with any of ${GRADE_KEYS.join(', ')}`);
@@ -80,7 +61,6 @@ export function gradeOf(g: unknown, where: string): Grade {
   return g as Grade;
 }
 
-/** A matte, checked; its short form ('luma') expanded. */
 export function matteOf(m: unknown, where: string): Required<Matte> {
   const fail = (msg: string): never => { throw new Error(`${where}: matte ${JSON.stringify(m)}: ${msg}`); };
   const o = typeof m === 'string' ? { mode: m } : m;
@@ -91,19 +71,16 @@ export function matteOf(m: unknown, where: string): Required<Matte> {
   return { mode: o.mode as MatteMode, from: (o.from as 'above' | 'below' | undefined) ?? 'above' };
 }
 
-/** A blend mode, checked. */
 export function blendOf(b: unknown, where: string): TrackBlend {
   if (!BLENDS.includes(b as string)) throw new Error(`${where}: blend ${JSON.stringify(b)}: expected one of ${BLENDS.join(', ')}`);
   return b as TrackBlend;
 }
 
-/** An opacity, checked (above 1 strengthens an add or screen). */
 export function opacityOf(o: unknown, where: string): number {
   if (!num(o, 0, 64)) throw new Error(`${where}: opacity ${JSON.stringify(o)}: expected a number from 0 (usually up to 1)`);
   return o as number;
 }
 
-/** The config's `tracks`, checked: keys are track numbers, values TrackSettings. */
 export function trackSettingsOf(tracks: unknown): Map<number, TrackSettings> {
   const out = new Map<number, TrackSettings>();
   if (tracks === undefined) return out;
@@ -122,10 +99,6 @@ export function trackSettingsOf(tracks: unknown): Map<number, TrackSettings> {
   return out;
 }
 
-/**
- * The track a matte on track `tn` reads: the nearest track number above (or below) it among `tracks` (every
- * track of the timeline but the theme overlay's). Throws when there is none.
- */
 export function matteSource(tn: number, m: Required<Matte>, tracks: number[], where: string): number {
   const s = [...new Set(tracks)].sort((a, b) => a - b);
   const src = m.from === 'above' ? s.find((x) => x > tn) : s.filter((x) => x < tn).pop();
@@ -133,18 +106,15 @@ export function matteSource(tn: number, m: Required<Matte>, tracks: number[], wh
   return src;
 }
 
-/** A grade resolved to numbers: the identity is every gain 1 and every effect 0. */
 export interface GradeValues { exposure: number; saturation: number; contrast: number; tint: [number, number, number]; fade: number; flash: number; blur: number }
 export const IDENTITY_GRADE: GradeValues = { exposure: 1, saturation: 1, contrast: 1, tint: [1, 1, 1], fade: 0, flash: 0, blur: 0 };
 
-/** Grades layered (later wins per field) and resolved to numbers. */
 export function resolveGrade(...gs: (Grade | undefined)[]): GradeValues {
   const g: Grade = Object.assign({}, ...gs.filter(Boolean));
   const tint = g.tint === undefined ? IDENTITY_GRADE.tint : typeof g.tint === 'string' ? colorLinear(g.tint) : g.tint;
   return { exposure: g.exposure ?? 1, saturation: g.saturation ?? 1, contrast: g.contrast ?? 1, tint: [tint[0], tint[1], tint[2]], fade: g.fade ?? 0, flash: g.flash ?? 0, blur: g.blur ?? 0 };
 }
 
-/** From grade a to grade b by k (0..1): across a transition, the outgoing clip's grade becomes the incoming one's. */
 export function lerpGrade(a: GradeValues, b: GradeValues, k: number): GradeValues {
   const l = (x: number, y: number) => x + (y - x) * k;
   return {
@@ -157,13 +127,7 @@ export function isIdentityGrade(g: GradeValues) {
   return g.exposure === 1 && g.saturation === 1 && g.contrast === 1 && g.tint.every((x) => x === 1) && g.fade === 0 && g.flash === 0 && g.blur === 0;
 }
 
-/**
- * A track's grade and matte, drawn from its composite into a target of its own. Premultiplied in and out: the
- * colour is unpremultiplied for the grade (contrast is not linear in it) and premultiplied again.
- */
 export class TrackFx {
-  // a big blur is made at a fraction of the size: each texel the average of d x d, so the Gaussian there is 8 to
-  // 16 texels wide and its taps stay a texel apart (spaced wider they would leave copies of sharp edges)
   private downPass = new FSPass(/* glsl */ `
     uniform sampler2D src; uniform int d;
     void main() {
@@ -175,7 +139,6 @@ export class TrackFx {
   private blurPass = new FSPass(/* glsl */ `
     uniform sampler2D src; uniform vec2 dir; uniform float sigma; uniform int taps;
     void main() {
-      // a separable Gaussian over 3 sigma each side, taps at most a texel apart
       float dx = 3.0 * sigma / float(taps);
       vec4 c = texture(src, vUv);
       float wsum = 1.0;
@@ -205,7 +168,6 @@ export class TrackFx {
       }
       if (matte > 0) {
         vec4 m = texture(matteTex, vUv);
-        // luma: the matte's brightness over black as displayed (sRGB-encoded), so mid-grey cuts half
         float k = matte <= 2 ? m.a : toSRGB(vec3(sat(luma(m.rgb)))).x;
         if (matte == 2 || matte == 4) k = 1.0 - k;
         c *= k;
@@ -215,13 +177,8 @@ export class TrackFx {
     src: { value: null }, srcScale: { value: new THREE.Vector2(1, 1) }, matteTex: { value: null }, matte: { value: 0 }, grade: { value: false }, upper: { value: false },
     exposure: { value: 1 }, saturation: { value: 1 }, contrast: { value: 1 }, fade: { value: 0 }, flash: { value: 0 }, tint: { value: new THREE.Vector3(1, 1, 1) },
   });
-  /** The blur's targets at its reduction d: the reduced copy, then the two passes (made again when d changes). */
   private blurRTs: { d: number; rts: THREE.WebGLRenderTarget[] } | null = null;
 
-  /**
-   * Draw `src` graded (g, or null for none) and matted (by `matteTex` in `mode`, or not) into `out`. `upper`: the
-   * track is above 0 or the render is transparent (a fade goes to transparent rather than to black).
-   */
   draw(renderer: THREE.WebGLRenderer, src: THREE.Texture, out: THREE.WebGLRenderTarget, g: GradeValues | null, matte: { tex: THREE.Texture; mode: MatteMode } | null, upper: boolean) {
     let tex = src;
     const u = this.gradePass.u, scale = u.srcScale!.value as THREE.Vector2;
@@ -246,7 +203,6 @@ export class TrackFx {
       bu.src!.value = a.texture; (bu.dir!.value as THREE.Vector2).set(0, 1 / h);
       this.blurPass.render(renderer, b);
       tex = b.texture;
-      // (the reduced frame is a little wider than PW / d when d does not divide it)
       scale.set(PW / (w * d), PH / (h * d));
     }
     u.src!.value = tex;
@@ -262,13 +218,6 @@ export class TrackFx {
   }
 }
 
-/**
- * The blend modes that read what is below: `top` drawn over `base` into `out` (all premultiplied linear HDR),
- * by the W3C compositing formula: Cs·(1-αb) + Cb·(1-αs) + αs·αb·B(Cb, Cs), with α = αs + αb - αs·αb.
- * overlay, soft-light and hard-light are defined on display values: their inputs are clamped to 0..1 and
- * sRGB-encoded, so mid-grey (sRGB 0.5) is neutral as in an image editor, and light above 1 is cut to 1.
- * difference is |Cb - Cs| in linear light, HDR kept. color-dodge is Cb / (1 - Cs) in linear light, capped at 16.
- */
 export class BlendPass {
   private pass = new FSPass(/* glsl */ `
     uniform sampler2D base; uniform sampler2D top; uniform float opacity; uniform int mode;

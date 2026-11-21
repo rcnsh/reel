@@ -1,9 +1,5 @@
-// What a scene drew this frame, for `reel check`: labelled rectangles (text, images, shapes) with the text, its
-// size and its colour. Scenes call report() / reportText() as they draw; outside a check nobody collects, and both
-// return at once (reportText measures nothing), so reporting costs nothing in previews and exports.
 import { HEX } from './palette';
 
-/** The rules of `reel check` a box or a clip can be exempt from. */
 export type CheckRule = 'blank' | 'frozen' | 'offFrame' | 'safeArea' | 'overlap' | 'minSize' | 'contrast' | 'overflow' | 'clipped' | 'tiny' | 'empty' | 'unreported' | 'nondeterministic' | 'timeline';
 export const CHECK_RULES: readonly CheckRule[] = ['blank', 'frozen', 'offFrame', 'safeArea', 'overlap', 'minSize', 'contrast', 'overflow', 'clipped', 'tiny', 'empty', 'unreported', 'nondeterministic', 'timeline'];
 
@@ -30,13 +26,7 @@ export interface DrawnBox {
   alpha?: number;
   /** Rules this box is meant to break (a title flying in from off the frame: ['offFrame']); true: all. */
   exempt?: CheckRule[] | true;
-  /**
-   * Text that does not fit its container (HTML layers report it): `clipped` when an ancestor's `overflow` cuts
-   * it off (`truncated` when that is an ellipsis or a line clamp, on purpose), else it spills out of its own
-   * box; `container` is that box in frame px, `px` how far the text passes it.
-   */
   overflow?: { clipped: boolean; truncated?: boolean; container: [number, number, number, number]; px: number };
-  /** Boxes with the same flow are parts of one run of text (a word in a span of a paragraph): they never overlap. */
   flow?: string;
   /** A 3D object entirely behind the camera (its rectangle is empty). */
   behind?: boolean;
@@ -44,35 +34,24 @@ export interface DrawnBox {
   visible?: number;
 }
 
-/**
- * A box as the check gets it: the clip that reported it and the clip's track, its colour resolved to #rrggbb, its
- * alpha including the clip's share of a transition and its track's opacity.
- */
 export interface ReportedBox extends DrawnBox { clip: string; track?: number; index: number }
 
 let sink: ReportedBox[] | null = null;
 let clip = '';
 let track = 0;
 let paused = false;
-/** fillText and strokeText calls of this frame, by clip: text the check can only see when it is also reported. */
 let draws: Record<string, number> = {};
 let lastDraws: Record<string, number> = {};
-/** Math.random, Date.now and performance.now called by the project's code this frame, by clip and name (1: called): what makes a frame depend on more than t. */
 let clocks: Record<string, Record<string, number>> = {};
 let lastClocks: Record<string, Record<string, number>> = {};
 let stacks = 0;
 
 let scratch = 0;
-/**
- * Run `f` without counting its fillText calls toward `unreported`: the engine's own text on scratch canvases that
- * never reach the frame as text (textPoints rasterising a word into particles, a missing asset's placeholder).
- */
 export function uncounted<T>(f: () => T): T {
   scratch++;
   try { return f(); } finally { scratch--; }
 }
 
-/** Count the Canvas2D text draws while boxes are collected (installed on the first check, never in a preview or export). */
 let hooked = false;
 function hookTextDraws() {
   if (hooked) return;
@@ -91,17 +70,13 @@ function hookTextDraws() {
       });
     }
   }
-  // (counted inside a clip's draw, and only when called from the project's own code: the engine's and its
-  // libraries' calls (three's ids, lottie-web's) are not the scene's doing)
   const wrap = (o: object | undefined, k: string, name: string) => {
     const orig = (o as Record<string, unknown> | undefined)?.[k];
     if (typeof orig !== 'function') return;
     Object.defineProperty(o, k, {
       configurable: true, writable: true,
       value(this: unknown, ...a: unknown[]) {
-        // (stacks capped per frame: three and other libraries call these a lot, and none of theirs count)
         if (sink && !paused && clip && !clocks[clip]?.[name] && stacks++ < 1024) {
-          // (the stack down to the caller and no further: capturing more costs, and three calls these a lot)
           const E = Error as { stackTraceLimit?: number }, was = E.stackTraceLimit;
           E.stackTraceLimit = 2;
           let stack: string | undefined;
@@ -117,10 +92,6 @@ function hookTextDraws() {
   wrap(globalThis.performance, 'now', 'performance.now()');
 }
 
-/**
- * Whether the caller of a wrapped function (the third line of `stack`) is the project's code: a module the dev
- * server serves from outside the engine's `src/` and outside any `node_modules/`.
- */
 export function fromProject(stack: string | undefined) {
   const line = stack?.split('\n')[2] ?? '';
   const url = /\(?((?:https?|file):\/\/[^\s)]+?):\d+:\d+\)?\s*$/.exec(line)?.[1];
@@ -130,10 +101,8 @@ export function fromProject(stack: string | undefined) {
   return !p.startsWith('/src/') && !p.includes('/node_modules/');
 }
 
-/** Whether this frame's boxes are being collected (to skip work that only feeds report()). */
 export const reporting = () => sink !== null && !paused;
 
-/** Report a rectangle the scene drew this frame. */
 export function report(b: DrawnBox) {
   if (!sink || paused) return;
   sink.push({ ...b, color: b.color === undefined ? undefined : cssHex(b.color) ?? b.color, clip, track, index: sink.filter((x) => x.clip === clip).length });
@@ -150,11 +119,6 @@ export function reportText(c: CanvasRenderingContext2D, text: string, x: number,
   reportDrawn(c, text, [x - m.actualBoundingBoxLeft, y - m.actualBoundingBoxAscent, x + m.actualBoundingBoxRight, y + m.actualBoundingBoxDescent], px ? Number(px[1]) : undefined, c.fillStyle, o);
 }
 
-/**
- * Report text drawn into a Canvas2D context as paths: its rectangle [left, top, right, bottom] and `size` in the
- * context's own coordinates (the transform is applied here), its colour from `style` (a fillStyle or strokeStyle)
- * and globalAlpha.
- */
 export function reportDrawn(c: CanvasRenderingContext2D, text: string, [l, t, r, b]: [number, number, number, number], size: number | undefined, style: unknown, o: Pick<DrawnBox, 'label' | 'exempt' | 'color' | 'alpha'> = {}) {
   if (!sink || paused || !text) return;
   const T = c.getTransform();
@@ -171,7 +135,6 @@ export function reportDrawn(c: CanvasRenderingContext2D, text: string, [l, t, r,
   });
 }
 
-/** '#rrggbb' or 'rgb(a)(…)' or a palette key -> [#rrggbb, alpha], or null. */
 function parseCss(s: string): [string, number] | null {
   if (Object.prototype.hasOwnProperty.call(HEX, s)) return [HEX[s]!, 1];
   let m = /^#([0-9a-f]{3}|[0-9a-f]{6})$/i.exec(s);
@@ -185,19 +148,14 @@ function parseCss(s: string): [string, number] | null {
 }
 const cssHex = (s: string) => parseCss(s)?.[0];
 
-/** The engine's side: collect the boxes of the next draws, naming the clip that draws. */
 export const boxes = {
   begin() { hookTextDraws(); sink = []; draws = {}; clocks = {}; stacks = 0; paused = false; },
   clip(id: string, onTrack = 0) { clip = id; track = onTrack; },
-  /** Scale the alpha of what `id` reported by `k` (its weight in a crossfade, its track's opacity). */
   fade(id: string, k: number) {
     if (sink && k !== 1) for (const b of sink) if (b.clip === id) b.alpha = (b.alpha ?? 1) * k;
   },
-  /** Draws that are not the frame's own (a stateful scene fast-forwarding) report nothing. */
   pause(on: boolean) { paused = on; },
   end(): ReportedBox[] { const b = sink ?? []; sink = null; clip = ''; lastDraws = draws; draws = {}; lastClocks = clocks; clocks = {}; return b; },
-  /** The fillText and strokeText calls per clip between the last begin() and end(). */
   textDraws(): Record<string, number> { return lastDraws; },
-  /** The Math.random, Date.now and performance.now calls per clip (and per name) between the last begin() and end(). */
   clocks(): Record<string, Record<string, number>> { return lastClocks; },
 };

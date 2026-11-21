@@ -1,6 +1,3 @@
-// The component kit: its pure helpers, and a rendered project of components that `reel check` passes, that renders
-// the same frame after a seek backwards, and whose faults (text cut off at a layer's edge, text overflowing a
-// block that does not fit it) check names.
 import { afterAll, describe, expect, test } from 'bun:test';
 import { arcPath, captionPages, clock, columnAlign, donutSlices, formatCell, growth, percents, polar, stackBars, textWidth, cssColor, esc, formatNumber, kineticPieces, motionAt, splitHighlighted, windowOf } from '../src/kit';
 import { LOADING } from '../src/engine/scene';
@@ -9,7 +6,6 @@ import { ease, stagger, staggerStart } from '../src/engine/util';
 import { Words } from '../src/engine/words';
 import { fixture, hasChrome, reel } from './helpers';
 
-// (the clip being loaded, without time remapping)
 const loading = (start: number, end: number) => ({ id: 'c', start, end, time: clipTime({ id: 'c', start, end }, 30) });
 
 describe('helpers', () => {
@@ -23,7 +19,7 @@ describe('helpers', () => {
     const pages = captionPages(words, 9, 0.5);
     expect(pages.map((p) => p.text)).toEqual(['one two', 'three', 'four five', 'six', 'seven']);
     for (let i = 0; i + 1 < pages.length; i++) expect(pages[i]!.end).toBeLessThanOrEqual(pages[i + 1]!.start);
-    expect(pages.at(-2)!.end).toBeCloseTo(6.5); // held half a second after its last word
+    expect(pages.at(-2)!.end).toBeCloseTo(6.5);
   });
 
   test('captionPages counts CJK and emoji twice and splits a line of CJK, which has no spaces, into pages', () => {
@@ -36,7 +32,6 @@ describe('helpers', () => {
     for (const p of pages) expect(textWidth(p.text)).toBeLessThanOrEqual(20);
     expect(pages[0]!.start).toBe(0);
     expect(pages.at(-1)!.words.at(-1)!.end).toBeCloseTo(7);
-    // a word that fits keeps its space; split pieces join without one
     const mixed = captionPages(Words.timed([{ text: 'Say 日本語日本語日本語日本語 now', start: 0, end: 3 }], 1), 12);
     expect(mixed.map((p) => p.text)).toEqual(['Say', '日本語日本語', '日本語日本語', 'now']);
   });
@@ -72,7 +67,6 @@ describe('helpers', () => {
   test('growth: one after another, all done at the end; together without stagger', () => {
     expect(growth(0, 0, 4)).toBe(0);
     for (let i = 0; i < 4; i++) expect(growth(1, i, 4)).toBe(1);
-    // the first item leads, the last starts only once the first is halfway
     expect(growth(0.25, 0, 4)).toBeGreaterThan(growth(0.25, 3, 4));
     expect(growth(0.25, 3, 4)).toBe(0);
     expect(growth(0.4, 2, 4, false)).toBe(0.4);
@@ -83,7 +77,6 @@ describe('helpers', () => {
     expect(s.map((x) => [x.start, x.end])).toEqual([[0, 0.25], [0.25, 0.5], [0.5, 1]]);
     expect(donutSlices([0, 0]).every((x) => x.share === 0 && x.end === 0)).toBe(true);
     expect(() => donutSlices([1, -1])).toThrow('0 or more');
-    // a third each rounds to 33 + 33 + 33 = 99: the largest remainder (ties to the earliest) takes the last unit
     expect(percents([1, 1, 1])).toEqual([34, 33, 33]);
     expect(percents([52, 21, 9, 18])).toEqual([52, 21, 9, 18]);
     expect(percents([2, 3, 7], 1)).toEqual([16.7, 25, 58.3]);
@@ -134,7 +127,7 @@ describe('helpers', () => {
       expect(() => windowOf(words.get('goes out'), 'x')).toThrow("is outside the clip 'c' (0 to 10)");
       LOADING.clip = loading(17, 20);
       expect(() => windowOf(words.get('tide'), 'x')).toThrow("its window [-5, -3] in clip seconds is outside the clip 'c'");
-      expect(windowOf([words.get('tide'), 2], 'x')).toEqual([-5, 2]); // (from before the clip into it: shown from its start)
+      expect(windowOf([words.get('tide'), 2], 'x')).toEqual([-5, 2]);
     } finally { LOADING.clip = null; }
   });
 
@@ -149,10 +142,8 @@ describe('helpers', () => {
     expect([0, 1, 2, 3, 4].map((i) => staggerStart(i, 5, { each: 1, order: 'center' }))).toEqual([2, 1, 0, 1, 2]);
     expect([0, 1, 2, 3].map((i) => staggerStart(i, 4, { each: 1, order: 'center' }))).toEqual([1, 0, 0, 1]);
     expect([0, 1, 2, 3, 4].map((i) => staggerStart(i, 5, { each: 1, order: 'edges' }))).toEqual([0, 1, 2, 1, 0]);
-    // total spreads the starts over a fixed time, however many items
     expect(staggerStart(9, 10, { total: 0.9 })).toBeCloseTo(0.9);
     expect(staggerStart(0, 1, { total: 0.9 })).toBe(0);
-    // random: a permutation, the same for a seed, another for another seed
     const shuffle = (seed: number) => Array.from({ length: 8 }, (_, i) => staggerStart(i, 8, { each: 1, order: 'random', seed }));
     expect([...shuffle(3)].sort()).toEqual([0, 1, 2, 3, 4, 5, 6, 7]);
     expect(shuffle(3)).toEqual(shuffle(3));
@@ -172,7 +163,6 @@ describe('helpers', () => {
     expect(cssColor('#ff0000')).toBe('#ff0000');
     expect(cssColor('white')).toBe('white');
     expect(cssColor('rgb(1, 2, 3)')).toBe('rgb(1, 2, 3)');
-    // (under bun the theme is neutral, which has 'muted'; print and film do not)
     expect(cssColor('muted')).toBe('var(--muted)');
     expect(() => cssColor('accent-hi')).toThrow("colour 'accent-hi'");
     expect(cssColor('var(--brand)')).toBe('var(--brand)');
@@ -182,11 +172,6 @@ describe('helpers', () => {
   });
 });
 
-// clips: a Canvas2D line off the centre, an HTML text block changing every frame, the Canvas2D line again (a
-// Layer2D upload after an HTML one must not come out upside down), captions with a word highlighted, a chart and
-// a code block; then the faults; then a text block timed by a span of the words and the same timed in clip seconds;
-// then a donut, a pie, horizontal and stacked bars and a table (in place throughout); then vertical stacked
-// bars and a donut with its legend under it
 const project = fixture('kit', {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({
@@ -251,8 +236,6 @@ export default class Timed extends Scene {
   render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); this.text.draw(this.ctx.renderer, out, f); }
 }
 `,
-  // words rising far enough to cross the line below them, letters sliding up behind their words' baselines, and
-  // words entering as they are said, the one being said highlighted
   'scenes/kinetic.ts': `import type * as THREE from 'three';
 import { Scene, type Frame, KineticText, Words, clearRT, LIN, W, H } from 'reel';
 const words = Words.timed([{ text: 'Each word arrives as it is said', start: 6.2, end: 8 }]);
@@ -260,7 +243,6 @@ export default class Kinetic extends Scene {
   rise = new KineticText({ text: 'Words rise into place one after another across two lines of text', by: 'word', distance: 1.4, each: 0.25, dur: 0.8, order: 'end', size: 56, box: { x: W * 0.08, y: H * 0.08, w: W * 0.5, h: H * 0.4 } });
   clip = new KineticText({ text: 'Letter by letter', by: 'letter', enter: 'clip', order: 'center', size: 48, box: { x: W * 0.6, y: H * 0.08, w: W * 0.32, h: H * 0.3 } });
   said = new KineticText({ words: words.lines[0]!, enter: 'blur', highlight: true, size: 44, box: { x: W * 0.08, y: H * 0.6, w: W * 0.84, h: H * 0.3 } });
-  // (a function that leaves transform out once a piece is in: no frame may keep it from an earlier one)
   own = new KineticText({ text: 'My own entrance', size: 40, dur: 2, enter: (k) => (k < 1 ? { opacity: k, transform: 'translateY(' + (1 - k) + 'em)' } : { opacity: 1 }), box: { x: W * 0.6, y: H * 0.4, w: W * 0.32, h: H * 0.16 } });
   render(f: Frame, out: THREE.WebGLRenderTarget) {
     const r = this.ctx.renderer;
@@ -290,7 +272,6 @@ export default class Drawn extends Scene {
 `,
   'scenes/scaled.ts': `import type * as THREE from 'three';
 import { Scene, type Frame, SvgDraw, TextBlock, clearRT, LIN } from 'reel';
-// a line in a viewBox drawn at 3x: 0, then 95% drawn, then all of it
 export default class Scaled extends Scene {
   line = new SvgDraw({ paths: ['M0 50 L300 50'], viewBox: [0, 0, 300, 100], box: { x: 100, y: 200, w: 900, h: 300 }, width: 8, motion: false,
     progress: (f) => (f.lt < 0.5 ? 0 : f.lt < 1.2 ? 0.95 : 1) });
@@ -326,7 +307,6 @@ export default class Data2 extends Scene {
   'scenes/faults.ts': `import type * as THREE from 'three';
 import { Scene, type Frame, HtmlLayer, KineticText, TextBlock, clearRT, LIN } from 'reel';
 export default class Faults extends Scene {
-  // (kinetic text that cannot fit its box is cut off at the box, not at its padded layer's edge)
   kin = new KineticText({ text: 'Overfull kinetic', fit: false, size: 64, total: 0, dur: 0, box: { x: 700, y: 420, w: 220, h: 60 }, motion: false });
   edge = new HtmlLayer({
     html: '<p data-label="edge">Cut off at the edge of its layer</p><p class="n" data-label="nowrap">Too long to stay in its box</p>',
@@ -351,7 +331,6 @@ test.skipIf(!hasChrome)('check passes the components and names the faults', asyn
   const findings: Finding[] = r.json().findings;
   const real = findings.filter((f) => f.severity !== 'info');
   expect(real.filter((f) => f.clip !== 'faults')).toEqual([]);
-  // (the text block's word breaks and its lines run past the bottom of the block: its layer cuts them off)
   const faults = real.filter((f) => f.clip === 'faults').map((f) => `${f.kind} ${f.severity} ${f.text!.split(' ')[0]}`).sort();
   expect(faults).toEqual(['clipped warning Cut', 'clipped warning Overfull', 'clipped warning Unbreakablewordthatcannotfitatall', 'clipped warning kinetic', 'overflow error Too']);
   expect(r.code).toBe(1);
@@ -359,10 +338,8 @@ test.skipIf(!hasChrome)('check passes the components and names the faults', asyn
 
 test.skipIf(!hasChrome)('a component timed by a span of the words shows over the span, in clip seconds', async () => {
   const still = async (t: number) => (await reel(['still', '--t', String(t), '--json', '--project', project.dir])).json().files[0] as string;
-  // (the largest difference in levels: the dither differs from frame to frame by 1)
   const differs = async (t: number, file: string) => (await reel(['diff', '--t', String(t), file, '--json', '--project', project.dir])).json().max as number;
   const before = await still(13.3), during = await still(13.9), after = await still(14.5);
-  // the same as the clip timed in numbers at the same clip time, and blank outside the span
   expect(await differs(15.3, before)).toBeLessThanOrEqual(1);
   expect(await differs(15.9, during)).toBeLessThanOrEqual(1);
   expect(await differs(16.5, after)).toBeLessThanOrEqual(1);
@@ -371,7 +348,6 @@ test.skipIf(!hasChrome)('a component timed by a span of the words shows over the
 }, 180_000);
 
 test.skipIf(!hasChrome)('charts and a table mid-sweep render the same after a seek past them and back', async () => {
-  // charts and a table mid-sweep (a highlight that switches on later): the same after a seek past it and back
   const data = (await reel(['still', '--t', '17.7', '--json', '--project', project.dir])).json().files[0];
   await reel(['still', '--t', '18.9', '--json', '--project', project.dir]);
   const back = await reel(['diff', '--t', '17.7', data, '--json', '--project', project.dir]);
@@ -379,9 +355,6 @@ test.skipIf(!hasChrome)('charts and a table mid-sweep render the same after a se
   expect(back.code).toBe(0);
 }, 180_000);
 
-// the mistakes that used to pass silently: a component made at a module's top level or lazily in render(), a
-// colour that only another theme has, a window in video seconds, a frame drawn from Math.random(), a transition
-// with nothing to overlap
 const mistakes = fixture('mistakes', {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({
@@ -443,7 +416,6 @@ export default class I extends Scene {
   'logo.svg': '<svg xmlns="http://www.w3.org/2000/svg" width="100" height="100"><circle cx="50" cy="50" r="40" fill="#c8301e"/></svg>',
   'scenes/shared.ts': `import type * as THREE from 'three';
 import { Scene, type Frame, ImageBox, clearRT, LIN } from 'reel';
-// (an image made at a module's top level, as a helper shared by scenes would: loaded with the scenes, and fine)
 const logo = new ImageBox({ src: 'logo.svg', box: { x: 220, y: 80, w: 200, h: 200 } });
 export default class S extends Scene {
   render(f: Frame, out: THREE.WebGLRenderTarget) { clearRT(this.ctx.renderer, out, LIN.bg); logo.draw(this.ctx.renderer, out, f); }
@@ -488,17 +460,14 @@ test.skipIf(!hasChrome)('kinetic text: a frame is the same whatever frame came b
 }, 180_000);
 
 test.skipIf(!hasChrome)('drawn-on paths and arrows draw over time and report themselves to check', async () => {
-  // (half drawn and fully drawn differ; check sees the drawings as pictures, by label)
   const half = (await reel(['still', '--t', '9.6', '--only', 'drawn', '--json', '--project', project.dir])).json().files[0];
   const diff = await reel(['diff', '--t', '10.6', half, '--only', 'drawn', '--json', '--project', project.dir]);
   expect(diff.json().changed).toBeGreaterThan(1000);
   const r = await reel(['check', '--json', '--only', 'drawn', '--project', project.dir]);
   const drawn = (r.json().findings as (Finding & { message: string })[]).filter((f) => f.clip === 'drawn');
   expect(drawn.filter((f) => f.severity !== 'info')).toEqual([]);
-  // (only the arrow led off the frame is found, as a picture running off its edge)
   expect(drawn.map((f) => `${f.kind} ${f.message}`)).toEqual([expect.stringMatching(/^offFrame 'away' runs .*right/)]);
   expect(r.code).toBe(0);
-  // a scaled viewBox: 95% drawn is all but the line's last 45 px (a stroke 8 px wide), nowhere near none of it
   const at = async (t: string) => (await reel(['still', '--t', t, '--only', 'scaled', '--json', '--project', project.dir])).json().files[0];
   const [none, most] = [await at('11.2'), await at('11.8')];
   const toFull = async (file: string) => (await reel(['diff', '--t', '12.5', file, '--tol', '16', '--only', 'scaled', '--json', '--project', project.dir])).json().changed;
@@ -517,10 +486,6 @@ for (const [t, later] of [['4.1', '4.9'], ['6.9', '8.5'], ['9.7', '10.5']] as co
   }, 180_000);
 }
 
-// captions whose second word sits a fraction of a pixel off the pixel grid (the media example's): Chrome keeps the
-// paint state of an element that once had an opacity below 1, so without the engine repainting a layer from
-// scratch the word came out a fraction of a pixel off once it had been dimmed, and a frame depended on the seeks
-// before it
 const caps = fixture('kit-caps', {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({ size: [1080, 1920], fps: 30, theme: 'neutral', timeline: () => [{ id: 'caps', scene: () => import('./scenes/caps'), start: 0, end: 3 }] });
@@ -537,7 +502,6 @@ export default class Caps extends Scene {
 afterAll(async () => { await reel(['daemon', 'stop', '--project', caps.dir]); caps.cleanup(); });
 
 test.skipIf(!hasChrome)('a caption frame is the same whether its words were dimmed before or not', async () => {
-  // the page shown first at 0.6 s ('clip' already said), then the same frame after 0.35 s, when 'clip' was dimmed
   await reel(['still', '--t', '0.1', '--json', '--project', caps.dir]);
   const fresh = (await reel(['still', '--t', '0.6', '--json', '--project', caps.dir])).json().files[0];
   await reel(['still', '--t', '0.35', '--json', '--project', caps.dir]);

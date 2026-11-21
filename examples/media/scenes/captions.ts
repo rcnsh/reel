@@ -1,4 +1,3 @@
-// Captions for a video without a voice: lines placed in time, their words spread over each line by Words.timed.
 import type * as THREE from 'three';
 import { Scene, type Frame, Captions, Words, clearRT } from 'reel';
 

@@ -1,6 +1,3 @@
-// The export's page side: a range handed to stream() that does not go on from the last one starts with a warm-up
-// frame only when a scene keeps state (its first frame must then follow one); a stateless frame is the same
-// however it is reached, so its ranges start straight away.
 import { afterAll, expect, test } from 'bun:test';
 import { Renderer } from '../cli/renderer';
 import { fixture, hasChrome } from './helpers';
@@ -21,7 +18,6 @@ export default defineVideo({ size: [64, 36], fps: 30, theme: 'neutral', timeline
 const projects = [project(false), project(true)];
 afterAll(() => { for (const p of projects) p.cleanup(); });
 
-/** The frames the page renders for two ranges that do not follow on from each other and a third that goes on from the second (an ack server takes them). */
 async function framesRendered(dir: string) {
   const r = new Renderer(dir);
   let n = 0;
@@ -38,7 +34,6 @@ async function framesRendered(dir: string) {
       E.renderFrame = (...a: unknown[]) => { calls++; return render(...a); };
       await P.stream({ from: 10 / 30, to: 13 / 30, ws });
       await P.stream({ from: 30 / 30, to: 33 / 30, ws });
-      // (one that goes on where the last ended never needs one)
       await P.stream({ from: 33 / 30, to: 35 / 30, ws });
       return calls;
     }, `ws://localhost:${server.port}/`);

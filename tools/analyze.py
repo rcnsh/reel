@@ -60,7 +60,6 @@ from scipy.fft import next_fast_len
 from scipy.ndimage import median_filter, uniform_filter1d
 from scipy.signal import butter, hilbert, sosfiltfilt
 
-# the project folder: the one `reel` was pointed at, else the current folder
 ROOT = Path(os.environ.get("REEL_PROJECT", ".")).resolve()
 SR = 22050
 FPS = 100
@@ -151,7 +150,7 @@ def attack(x, times, before=0.04, after=0.02, smooth=0.005):
         hi = min(t + after, (t + times[i + 1]) / 2 if i + 1 < len(times) else t + after)
         i0, i1 = max(0, int(lo * SR)), min(len(slope), int(hi * SR))
         j = i0 + int(np.argmax(slope[i0:i1])) if i1 > i0 else -1
-        out.append(j / SR if j >= 0 and slope[j] > 0 else t)  # (no rise in reach: left where it was found)
+        out.append(j / SR if j >= 0 and slope[j] > 0 else t)
     return np.array(out)
 
 
@@ -195,18 +194,14 @@ def spectrum(x, n):
         if m.any():
             P[b] = S[m].mean(axis=0)
         else:
-            # a band narrower than a bin: the power at its centre, between the bins around it
             j = int(np.clip(np.searchsorted(freqs, centres[b]), 1, len(freqs) - 1))
             w = (centres[b] - freqs[j - 1]) / (freqs[j] - freqs[j - 1])
             P[b] = S[j - 1] * (1 - w) + S[j] * w
     db = 10 * np.log10(P + 1e-12)
-    # (at least the loudest moment less 30 dB: a short sound in a long silence, a bed placed with --offset, must not
-    # put the silence at the top of the range; a silent track stays at 0)
     top = max(np.percentile(db, 99.5), db.max() - 30)
     if db.max() < -100:
         top = np.inf
     lvl = np.clip((db - (top - 60)) / 60, 0, 1)
-    # onto the envelopes' frames
     tf = np.arange(S.shape[1]) * hop / SR
     t = np.arange(n) / FPS
     out = follow_rows(np.stack([np.interp(t, tf, lvl[b]) for b in range(SPECTRUM_BANDS)], axis=1))
@@ -234,7 +229,6 @@ def beat_grid(y, duration, free):
         sys.exit("analyze: too few beats found; is this music?")
     if free:
         return float(np.atleast_1d(tempo)[0]), [float(b) for b in raw]
-    # one constant tempo through the tracked beats (least squares of time against beat index)
     k = np.arange(len(raw))
     period, phase = np.polyfit(k, raw, 1)
     phase = phase % period
@@ -307,10 +301,8 @@ def downbeat_phase(y, harm, beats, kick, snare):
     if len(beats) < 4:
         return 0
     k, s = at_beats(kick, beats), at_beats(snare, beats)
-    # low end: rms below 200 Hz in the 100 ms after each beat (raw, so a louder kick on the one counts)
     lowb = band(y, None, 200)
     low = np.array([np.sqrt(np.mean(lowb[int(b * SR):int((b + 0.1) * SR)] ** 2) + 1e-12) for b in beats])
-    # harmonic change: chroma distance between the beat before and the beat after
     hop = 512
     ch = librosa.util.normalize(librosa.feature.chroma_stft(y=harm, sr=SR, hop_length=hop), axis=0)
     fr = librosa.time_to_frames(beats, sr=SR, hop_length=hop).clip(0, ch.shape[1] - 1)
@@ -333,7 +325,7 @@ def auto_sections(y, beats, downbeats, duration):
     ])
     edges = librosa.util.fix_frames(librosa.time_to_frames(beats, sr=SR, hop_length=hop), x_min=0, x_max=feat.shape[1])
     feat = librosa.util.sync(feat, edges, aggregate=np.mean)
-    k = int(np.clip(round(duration / 25), 2, 12))  # about one section per 25 s
+    k = int(np.clip(round(duration / 25), 2, 12))
     k = min(k, feat.shape[1])
     bounds = librosa.frames_to_time(edges[librosa.segment.agglomerative(feat, k)], sr=SR, hop_length=hop)
     db = np.array(downbeats) if downbeats else np.array([0.0])
@@ -380,7 +372,6 @@ def follow_beats(beats, free, duration):
     b = np.array(beats, dtype=float)
     if len(b) < 8:
         sys.exit("analyze: too few beats found; is this music?")
-    # beat indices from the intervals (a gap of two periods is a missed beat)
     d = np.diff(b)
     idx = np.r_[0, np.cumsum(np.maximum(1, np.round(d / np.median(d))))]
     if free:
@@ -398,8 +389,6 @@ def follow_beats(beats, free, duration):
     return out[(out >= 0) & (out < duration)], "followed"
 
 
-# the most RMS a line through 7 tracked beats leaves where the tempo is smooth: their rounding to 20 ms frames
-# leaves about 5 ms
 SMOOTH = 0.007
 
 
@@ -416,7 +405,6 @@ def smooth_beats(idx, b, n=7):
     def fit(w):
         m = np.zeros(len(idx), bool)
         m[w] = True
-        # (the window's error is over all its beats: one whose line fits after dropping half of them is no fit)
         line = np.polyfit(idx[m], b[m], 1)
         err = float(np.sqrt(np.mean((b[m] - np.polyval(line, idx[m])) ** 2)))
         keep = m & (np.abs(b - np.polyval(line, idx)) < 0.03)
@@ -428,8 +416,8 @@ def smooth_beats(idx, b, n=7):
     for j in range(int(idx[0]), int(idx[-1]) + 1):
         line, err = fit(np.argsort(np.abs(idx - j), kind="stable")[:n])
         if err > SMOOTH:
-            k = int(np.searchsorted(idx, j))  # (the first tracked beat at or after j)
-            end = k + 1 if k < len(idx) and idx[k] == j else k  # (the before window: up to j, with j if tracked)
+            k = int(np.searchsorted(idx, j))
+            end = k + 1 if k < len(idx) and idx[k] == j else k
             lo = min(k, len(idx) - n)
             side = min((fit(np.arange(max(0, end - n), max(n, end))), fit(np.arange(lo, lo + n))), key=lambda f: f[1])
             if side[1] < err:
@@ -458,10 +446,7 @@ def bar_of(beats, downbeats, factor=1.0):
     return [float(x) for x in out[ph::meter]], meter
 
 
-# beats per minute: a doubled tempo stays at or under MAX_BPM; under SLOW_BPM a tracked beat may be half the song's
 MAX_BPM, SLOW_BPM = 200, 82
-# the share of the beats' percussion the midpoints between them must carry for the beats to be doubled: from a
-# backbeat, and (more, as a slow song with even hats carries up to 0.37) under SLOW_BPM
 DOUBLE_SHARE, SLOW_SHARE = 0.36, 0.42
 
 
@@ -553,7 +538,6 @@ def main():
     y, _ = librosa.load(song, sr=SR, mono=True)
     song_dur = len(y) / SR
     duration = prev["duration"] if prev else song_dur
-    # the song on the video's timeline: shifted by the offset, cut or padded to the video's length
     lead = int(round(off * SR))
     y = np.concatenate([np.zeros(max(lead, 0)), y[max(-lead, 0):]])[: int(math.ceil(duration * SR))]
     y = np.pad(y, (0, max(0, int(math.ceil(duration * SR)) - len(y))))
@@ -565,7 +549,6 @@ def main():
         turn = take_turns()
         harm, perc = hpss(y)
         bpm, beats = beat_grid(y, duration, a.free_tempo)
-        # (a free-tempo grid from a shifted song starts at its first beat; a fitted one extends back to 0)
         kick = onsets(band(perc, None, 150), delta=dk, min_gap=0.10)
         snare = onsets(band(perc, 150, 2500), delta=ds, min_gap=0.10)
         hat = onsets(band(perc, 6000, None), delta=dh, min_gap=0.05)
@@ -585,26 +568,22 @@ def main():
             tracked = run_models(song, work)
             n_samples = len(y)
             stems = {k: load_on_timeline(Path(work) / f"{f}.wav", lead, n_samples) for k, f in [("drums", "drums"), ("bass", "bass"), ("other", "other"), ("vocal", "vocals")]}
-        turn = take_turns()  # (after the models, which run for tens of seconds and need no turn)
+        turn = take_turns()
         shift = lambda ts: [t + off for t in ts if 0 <= t + off < duration]
         beats, kind = follow_beats(shift(tracked["beats"]), a.free_tempo, duration)
         kick = onsets(band(stems["drums"], None, 150), delta=dk, min_gap=0.10)
         snare = onsets(band(stems["drums"], 150, 2500), delta=ds, min_gap=0.10)
         hat = onsets(band(stems["drums"], 6000, None), delta=dh, min_gap=0.05)
         vocal = onsets(stems["vocal"], delta=0.3, min_gap=0.12)
-        # the tracker works in 20 ms frames and its beats come late by up to one: move them onto the drum stem's
-        # hits (drum_shift), which measured more consistent on songs with known beats, where drums mark the beats
-        # (--free-tempo keeps the tracked beats where they are, at the tracked octave)
         drums = kind != "tracked" and drums_on(beats, [kick, snare, hat])
         sh = (drum_shift(beats, kick, snare) or 0.0) if drums else 0.0
         beats = shifted(beats, sh, duration)
         factor, lock = 1.0, False
-        if not a.keep_octave:  # (drums is False for tracked beats, which octave() then leaves)
+        if not a.keep_octave:
             beats, factor, lock = octave(beats, kick, snare, hat, drums, False, duration)
         if kind == "followed" and drums:
             beats = [float(x) for x in snap(beats, kick + snare)]
         if lock or factor < 1:
-            # (the tracked downbeats sat on the backbeat, or on beats now dropped: the drums place the one, as --fast)
             downbeats, meter = beats[downbeat_phase(y, stems["other"], beats, kick, snare)::4], 4
         else:
             downbeats, meter = bar_of(beats, [t + sh for t in shift(tracked["downbeats"])], factor)
@@ -661,7 +640,6 @@ def main():
         if "track" in prev:
             doc["track"] = prev["track"]
     else:
-        # (a plain file name: the preview fetches it by URL, where '#', '?' and '%' would break it)
         dest = ROOT / "audio" / re.sub(r"[^A-Za-z0-9._-]+", "-", song.name)
         if dest.resolve() != song:
             dest.parent.mkdir(exist_ok=True)

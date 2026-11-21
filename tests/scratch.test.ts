@@ -1,5 +1,3 @@
-// An export's scratch: partials named after their process, the sweep that removes only dead processes' scratch, and
-// end to end, an export stopped or killed mid-way leaving the file at --out as it was.
 import { afterAll, expect, test } from 'bun:test';
 import { chmodSync, existsSync, lstatSync, statSync, mkdirSync, readdirSync, readFileSync, symlinkSync, utimesSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -7,7 +5,6 @@ import { commit, commitFrames, destOf, ownerGone, ownerOf, partialOf, processNam
 import { fixture, hasChrome, REEL, removeTempDirs, scratchCopy, tempDir } from './helpers';
 
 const layers = scratchCopy('layers');
-// (a scene that throws in render(): its export exits 1)
 const broken = fixture('broken', {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({ size: [320, 180], fps: 10, theme: 'print', timeline: () => [{ id: 'oops', scene: () => import('./scenes/oops'), start: 0, end: 0.5 }] });
@@ -34,7 +31,6 @@ test('an owner is gone when dead, or when its pid now runs another program', () 
   expect(ownerGone({ pid: dead })).toBe(true);
   expect(processName(process.pid)).toMatch(/^bun/);
   expect(ownerGone({ pid: process.pid })).toBe(false);
-  // (a reused pid: alive, but no longer bun; a name that cannot be read keeps the scratch)
   expect(ownerGone({ pid: process.pid }, () => 'zsh')).toBe(true);
   expect(ownerGone({ pid: process.pid }, () => null)).toBe(false);
 });
@@ -49,7 +45,6 @@ test('an output that is a symlink is written through to its target', () => {
   expect(readFileSync(link, 'utf8')).toBe('new');
   expect(destOf(target)).toBe(target);
   expect(destOf(path.join(d, 'missing.mp4'))).toBe(path.join(d, 'missing.mp4'));
-  // (a dangling link is still followed; the old file's permissions carry over)
   const dangling = path.join(d, 'dangling.mp4');
   symlinkSync(path.join(d, 'gone/real.mp4'), dangling);
   expect(destOf(dangling)).toBe(path.join(d, 'gone/real.mp4'));
@@ -87,7 +82,6 @@ test('commitFrames moves a folder of frames over the old ones', () => {
   expect(readFileSync(path.join(d, 'frame_000001.png'), 'utf8')).toBe('new');
 });
 
-/** Start an export to `out`, and once it has written frames, send it `signal`; resolves when it has exited. */
 async function stopMidway(out: string, signal: 'SIGTERM' | 'SIGKILL', env: Record<string, string>) {
   const p = Bun.spawn(['bun', REEL, 'video', '--project', layers.dir, '--samples', '1', '--preset', 'ultrafast', '--size', '360x640', '--out', out, '--force', '--progress'], { stdout: 'ignore', stderr: 'pipe', env: { ...process.env, ...env } });
   const dec = new TextDecoder();
@@ -104,16 +98,12 @@ test.skipIf(!hasChrome)('an export stopped or killed mid-way leaves the previous
   const d = tempDir('reel-test-atomic-'), out = path.join(d, 'video.mp4');
   const env = { REEL_EXPORTS_DIR: tempDir('reel-test-atomic-exports-') };
   writeFileSync(out, 'the previous render');
-  // SIGTERM (what the MCP's video_cancel sends): the export removes its partial itself
   expect(await stopMidway(out, 'SIGTERM', env)).toBe(143);
   expect(readFileSync(out, 'utf8')).toBe('the previous render');
   expect(readdirSync(d)).toEqual(['video.mp4']);
-  // SIGKILL: ffmpeg sees its input end and finishes the partial, never the file at --out
-  // (ffmpeg made the partial before the first frame was counted)
   await stopMidway(out, 'SIGKILL', env);
   expect(readFileSync(out, 'utf8')).toBe('the previous render');
   expect(readdirSync(d).some((n) => /\.partial-\d+-\d+\.mp4$/.test(n))).toBe(true);
-  // a finished export replaces the file and sweeps the dead export's partial
   const p = Bun.spawnSync(['bun', REEL, 'video', '--project', layers.dir, '--samples', '1', '--preset', 'ultrafast', '--size', '360x640', '--to', '0.3', '--out', out, '--force'], { env: { ...process.env, ...env } });
   expect(p.exitCode).toBe(0);
   expect(readdirSync(d)).toEqual(['video.mp4']);

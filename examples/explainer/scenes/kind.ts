@@ -1,5 +1,3 @@
-// One card per transition at the end: an accent panel on one side (so each transition's shape reads at a
-// glance) and the kind's name and config beside it. Params: title, code, side ('left' | 'right').
 import type * as THREE from 'three';
 import { Scene, type Frame, TitleCard, Layer2D, clearRT, LIN, rgba, W, H } from 'reel';
 import { BOTTOM, TOP } from './_script';
@@ -20,7 +18,7 @@ export default class Kind extends Scene {
     this.panel.clear();
     c.fillStyle = rgba('accent');
     c.fillRect(left ? 0 : W - pw, 0, pw, H);
-    this.panel.upload(); // (once: the panel never changes)
+    this.panel.upload();
   }
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
