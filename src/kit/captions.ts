@@ -26,39 +26,51 @@ export interface CaptionsOptions extends ComponentOptions {
 /** A page of captions: its words and when it shows; `joined[k]`: word k follows the one before without a space. */
 export interface CaptionPage { text: string; words: Word[]; joined: boolean[]; start: number; end: number }
 
+const CAP_PADDING = 0.4;
+const LINE_SLACK = 1;
+
 const WIDE = /[\u1100-\u115F\u2E80-\u303E\u3041-\u33FF\u3400-\u4DBF\u4E00-\u9FFF\uA960-\uA97F\uAC00-\uD7A3\uF900-\uFAFF\uFE30-\uFE4F\uFF00-\uFF60\uFFE0-\uFFE6\u{1F300}-\u{1FAFF}\u{20000}-\u{3FFFD}]/u;
 export const textWidth = (s: string) => graphemes(s).reduce((a, g) => a + (WIDE.test(g) ? 2 : 1), 0);
 
-function splitWide(w: Word, max: number): { w: Word; joined: boolean }[] {
-  const total = textWidth(w.w);
-  if (total <= max) return [{ w, joined: false }];
+export interface CaptionMeasure { width: (s: string) => number; space: number; line: number; lines: number }
+
+const charBudget = (maxChars: number): CaptionMeasure => ({ width: textWidth, space: 1, line: maxChars, lines: 1 });
+
+function splitLong(w: Word, m: CaptionMeasure): { w: Word; joined: boolean }[] {
+  const total = m.width(w.w);
+  if (total <= m.line) return [{ w, joined: false }];
   const pieces: string[] = [];
-  let cur = '', cw = 0;
+  let cur = '';
   for (const g of graphemes(w.w)) {
-    const gw = WIDE.test(g) ? 2 : 1;
-    if (cur && cw + gw > max) { pieces.push(cur); cur = ''; cw = 0; }
-    cur += g; cw += gw;
+    if (cur && m.width(cur + g) > m.line) { pieces.push(cur); cur = ''; }
+    cur += g;
   }
   if (cur) pieces.push(cur);
+  const sizes = pieces.map((x) => m.width(x)), sum = sizes.reduce((x, y) => x + y, 0);
   let t = w.start, done = 0;
   return pieces.map((x, i) => {
-    done += textWidth(x);
-    const end = w.start + ((w.end - w.start) * done) / total, piece = { ...w, w: x, start: t, end };
+    done += sizes[i]!;
+    const end = w.start + ((w.end - w.start) * done) / sum, piece = { ...w, w: x, start: t, end };
     t = end;
     return { w: piece, joined: i > 0 };
   });
 }
 
-export function captionPages(words: Words, maxChars: number, hold = 0.5): CaptionPage[] {
+export function captionPages(words: Words, fit: number | CaptionMeasure, hold = 0.5): CaptionPage[] {
+  const m = typeof fit === 'number' ? charBudget(fit) : fit;
   const pages: CaptionPage[] = [];
   for (const line of words.lines) {
-    let cur: { w: Word; joined: boolean }[] = [], width = 0;
+    let cur: { w: Word; joined: boolean }[] = [], rows = 0, row = 0;
     const runs: (typeof cur)[] = [];
-    for (const x of line.words.flatMap((w) => splitWide(w, maxChars))) {
-      const ww = textWidth(x.w.w) + (cur.length && !x.joined ? 1 : 0);
-      if (cur.length && width + ww > maxChars) { runs.push(cur); cur = []; width = 0; }
+    for (const x of line.words.flatMap((w) => splitLong(w, m))) {
+      const ww = m.width(x.w.w), gap = x.joined ? 0 : m.space;
+      if (cur.length && row + gap + ww <= m.line) row += gap + ww;
+      else if (cur.length && rows < m.lines) { rows++; row = ww; }
+      else {
+        if (cur.length) runs.push(cur);
+        cur = []; rows = 1; row = ww;
+      }
       cur.push(cur.length ? x : { ...x, joined: false });
-      width += textWidth(x.w.w) + (cur.length > 1 && !x.joined ? 1 : 0);
     }
     if (cur.length) runs.push(cur);
     for (const r of runs) pages.push({ text: r.map((x, k) => (k && !x.joined ? ' ' : '') + x.w.w).join(''), words: r.map((x) => x.w), joined: r.map((x) => x.joined), start: r[0]!.w.start, end: r.at(-1)!.w.end + hold });
@@ -66,6 +78,12 @@ export function captionPages(words: Words, maxChars: number, hold = 0.5): Captio
   pages.sort((a, b) => a.start - b.start);
   for (let i = 0; i + 1 < pages.length; i++) pages[i]!.end = Math.min(pages[i]!.end, pages[i + 1]!.start);
   return pages;
+}
+
+function measureIn(font: string): (s: string) => number {
+  const c = new OffscreenCanvas(1, 1).getContext('2d')!;
+  c.font = font;
+  return (s) => c.measureText(s).width;
 }
 
 export class Captions extends HtmlComponent {
@@ -83,7 +101,7 @@ export class Captions extends HtmlComponent {
       html: `<div class="frame"><div class="page"></div></div>`,
       css: `.frame { position: absolute; inset: 0; display: grid; align-content: ${align}; justify-items: center; text-align: center; }
         .page { max-width: 100%; font-family: ${o.font ? `'${o.font}'` : 'Archivo'}; font-weight: ${o.weight ?? 600}; font-size: ${size}px; line-height: 1.45; color: ${cssColor(o.color ?? 'fg')}; text-wrap: balance; }
-        .cap { ${o.panel === false ? '' : `background: color-mix(in srgb, var(--bg) ${Math.round((o.panelOpacity ?? 0.82) * 100)}%, transparent);`} padding: .12em .4em; border-radius: .18em;
+        .cap { ${o.panel === false ? '' : `background: color-mix(in srgb, var(--bg) ${Math.round((o.panelOpacity ?? 0.82) * 100)}%, transparent);`} padding: .12em ${CAP_PADDING}em; border-radius: .18em;
           -webkit-box-decoration-break: clone; box-decoration-break: clone; }
         .w { opacity: ${style === 'highlight' ? 0.45 : 1}; }
         .w.said { opacity: 1; }
@@ -94,8 +112,11 @@ export class Captions extends HtmlComponent {
         @keyframes capPop { from { opacity: 0; transform: scale(.92); } }`,
     });
     this.o = o;
-    const perLine = Math.max(8, Math.floor(this.box.w / (size * 0.52)));
-    this.pages = style === 'word' ? o.words.words.map((w, i, a) => ({ text: w.w, words: [w], joined: [false], start: w.start, end: Math.min(w.end + (o.hold ?? 0.25), a[i + 1]?.start ?? Infinity) })) : captionPages(o.words, perLine * lines, o.hold ?? 0.5);
+    if (style === 'word') this.pages = o.words.words.map((w, i, a) => ({ text: w.w, words: [w], joined: [false], start: w.start, end: Math.min(w.end + (o.hold ?? 0.25), a[i + 1]?.start ?? Infinity) }));
+    else {
+      const width = measureIn(`${o.weight ?? 600} ${size}px ${o.font ? `'${o.font}'` : 'Archivo'}`);
+      this.pages = captionPages(o.words, { width, space: width(' '), line: this.box.w - CAP_PADDING * 2 * size - LINE_SLACK, lines }, o.hold ?? 0.5);
+    }
   }
 
   pageAt(t: number) {

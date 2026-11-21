@@ -36,6 +36,28 @@ describe('helpers', () => {
     expect(mixed.map((p) => p.text)).toEqual(['Say', '日本語日本語', '日本語日本語', 'now']);
   });
 
+  test('captionPages with a measure fills lines lines of the measured width, however wide the letters', () => {
+    const width = (s: string) => [...s].reduce((a, ch) => a + (ch === ' ' ? 0.3 : /[A-Z]/.test(ch) ? 0.8 : ch === 'i' ? 0.25 : 0.5), 0);
+    const measure = { width, space: 0.3, line: 10, lines: 2 };
+    const rows = (text: string) => {
+      let n = 1, row = 0;
+      for (const w of text.split(' ')) {
+        if (row && row + 0.3 + width(w) <= measure.line) row += 0.3 + width(w);
+        else if (row) { n++; row = width(w); } else row = width(w);
+      }
+      return n;
+    };
+    for (const text of ['WIDE CAPS MAKE WORDS WITH HEAVY LETTERS SPREAD OVER MANY MORE LINES THAN USUAL', 'iii ii iiii i iii ii iiii iii i ii iii iiii ii i iii ii iiii i ii iii']) {
+      const pages = captionPages(Words.timed([{ text, start: 0, end: 10 }], 1), measure);
+      expect(pages.map((p) => p.text).join(' ')).toBe(text);
+      for (const p of pages) expect(rows(p.text)).toBeLessThanOrEqual(2);
+      for (let i = 0; i + 1 < pages.length; i++) expect(rows(`${pages[i]!.text} ${pages[i + 1]!.words[0]!.w}`)).toBeGreaterThan(2);
+    }
+    const caps = captionPages(Words.timed([{ text: 'MMMM MMMM MMMM MMMM MMMM MMMM', start: 0, end: 6 }], 1), measure);
+    const thin = captionPages(Words.timed([{ text: 'iiii iiii iiii iiii iiii iiii', start: 0, end: 6 }], 1), measure);
+    expect(caps.length).toBeGreaterThan(thin.length);
+  });
+
   test('clock and formatNumber are the same on every machine', () => {
     expect(clock(0)).toBe('0:00');
     expect(clock(65.99)).toBe('1:05');

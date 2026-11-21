@@ -2,7 +2,7 @@ export { HtmlComponent, motionAt, progressOf, lineWidth, safeBox, windowOf, SAFE
 export { inset, split, grid, align, center, type Inset, type Align } from './layout';
 export { TextBlock, TitleCard, LowerThird, fitText, type TextBlockOptions, type TitleCardOptions, type LowerThirdOptions } from './text';
 export { KineticText, kineticPieces, type KineticTextOptions, type KineticEntrance } from './kinetic';
-export { Captions, captionPages, textWidth, type CaptionsOptions, type CaptionPage } from './captions';
+export { Captions, captionPages, textWidth, type CaptionsOptions, type CaptionPage, type CaptionMeasure } from './captions';
 export { ImageBox, svgSize, drawPicture, kenBurnsAt, type ImageBoxOptions, type Framing, type Picture } from './image';
 export { VideoClip, type VideoClipOptions } from './video';
 export { LottieBox, type LottieBoxOptions } from './lottie';
