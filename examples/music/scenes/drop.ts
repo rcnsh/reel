@@ -1,5 +1,3 @@
-// The drop: sixteen tiles, one lit per beat in order from the drop's first beat, flaring with the kick, and the bar and
-// beat counted in type.
 import type * as THREE from 'three';
 import { W, H, Scene, type Frame, FSPass, HtmlLayer } from 'reel';
 
@@ -13,7 +11,7 @@ export default class Drop extends Scene {
       if (all(greaterThanEqual(g, vec2(0.0))) && all(lessThan(g, vec2(1.0)))) {
         vec2 c = floor(g * 4.0), f = fract(g * 4.0);
         float idx = c.x + (3.0 - c.y) * 4.0;
-        float age = mod(beat - idx, 16.0);                     // beats since this tile was lit
+        float age = mod(beat - idx, 16.0);
         float lit = exp(-age * 1.4) * (0.6 + 0.4 * kick);
         float inside = step(0.06, f.x) * step(f.x, 0.94) * step(0.06, f.y) * step(f.y, 0.94);
         col = mix(C_BG, mix(C_ACCENT_LO, C_ACCENT_HI, lit), inside * (0.25 + 0.75 * lit));
@@ -29,7 +27,7 @@ export default class Drop extends Scene {
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
     const u = this.grid.u;
-    u.beat!.value = Math.floor(f.beat + 1e-3) - Math.round(this.ctx.audio.beatAt(f.start)); // beats since the drop began
+    u.beat!.value = Math.floor(f.beat + 1e-3) - Math.round(this.ctx.audio.beatAt(f.start));
     u.kick!.value = f.a.kick;
     u.snare!.value = f.a.snare;
     this.grid.render(this.ctx.renderer, out);

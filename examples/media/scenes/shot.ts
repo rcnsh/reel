@@ -1,5 +1,3 @@
-// The clip behind everything, dimmed and pushed in slowly; over it an SVG mark, a Lottie badge with a line under it, and the
-// clip again in an inset at half speed, looped, its frames blended so the slow motion stays smooth.
 import type * as THREE from 'three';
 import { Scene, type Frame, VideoClip, ImageBox, LottieBox, TextBlock, clearRT, W } from 'reel';
 
@@ -20,7 +18,6 @@ export default class Shot extends Scene {
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
     const r = this.ctx.renderer;
-    // (the clip dimmed over black, so white type reads on every part of it)
     clearRT(r, out, [0, 0, 0], 1);
     this.clip.draw(r, out, f, { opacity: 0.72 });
     this.mark.draw(r, out, f);

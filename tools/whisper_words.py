@@ -1,12 +1,3 @@
-# Word timestamps for tools/align.ts: whisper_words.py <jobs.json>
-#
-# jobs.json is a list of {"audio": <16 kHz mono wav>, "out": <json path>, "script": <text, may be empty>}; each out
-# gets a list of {"w", "s", "e"}. The model loads once for every job.
-#
-# Each recording is transcribed in chunks of about CHUNK seconds, cut in the longest pause near each boundary, each
-# chunk on its own (no text carried over from the previous one). One pass over the whole file lets a mishearing
-# carry forward and squash later lines; chunks contain it. The prompt is the script's vocabulary (names and
-# figures), so they come back spelled our way.
 
 import os, re, sys, json, wave, numpy as np
 from faster_whisper import WhisperModel

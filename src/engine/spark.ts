@@ -1,6 +1,3 @@
-// The spark: a point of light with a white-hot core, a glow and sputtering particles, for a pen or fuse head
-// that moves along a path. Coloured from the theme's accent and accentHi. Deterministic in t, so it is safe
-// under motion-blur sampling. From upstream's scenes/_motifs.ts.
 import { LineBatch } from './lines';
 import { LIN, rgba } from './palette';
 import { frameIdx, hash, TAU } from './util';
@@ -34,7 +31,7 @@ export function sparkParticles(lb: LineBatch, t: number, headAt: (t: number) => 
     if (age > lf) continue;
     const vx = Math.cos(a) * sp, vy = Math.sin(a) * sp - speed * 0.3;
     const x = h.x + vx * age, y = h.y + vy * age + 0.5 * g * age * age;
-    const dtb = 0.018; // streak length in time
+    const dtb = 0.018;
     const x0 = h.x + vx * Math.max(0, age - dtb), y0 = h.y + vy * Math.max(0, age - dtb) + 0.5 * g * Math.max(0, age - dtb) ** 2;
     const k = 1 - age / lf;
     const heat = k * k;
@@ -47,15 +44,12 @@ export function sparkParticles(lb: LineBatch, t: number, headAt: (t: number) => 
   }
 }
 
-/** The spark head: a white-hot core and a halo in the accent (draw after the line it drags). 2D LineBatch. */
 export function sparkHead(lb: LineBatch, x: number, y: number, t: number, scale = 1, intensity = 1) {
   const flick = 0.85 + 0.15 * Math.sin(t * 91.7) * Math.sin(t * 57.3);
   const I = intensity * flick;
-  // halo: a few concentric short segments (dots) with decreasing intensity
   lb.seg2(x, y, x + 0.01, y, 26 * scale, [LIN.accent![0] * 0.5 * I, LIN.accent![1] * 0.5 * I, LIN.accent![2] * 0.5 * I], 0.35);
   lb.seg2(x, y, x + 0.01, y, 12 * scale, [LIN.accentHi![0] * 2.5 * I, LIN.accentHi![1] * 2.5 * I, LIN.accentHi![2] * 2.5 * I], 0.8);
   lb.seg2(x, y, x + 0.01, y, 5 * scale, [6 * I, 5 * I, 4 * I], 1);
-  // four tiny rays
   for (let i = 0; i < 4; i++) {
     const a = i * (TAU / 4) + t * 3 + 0.4;
     const r = (9 + 5 * hash(frameIdx(t) >> 1, i)) * scale;
@@ -63,7 +57,6 @@ export function sparkHead(lb: LineBatch, x: number, y: number, t: number, scale 
   }
 }
 
-/** Canvas2D version of the spark head (for scenes drawing in 2D layers). Use with additive-ish bloom. */
 export function sparkHead2D(c: CanvasRenderingContext2D, x: number, y: number, t: number, scale = 1) {
   const g = c.createRadialGradient(x, y, 0, x, y, 22 * scale);
   g.addColorStop(0, 'rgba(255,250,240,1)');

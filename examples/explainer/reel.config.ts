@@ -1,11 +1,6 @@
-// A silent 16:9 explainer built from the component kit: a title card, text beside an image, a bar chart and a
-// counter, a line chart, a code block, then a card per transition, each clip coming in with a different
-// transition (every kind, an eased one and a custom GLSL one), and captions, a progress bar and a timer on a
-// track above them all. No narration: the captions' times are in scenes/_script.ts.
 import { defineVideo, sequence } from 'reel/config';
 
 const kind = () => import('./scenes/kind');
-// a custom transition: diagonal bands that each wipe across in turn
 const BANDS = `float x = fract((uv.x * ratio + uv.y) * bands / (ratio + 1.0));
 float m = smoothstep(x - 0.04, x, p * 1.04);
 return mix(getFromColor(uv), getToColor(uv), m);`;
@@ -15,8 +10,6 @@ export default defineVideo({
   fps: 30,
   theme: 'neutral',
   timeline: () => {
-    // each clip after the first comes in over the last 0.4 s of the one before (the dip into the code, and the
-    // iris, clock and custom transitions over 0.6 s, the whip over 0.3 s)
     const story = sequence([
       { id: 'title', scene: () => import('./scenes/title'), dur: 4.4 },
       { id: 'light', scene: () => import('./scenes/light'), dur: 5, transition: 'slide' },

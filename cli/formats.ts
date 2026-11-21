@@ -1,6 +1,3 @@
-// What `reel video` writes: the output formats, which one a command line means (--format, else the --out
-// extension), what each needs from the page (the readback, the bits per channel, a transparent background) and the
-// ffmpeg command that encodes it. Pure (no I/O), so the CLI and its tests share it.
 import path from 'node:path';
 import { yuvFits, type Pixels } from '../src/engine/pixels';
 import { int, num, scaleFits, UsageError, type Values } from './args';
@@ -10,17 +7,11 @@ export type FormatId = 'h264' | 'hevc' | 'prores' | 'prores4444' | 'webm' | 'gif
 
 export interface FormatSpec {
   id: FormatId;
-  /** The file extension a default output gets (and that --out infers it from). */
   ext: string;
-  /** One line for --help and errors. */
   about: string;
-  /** A video file, a short loop (no sound, capped rate and size) or a folder of numbered images. */
   kind: 'video' | 'loop' | 'sequence';
-  /** 'always': transparent unless --opaque; 'option': with --alpha; 'never'. */
   alpha: 'always' | 'option' | 'never';
-  /** The sound codec the container carries (null: no sound). */
   audio: string[] | null;
-  /** The soft subtitle codec the container carries (null: none). */
   subtitles: 'mov_text' | 'webvtt' | null;
 }
 
@@ -40,14 +31,12 @@ export const FORMATS: Record<FormatId, FormatSpec> = {
 
 const BY_EXT: Record<string, FormatId> = { '.mp4': 'h264', '.m4v': 'h264', '.mov': 'prores', '.webm': 'webm', '.gif': 'gif', '.webp': 'webp', '.png': 'png', '.jpg': 'jpeg', '.jpeg': 'jpeg', '.exr': 'exr' };
 
-/** The format a command line means: --format, else the --out extension, else H.264. */
 export function formatOf(format: string | undefined, out: string | undefined): FormatSpec {
   if (format !== undefined) {
     const f = FORMATS[format as FormatId];
     if (!f || !Object.prototype.hasOwnProperty.call(FORMATS, format)) throw new UsageError(`--format ${format}: expected one of ${Object.keys(FORMATS).join(', ')}`);
     if (out) {
       const ext = path.extname(out).toLowerCase(), want = BY_EXT[ext] ? FORMATS[BY_EXT[ext]!].ext : ext;
-      // (a file without an extension gives ffmpeg no container to write, and the mix none to carry the sound)
       if (f.kind !== 'sequence' && !ext) throw new UsageError(`--out ${out}: a ${f.id} file needs its extension, ${f.ext}`);
       if (f.kind !== 'sequence' && want !== f.ext && !(f.ext === '.mp4' && ext === '.m4v')) throw new UsageError(`--out ${out}: a ${f.id} file is ${f.ext}`);
       if (f.kind === 'sequence' && ext && ext !== f.ext && !(f.id === 'jpeg' && ext === '.jpeg')) throw new UsageError(`--out ${out}: ${f.id} frames are ${f.ext} files`);
@@ -62,47 +51,31 @@ export function formatOf(format: string | undefined, out: string | undefined): F
   return FORMATS.h264;
 }
 
-/** What the encoder is asked for beyond the format. */
 export interface EncodeOpts {
   crf?: number;
   preset?: string;
-  /** Extra x264 or x265 parameters (key=value:key=value). */
   params?: string;
   chroma?: '420' | '444';
   depth?: 8 | 10;
-  /** A transparent background (formats that can carry it). */
   alpha?: boolean;
-  /** Loops: the highest frame rate and the longest side in px. */
   maxFps?: number;
   maxSize?: number;
-  /** JPEG and WebP quality, 1 to 100. */
   quality?: number;
-  /** The draft tier's encoder: WebCodecs H.264 in the page, or the raw pipe into VideoToolbox (macOS) or x264 ultrafast. */
   draft?: 'webcodecs' | 'videotoolbox' | 'x264';
-  /** Text for the file's comment tag (drafts say they are drafts). */
   comment?: string;
 }
 
-/** What the page is opened with and reads back for a format. */
 export interface Plan {
   format: FormatSpec;
   pixels: Pixels;
-  /** Bits per channel the final pass renders at (the page's ?bits=). */
   bits: 8 | 10 | 16;
   alpha: boolean;
-  /** The frame rate rendered (a loop's may be capped below the project's). */
   fps: number;
-  /** ffmpeg's rawvideo pixel format for `pixels`. */
   rawFormat: string;
 }
 
 const RAW: Record<Pixels, string> = { rgb8: 'rgb24', rgba8: 'rgba', rgb16: 'rgb48le', rgba16: 'rgba64le', linear: 'rgbaf16le', yuv420: 'yuv420p' };
 
-/**
- * The plan for a format and its options at the project's frame rate and output size (physical px). Throws a
- * UsageError for options that do not apply. 8-bit 4:2:0 formats read back yuv420p converted on the GPU when the size
- * allows: half the bytes of rgb24 to carry from the page.
- */
 export function planOf(f: FormatSpec, o: EncodeOpts, fps: number, size?: [number, number]): Plan {
   if (o.alpha && f.alpha === 'never') throw new UsageError(`--alpha: ${f.id} cannot carry transparency (prores4444, webm, webp, png, png16 and exr can)`);
   if (o.chroma && f.id !== 'h264') throw new UsageError(`--chroma goes with h264 (${f.id} has its own)`);
@@ -121,47 +94,32 @@ export function planOf(f: FormatSpec, o: EncodeOpts, fps: number, size?: [number
   return { format: f, pixels, bits, alpha, fps: Math.min(fps, cap), rawFormat: RAW[pixels] };
 }
 
-/** Where a sequence's frames go: --out as a pattern (`%05d` added before the extension when it has none). */
 export function sequencePattern(out: string, f: FormatSpec) {
   if (/%0?\d*d/.test(path.basename(out))) return out;
   const ext = path.extname(out) || f.ext;
   return path.join(path.dirname(out), `${path.basename(out, path.extname(out))}_%06d${ext}`);
 }
 
-/** The default output for a project folder. */
 export function defaultOut(project: string, f: FormatSpec, draft = false) {
   if (f.kind === 'sequence') return path.join(project, 'out', f.id, `frame${f.ext}`);
   return path.join(project, 'out', `video${draft ? '.draft' : ''}${f.id === 'h264' ? '' : f.id === 'hevc' ? '.hevc' : f.id === 'prores4444' ? '.4444' : ''}${f.ext}`);
 }
 
-// BT.709 tags for every YUV stream reel writes (SDR, limited range)
 const TAGS709 = ['-color_range', 'tv', '-colorspace', 'bt709', '-color_primaries', 'bt709', '-color_trc', 'bt709'];
 const SRGB = 'setparams=color_trc=iec61966-2-1:color_primaries=bt709';
 const TAG709 = 'setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709';
-/**
- * Full-range RGB to limited-range BT.709 YUV: chroma averaged over its block, accurate rounding, tagged. `gain` is
- * what this ffmpeg's swscale multiplies 16-bit RGB by on the way to YUV (ffmpegDeepGain): divided out first, so the
- * deep formats come out at the levels the page rendered.
- */
 export const toYuv709 = (pixFmt: string, gain = 1) => `${Math.abs(gain - 1) > 1e-5 ? `lutrgb=${['r', 'g', 'b'].map((c) => `${c}=val*${(1 / gain).toFixed(7)}`).join(':')},` : ''}scale=in_range=pc:out_range=tv:out_color_matrix=bt709:flags=area+accurate_rnd+full_chroma_int,format=${pixFmt},setparams=range=tv:colorspace=bt709:color_primaries=bt709:color_trc=bt709`;
 
 export interface FfmpegInput { width: number; height: number; fps: number; out: string; audio?: { file: string; from: number; duration: number } | null; startNumber?: number; webpFrames?: string;
-  /** Whether this ffmpeg tracks alpha modes (8 and later), which EXR's premultiplied alpha must name; default true. */
   alphaModes?: boolean;
-  /** What swscale multiplies 16-bit RGB by on its way to YUV (ffmpegDeepGain); default 1. */
   deepGain?: number }
 
-/**
- * The ffmpeg command that reads raw frames (bottom-up, `plan.rawFormat`) on stdin and writes the format, with the
- * project's sound when the container carries it. Loops and sequences take no sound.
- */
 export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] {
   const f = plan.format;
   const a = ['ffmpeg', '-y', '-loglevel', 'error', '-f', 'rawvideo', '-pix_fmt', plan.rawFormat, '-s', `${i.width}x${i.height}`, '-r', String(i.fps), '-i', 'pipe:0'];
   const sound = !!i.audio && !!f.audio;
   if (sound) a.push('-ss', String(i.audio!.from), '-t', String(i.audio!.duration), '-i', i.audio!.file);
   const v: string[] = [];
-  // (frames already converted to yuv420p on the GPU are only tagged, and repacked for an encoder that wants nv12)
   const deep = plan.pixels === 'rgb16' || plan.pixels === 'rgba16' ? i.deepGain ?? 1 : 1;
   const yuv = (pix: string) => (plan.pixels === 'yuv420' ? `${pix === 'yuv420p' ? '' : `format=${pix},`}${TAG709}` : toYuv709(pix, deep));
   switch (f.id) {
@@ -186,26 +144,22 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
       v.push('-vf', `vflip,${toYuv709('yuv422p10le', deep)}`, '-c:v', 'prores_ks', '-profile:v', '3', '-vendor', 'apl0', '-pix_fmt', 'yuv422p10le', ...TAGS709);
       break;
     case 'prores4444': {
-      // (straight alpha in the alpha plane; ProRes 4444 is read as straight by editors and ffmpeg)
       const pix = plan.alpha ? 'yuva444p10le' : 'yuv444p10le';
       v.push('-vf', `vflip,${toYuv709(pix, deep)}`, '-c:v', 'prores_ks', '-profile:v', '4', '-vendor', 'apl0', '-pix_fmt', pix, ...(plan.alpha ? ['-alpha_bits', '16'] : []), ...TAGS709);
       break;
     }
     case 'webm': {
-      // (VP9 keeps alpha as a second stream libvpx encodes from yuva420p; browsers composite it as straight alpha)
       const pix = plan.alpha ? 'yuva420p' : 'yuv420p';
       v.push('-vf', `vflip,${yuv(pix)}`, '-c:v', 'libvpx-vp9', '-pix_fmt', pix, '-crf', String(o.crf ?? 24), '-b:v', '0', '-row-mt', '1', '-deadline', 'good', '-cpu-used', '2', ...(plan.alpha ? ['-auto-alt-ref', '0'] : []), ...TAGS709);
       break;
     }
     case 'gif': {
-      // one palette for the whole loop from the frames' differences, Sierra dither, only the changed rectangle per frame
       const size = loopScale(i.width, i.height, o.maxSize ?? 640);
       v.push('-vf', `vflip${size},split[a][b];[a]palettegen=max_colors=256:stats_mode=diff[p];[b][p]paletteuse=dither=sierra2_4a:diff_mode=rectangle`, '-loop', '0');
       break;
     }
     case 'webp': {
       const size = loopScale(i.width, i.height, o.maxSize ?? 1080);
-      // (an ffmpeg without libwebp writes PNG frames that img2webp, from libwebp's tools, then assembles: webpArgs)
       if (i.webpFrames) {
         a.push('-vf', `vflip${size}`, '-c:v', 'png', '-pix_fmt', plan.alpha ? 'rgba' : 'rgb24', path.join(i.webpFrames, '%06d.png'));
         return a;
@@ -214,19 +168,15 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
       break;
     }
     case 'png':
-      // (tagged sRGB: the PNG gets its sRGB, gAMA and cHRM chunks)
       v.push('-vf', `vflip,${SRGB}`, '-c:v', 'png', '-pix_fmt', plan.alpha ? 'rgba' : 'rgb24', '-start_number', String(i.startNumber ?? 0));
       break;
     case 'png16':
       v.push('-vf', `vflip,${SRGB}`, '-c:v', 'png', '-pix_fmt', plan.alpha ? 'rgba64be' : 'rgb48be', '-start_number', String(i.startNumber ?? 0));
       break;
     case 'jpeg':
-      // (JPEG is full-range BT.601 YCbCr by its standard)
       v.push('-vf', 'vflip,scale=in_range=pc:out_range=pc:out_color_matrix=bt601:flags=accurate_rnd+full_chroma_int,format=yuvj444p', '-c:v', 'mjpeg', '-q:v', String(jpegQ(o.quality ?? 92)), '-start_number', String(i.startNumber ?? 0));
       break;
     case 'exr':
-      // (the linear frame's alpha is premultiplied, as EXR's is: said so, ffmpeg converts nothing; an ffmpeg older
-      // than 8 has no alpha modes and passes the values through as they are)
       v.push('-vf', `${i.alphaModes === false ? '' : 'setparams=alpha_mode=premultiplied,'}format=${plan.alpha ? 'gbrapf32le' : 'gbrpf32le'},vflip`, '-c:v', 'exr', '-format', '1', '-compression', '3', '-start_number', String(i.startNumber ?? 0));
       break;
   }
@@ -238,23 +188,16 @@ export function ffmpegArgs(plan: Plan, o: EncodeOpts, i: FfmpegInput): string[] 
   return a;
 }
 
-/** A loop's downscale to at most `max` px on its long side (an empty string when it fits). */
 function loopScale(w: number, h: number, max: number) {
   if (Math.max(w, h) <= max) return '';
   const k = max / Math.max(w, h), even = (x: number) => Math.max(2, 2 * Math.round((x * k) / 2));
   return `,scale=${even(w)}:${even(h)}:flags=lanczos`;
 }
 
-/** Animated WebP's default quality: at 80 flat dark areas (a night sky, a gradient) show blocks. */
 export const WEBP_QUALITY = 88;
 
-/** ffmpeg's mjpeg -q:v (2 best .. 31) for a quality of 1 to 100. */
 export const jpegQ = (q: number) => Math.max(2, Math.min(31, Math.round(2 + ((100 - q) / 99) * 29)));
 
-/**
- * img2webp's command for `n` PNG frames in `dir` at `fps`: each frame's duration in whole milliseconds, rounded so
- * the running total stays on the frame clock (a 30 fps loop alternates 33 and 34 ms).
- */
 export function webpArgs(dir: string, n: number, fps: number, o: EncodeOpts, out: string) {
   const a = ['img2webp', '-loop', '0', '-lossy', '-q', String(o.quality ?? WEBP_QUALITY), '-m', '4'];
   for (let k = 0; k < n; k++) {
@@ -265,11 +208,6 @@ export function webpArgs(dir: string, n: number, fps: number, o: EncodeOpts, out
   return a;
 }
 
-/**
- * The flags of a `reel video` with the project's export defaults (the config's `export`) under them: a flag given
- * wins (`--audio` over `noaudio`); crf and preset apply to h264 and hevc only (VP9's crf is another scale), and
- * samples not to a draft (one sample always) nor beside the adaptive flags. A bad value is an error naming the config.
- */
 export function withExportDefaults(v: Values, d: ExportDefaults | undefined, f: FormatSpec): Values {
   if (!d) return v;
   const bad = (k: string, want: string) => new UsageError(`reel.config.ts export.${k} ${JSON.stringify((d as Record<string, unknown>)[k])}: expected ${want}`);
@@ -289,7 +227,6 @@ export function withExportDefaults(v: Values, d: ExportDefaults | undefined, f: 
 
 const PRESETS = ['ultrafast', 'superfast', 'veryfast', 'faster', 'fast', 'medium', 'slow', 'slower', 'veryslow', 'placebo'];
 
-/** The encoder options of `reel video`'s flags, checked against the format. */
 export function encodeOptsOf(v: Values, f: FormatSpec): EncodeOpts {
   const o: EncodeOpts = {};
   if (v.crf !== undefined) {
@@ -322,11 +259,6 @@ export function encodeOptsOf(v: Values, f: FormatSpec): EncodeOpts {
   return o;
 }
 
-/**
- * The draft tier's encoder: H.264 encoded in the page with WebCodecs (fastest: no raw frames leave the page; hardware
- * where the browser has it), falling back to the raw pipe into VideoToolbox or x264 ultrafast when the browser cannot.
- * REEL_DRAFT_ENCODER (webcodecs, videotoolbox or x264) picks one.
- */
 export function draftEncoder(has: (encoder: string) => boolean = hasFfmpegEncoder): 'webcodecs' | 'videotoolbox' | 'x264' {
   const env = process.env.REEL_DRAFT_ENCODER;
   if (env === 'webcodecs' || env === 'x264') return env;
@@ -334,14 +266,8 @@ export function draftEncoder(has: (encoder: string) => boolean = hasFfmpegEncode
   return 'webcodecs';
 }
 
-/**
- * A draft's scale for a frame of w x h logical px: half size (the same layout) when the half frame still packs into
- * the readback (its width a multiple of 4 and its height even: a frame width that is a multiple of 8 and a height that
- * is a multiple of 4, as 1920x1080 and 1080x1920 are), else full size (1080x1350 and 1100x1100 are not).
- */
 export const draftScale = (w: number, h: number): 0.5 | 1 => (scaleFits(w, h, 0.5) ? 0.5 : 1);
 
-/** A draft's file name: `.draft` before the extension (added when missing), so a draft is never taken for a final. */
 export function draftName(out: string, draft: boolean) {
   if (!draft || /\.draft\.[^./]+$/.test(out)) return out;
   const ext = path.extname(out);
@@ -350,24 +276,14 @@ export function draftName(out: string, draft: boolean) {
 
 const encoders = new Set<string>();
 let alphaModes: boolean | undefined;
-/** Whether the ffmpeg on PATH tracks alpha modes (its setparams filter has alpha_mode: ffmpeg 8 and later). */
 export function ffmpegHasAlphaModes() {
   alphaModes ??= Bun.spawnSync(['ffmpeg', '-hide_banner', '-h', 'filter=setparams'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString().includes('alpha_mode');
   return alphaModes;
 }
 
 let deepGain: number | undefined;
-/** The grey the gain is measured on (16-bit), and the limited-range 16-bit luma an exact conversion gives it. */
 export const GAIN_GREY = 60000, GAIN_Y = 4096 + (56064 * GAIN_GREY) / 65535;
-/** The gain a measured luma shows: how far the conversion stretched the grey's distance from black. */
 export const deepGainOf = (y: number) => (y > 4096 ? (y - 4096) / (GAIN_Y - 4096) : 1);
-/**
- * What the ffmpeg on PATH multiplies 16-bit RGB by when swscale converts it to limited-range YUV: measured once per
- * process on a grey of GAIN_GREY, through the very conversion the deep formats use (toYuv709, at 16 bits). Builds
- * scale 16-bit input as if its full scale were 255 x 256 rather than 65535 (1.0039, which brightens a 10-bit export by
- * up to 3.4 codes): Homebrew's ffmpeg 9 on every path, a static ffmpeg 7 only on the way to limited range, so the
- * measurement takes that way. The deep formats divide it out first.
- */
 export function ffmpegDeepGain() {
   if (deepGain === undefined) {
     const grey = new Uint8Array(16 * 16 * 6);
@@ -378,7 +294,6 @@ export function ffmpegDeepGain() {
   return deepGain;
 }
 
-/** Whether this machine's ffmpeg has an encoder (`ffmpeg -encoders`, asked once per process). */
 export function hasFfmpegEncoder(name: string) {
   if (!encoders.size) {
     const out = Bun.spawnSync(['ffmpeg', '-hide_banner', '-encoders'], { stdout: 'pipe', stderr: 'ignore' }).stdout.toString();

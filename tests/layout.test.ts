@@ -1,4 +1,3 @@
-// The kit's layout helpers (boxes cut from a box) and the drawn-on lines' geometry: pure maths.
 import { describe, expect, test } from 'bun:test';
 import { align, anchor, arrowTrack, center, drawShares, grid, inset, pointAlong, split, svgLength, type Box } from '../src/kit';
 
@@ -23,13 +22,11 @@ describe('layout', () => {
     expect(col.map((c) => c.h)).toEqual([180, 180, 180]);
     expect(col.map((c) => c.y)).toEqual([50, 260, 470]);
     expect(split(B, 'h', [1])).toEqual([B]);
-    // shares are relative, so an explainer's hand-made 0.56 / 0.26 split of the frame comes out the same
     const W = 1920, [chart, note] = split({ x: W * 0.08, y: 0, w: W * 0.86, h: 10 }, 'h', [0.56, 0.26], W * 0.04);
     expect(chart!.w).toBeCloseTo(W * 0.56, 9);
     expect(note!.x).toBeCloseTo(W * 0.68, 9);
     expect(note!.w).toBeCloseTo(W * 0.26, 9);
     expect(() => split(B, 'h', [1, -1])).toThrow(/shares/);
-    // gaps wider than the box allows shrink: every part stays inside it
     const tight = split({ x: 0, y: 0, w: 100, h: 50 }, 'h', 3, 80);
     expect(tight.map((p) => p.x)).toEqual([0, 50, 100]);
     expect(tight.map((p) => p.w)).toEqual([0, 0, 0]);
@@ -77,7 +74,6 @@ describe('drawn lines', () => {
     expect(anchor(B, 'center')).toEqual({ x: 600, y: 350, nx: 0, ny: 0 });
     expect(anchor(B, 'auto', { x: 2000, y: 400 })).toMatchObject({ x: 1100, y: 350 });
     expect(anchor(B, 'auto', { x: 600, y: 0 })).toMatchObject({ x: 600, y: 50 });
-    // (measured in half sizes: a point below a wide box's corner is met on its bottom)
     expect(anchor(B, 'auto', { x: 1200, y: 1000 })).toMatchObject({ x: 600, y: 650 });
   });
 
@@ -91,7 +87,6 @@ describe('drawn lines', () => {
     expect(mid.angle).toBeCloseTo(Math.atan2(400, 300), 9);
     const c = arrowTrack({ x: 0, y: 0 }, { x: 400, y: 0 }, 0.25);
     expect(c.length).toBeGreaterThan(400);
-    // running right on screen (y down), its left is up: the bow's middle is above the line by curve x length
     expect(pointAlong(c, c.length / 2).y).toBeCloseTo(-100, 0);
     expect(pointAlong(c, 0).angle).toBeLessThan(0);
     expect(pointAlong(c, c.length).angle).toBeGreaterThan(0);

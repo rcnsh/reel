@@ -26,7 +26,6 @@ describe('util', () => {
     expect(prog(5, 0, 10)).toBe(0.5);
     expect(prog(-5, 0, 10)).toBe(0);
     expect(prog(5, 0, 10, ease.inQuad)).toBe(0.25);
-    // an empty range is a step at a
     expect(prog(1.9, 2, 2)).toBe(0);
     expect(prog(2, 2, 2)).toBe(1);
     expect(prog(3, 2, 2, ease.outCubic)).toBe(1);
@@ -36,10 +35,9 @@ describe('util', () => {
     const k: [number, number, ((t: number) => number)?][] = [[0, 0], [1, 10, ease.linear], [2, 0]];
     expect(keys(-1, k)).toBe(0);
     expect(keys(0.5, k)).toBe(5);
-    expect(keys(1.5, k)).toBe(5); // inOutCubic at the midpoint
+    expect(keys(1.5, k)).toBe(5);
     expect(keys(9, k)).toBe(0);
     expect(keys(1, [])).toBe(0);
-    // two keys at one time: a step; out of order: an error naming the keys
     expect(keys(0.99, [[0, 0], [1, 0], [1, 10], [2, 10]])).toBe(0);
     expect(keys(1.01, [[0, 0], [1, 0], [1, 10], [2, 10]])).toBe(10);
     expect(() => keys(3, [[0, 0], [2, 1], [1, 5]])).toThrow('keys: key 2 at 1 comes before key 1 at 2');
@@ -49,7 +47,7 @@ describe('util', () => {
   test('springStep and pulse', () => {
     expect(springStep(0)).toBe(0);
     expect(springStep(10)).toBeCloseTo(1, 3);
-    expect(Math.max(...Array.from({ length: 100 }, (_, i) => springStep(i / 100)))).toBeGreaterThan(1); // overshoots
+    expect(Math.max(...Array.from({ length: 100 }, (_, i) => springStep(i / 100)))).toBeGreaterThan(1);
     expect(pulse(1, 2)).toBe(0);
     expect(pulse(2, 2)).toBe(1);
     expect(pulse(2.12, 2, 0.12)).toBeCloseTo(0.5, 9);
@@ -63,17 +61,15 @@ describe('util', () => {
       expect(springStep(0, 4, d)).toBe(0);
       expect(springStep(4, 4, d)).toBeCloseTo(1, 3);
       if (d >= 1) {
-        for (let i = 1; i < v.length; i++) expect(v[i]!).toBeGreaterThanOrEqual(v[i - 1]! - 1e-12); // no overshoot, no ringing
+        for (let i = 1; i < v.length; i++) expect(v[i]!).toBeGreaterThanOrEqual(v[i - 1]! - 1e-12);
         expect(Math.max(...v)).toBeLessThanOrEqual(1);
       } else if (d <= 0.5) expect(Math.max(...v)).toBeGreaterThan(1);
     }
-    // continuous across 1: the curve below, at and above it agree
     for (const t of [0.01, 0.05, 0.2]) {
       expect(springStep(t, 4, 0.9999999)).toBeCloseTo(springStep(t, 4, 1), 5);
       expect(springStep(t, 4, 1.0000001)).toBeCloseTo(springStep(t, 4, 1), 5);
     }
-    expect(springStep(1e4, 4, 50)).toBeCloseTo(1, 6); // large t, heavy damping: no overflow
-    // heavier damping is gentler: it leaves 0 at the same speed and never jumps half way in a frame
+    expect(springStep(1e4, 4, 50)).toBeCloseTo(1, 6);
     for (const d of [1, 1.5, 3, 10, 1e6]) {
       expect(springStep(1e-12, 4, d) / 1e-12).toBeCloseTo(TAU * 4, 1);
       expect(springStep(1 / 60, 4, d)).toBeLessThanOrEqual(springStep(1 / 60, 4, 1) + 1e-12);
@@ -84,7 +80,6 @@ describe('util', () => {
 
   test('spring: endpoints, overshoot under critical damping, none at or above it', () => {
     const run = (o: Partial<Parameters<typeof spring>[0]>) => Array.from({ length: 300 }, (_, i) => spring({ t: i / 100, ...o }));
-    // damping ratio = damping / (2 sqrt(stiffness * mass)): 10/20 = 0.5, 20/20 = 1, 60/20 = 3
     for (const damping of [10, 20, 60]) {
       expect(spring({ t: 0, damping })).toBe(0);
       expect(spring({ t: -1, damping })).toBe(0);
@@ -93,16 +88,12 @@ describe('util', () => {
       if (damping < 20) expect(Math.max(...v)).toBeGreaterThan(1.1);
       else for (let i = 1; i < v.length; i++) expect(v[i]!).toBeGreaterThanOrEqual(v[i - 1]! - 1e-12);
     }
-    // the exact underdamped solution: 1 - e^(-ζω0 t)(cos ω1 t + ζω0/ω1 sin ω1 t)
     const w0 = 10, z = 0.5, w1 = w0 * Math.sqrt(1 - z * z), t = 0.3;
     expect(spring({ t })).toBeCloseTo(1 - Math.exp(-z * w0 * t) * (Math.cos(w1 * t) + ((z * w0) / w1) * Math.sin(w1 * t)), 12);
-    // critical: 1 - e^(-ω0 t)(1 + ω0 t)
     expect(spring({ t, damping: 20 })).toBeCloseTo(1 - Math.exp(-w0 * t) * (1 + w0 * t), 12);
-    // from, to, delay
     expect(spring({ t: 1, from: 100, to: 200, delay: 1 })).toBe(100);
     expect(spring({ t: 30, from: 100, to: 200, delay: 1 })).toBeCloseTo(200, 6);
     expect(spring({ t: 1.3, from: 100, to: 200, delay: 1 })).toBeCloseTo(100 + 100 * spring({ t: 0.3 }), 9);
-    // the same t gives the same value, in any order
     expect(spring({ t: 0.77, damping: 3 })).toBe(spring({ t: 0.77, damping: 3 }));
     expect(() => spring({ t: 0, mass: 0 })).toThrow('mass and stiffness');
     expect(() => spring({ t: 0, damping: 0, duration: 1 })).toThrow('never settles');
@@ -111,7 +102,6 @@ describe('util', () => {
   test('spring: duration stretches it to settle then', () => {
     for (const damping of [5, 10, 20, 60]) {
       const T = springSettleTime(1, 100, damping);
-      // settled after T, not just before it
       for (let t = T; t < T * 3; t += T / 50) expect(Math.abs(1 - spring({ t, damping }))).toBeLessThanOrEqual(0.005 + 1e-9);
       expect(Math.abs(1 - spring({ t: T * 0.999, damping }))).toBeGreaterThan(0.005 - 1e-4);
       for (const d of [0.5, 2]) {
@@ -119,16 +109,14 @@ describe('util', () => {
         expect(spring({ t: d / 2, damping, duration: d })).toBeCloseTo(spring({ t: T / 2, damping }), 9);
       }
     }
-    // lightly damped, long ringing: the last ring above 0.5% is caught, not stepped over
     for (const damping of [0.02, 0.05, 0.3]) {
       const T = springSettleTime(1, 100, damping), period = (2 * Math.PI) / 10;
       for (let t = T; t < T + 3 * period; t += period / 400) expect(Math.abs(1 - spring({ t, damping }))).toBeLessThanOrEqual(0.005 + 1e-9);
       expect(Math.abs(1 - spring({ t: T - 1e-6, damping }))).toBeGreaterThan(0.005);
     }
     expect(() => springSettleTime(1, 100, 0)).toThrow('never settles');
-    // overdamped far past critical: settles at about ln(1/0.005)·c/k (the slow rate ω0²/(2ζω0) = k/c)
     expect(springSettleTime(1, 100, 1e9) / ((Math.log(200) * 1e9) / 100)).toBeCloseTo(1, 3);
-    expect(springSettleTime(1, 100, 20)).toBeGreaterThan(0.7); // critical, ω0 = 10: e^-10t(1+10t) = 0.005 at t ≈ 0.743
+    expect(springSettleTime(1, 100, 20)).toBeGreaterThan(0.7);
     expect(springSettleTime(1, 100, 20)).toBeLessThan(0.75);
   });
 
@@ -136,19 +124,17 @@ describe('util', () => {
     for (const fam of ['Sine', 'Quad', 'Cubic', 'Quart', 'Quint', 'Expo', 'Circ', 'Back', 'Elastic', 'Bounce']) {
       for (const k of ['in', 'out', 'inOut']) expect(typeof (ease as Record<string, unknown>)[k + fam]).toBe('function');
       const e = ease as unknown as Record<string, (t: number) => number>;
-      // out is in mirrored; inOut is symmetric about the middle
       for (const t of [0.1, 0.3, 0.6]) {
         expect(e['out' + fam]!(t)).toBeCloseTo(1 - e['in' + fam]!(1 - t), 9);
         expect(e['inOut' + fam]!(t)).toBeCloseTo(1 - e['inOut' + fam]!(1 - t), 9);
       }
       expect(e['inOut' + fam]!(0.5)).toBeCloseTo(0.5, 9);
     }
-    expect(ease.outBounce(0.5)).toBeCloseTo(0.765625, 9); // easings.net
+    expect(ease.outBounce(0.5)).toBeCloseTo(0.765625, 9);
     expect(ease.inOutBack(0.25)).toBeCloseTo(-0.0996818, 6);
   });
 
   test('cubicBezier matches Chrome', () => {
-    // Chrome 157's Web Animations progress for cubic-bezier(...) at 0.1, 0.25, 0.5, 0.75, 0.9
     const ref: [number[], number[]][] = [
       [[0.25, 0.1, 0.25, 1], [0.09479630571576989, 0.4085105913555371, 0.8024033910598437, 0.9604589783649767, 0.9943164774961483]],
       [[0.42, 0, 1, 1], [0.017026631752235472, 0.0934646510311063, 0.31535673426536154, 0.621861869174206, 0.839427844517541]],
@@ -163,7 +149,6 @@ describe('util', () => {
       expect(f(1)).toBe(1);
       [0.1, 0.25, 0.5, 0.75, 0.9].forEach((x, i) => expect(f(x)).toBeCloseTo(ys[i]!, 6));
     }
-    // past the ends it follows the end tangents
     const e = cubicBezier(0.25, 0.1, 0.25, 1);
     expect(e(-1)).toBeCloseTo(-0.4, 12);
     expect(e(2)).toBe(1);
@@ -175,11 +160,9 @@ describe('util', () => {
     expect(interpolate(5, [0, 10], [0, 100])).toBe(50);
     expect(interpolate(15, [0, 10, 20], [0, 100, 0])).toBe(50);
     expect(interpolate(5, [0, 10], [0, 100], { easing: ease.inQuad })).toBe(25);
-    // extend (the default) continues the end segment, eased
     expect(interpolate(-5, [0, 10, 20], [0, 100, 0])).toBe(-50);
     expect(interpolate(25, [0, 10, 20], [0, 100, 0])).toBe(-50);
     expect(interpolate(20, [0, 10], [0, 100], { easing: ease.inQuad })).toBe(400);
-    // clamp holds the end value, identity returns x
     expect(interpolate(-5, [0, 10], [50, 100], { extrapolateLeft: 'clamp' })).toBe(50);
     expect(interpolate(25, [0, 10], [50, 100], { extrapolateRight: 'clamp' })).toBe(100);
     expect(interpolate(25, [0, 10], [50, 100], { extrapolateLeft: 'clamp' })).toBe(175);
@@ -194,10 +177,10 @@ describe('util', () => {
   test('mixColor mixes in linear light', () => {
     const m = mixColor('#000000', '#ffffff', 0.5);
     expect(m.lin).toEqual([0.5, 0.5, 0.5]);
-    expect(m.hex).toBe('#bcbcbc'); // linear 0.5 in sRGB, not #808080
+    expect(m.hex).toBe('#bcbcbc');
     expect(m.rgba(0.4)).toBe('rgba(188,188,188,0.4)');
     expect(mixColor('#ff0000', [0, 0, 1], 0).hex).toBe('#ff0000');
-    expect(mixColor('#ff0000', [0, 0, 1], 2).hex).toBe('#0000ff'); // t clamped
+    expect(mixColor('#ff0000', [0, 0, 1], 2).hex).toBe('#0000ff');
     expect(mixColor('bg', 'fg', 0).lin).toEqual(LIN.bg!);
     expect(mixColor('bg', 'fg', 1).lin).toEqual(LIN.fg!);
     expect(mixColor('accent', 'accent', 0.3).hex.toLowerCase()).toBe(mixColor('accent', 'accent', 0.9).hex.toLowerCase());

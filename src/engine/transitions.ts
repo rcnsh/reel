@@ -1,6 +1,3 @@
-// Transitions between overlapping clips on one track: the incoming clip's `transition` (reel.config.ts) says
-// how it replaces the outgoing one over their overlap. Each is a pure function of the overlap's progress, so a
-// wipe or a slide is motion blurred like anything else.
 import * as THREE from 'three';
 import { FSPass } from './gl';
 import { W, H } from './format';
@@ -9,92 +6,52 @@ import { clamp, ease, hexToLinear } from './util';
 
 export type TransitionKind = 'crossfade' | 'wipe' | 'slide' | 'zoom' | 'dip' | 'iris' | 'clock' | 'whip' | 'flash';
 export type TransitionDirection = 'left' | 'right' | 'up' | 'down';
-/** A curve of the engine's easing set (`ease` in `reel`). */
 export type EaseName = keyof typeof ease;
-/** A custom transition's uniform: a float, vec2, vec3 or vec4. */
 export type TransitionUniform = number | [number, number] | [number, number, number] | [number, number, number, number];
 
 interface Eased {
-  /**
-   * The curve the overlap's progress runs through (a name from `ease`). Default: `linear` for a crossfade, dip,
-   * flash and custom transition, `inOutExpo` for a whip, `inOutCubic` for the rest.
-   */
   ease?: EaseName;
 }
-/** `crossfade` mixes the two; `zoom` grows the outgoing clip as it fades into the incoming one settling from slightly small; `flash` cuts at the middle through a flash of the theme's light colour, overexposed. */
 export interface PlainTransition extends Eased { kind: 'crossfade' | 'zoom' | 'flash' }
-/** Reveals the incoming clip behind an edge that travels across the frame. */
 export interface WipeTransition extends Eased {
   kind: 'wipe';
-  /** Which way the edge moves (default 'left': the incoming clip enters from the right). */
   direction?: TransitionDirection;
-  /** The soft edge, as a share of the frame (default 0.08; 0 is a hard edge). */
   softness?: number;
 }
-/** `slide` pushes the outgoing clip off the frame with the incoming one; `whip` is a fast push that motion blur turns into a streak. */
 export interface PushTransition extends Eased {
   kind: 'slide' | 'whip';
-  /** Which way the clips move (default 'left': the incoming clip enters from the right). */
   direction?: TransitionDirection;
 }
-/** Fades to a colour and out of it. */
 export interface DipTransition extends Eased {
   kind: 'dip';
-  /**
-   * A palette key or '#rrggbb' (default 'bg' on track 0; on a track above it, transparent, so the tracks below
-   * show through the dip instead of a colour covering them).
-   */
   color?: string;
 }
-/** A circle that opens from `center` onto the incoming clip (or, with `close`, closes onto it over the outgoing one). */
 export interface IrisTransition extends Eased {
   kind: 'iris';
-  /** The circle's centre as shares of the frame from its top left (default [0.5, 0.5]). */
   center?: [number, number];
-  /** The soft edge, as a share of the circle's full radius (default 0.02). */
   softness?: number;
-  /** Close onto the centre instead of opening from it: the outgoing clip shrinks into a circle (default false). */
   close?: boolean;
 }
-/** A hand sweeps round `center` from 12 o'clock, uncovering the incoming clip. */
 export interface ClockTransition extends Eased {
   kind: 'clock';
-  /** The centre the hand turns round, as shares of the frame from its top left (default [0.5, 0.5]). */
   center?: [number, number];
-  /** The soft edge, as a share of a full turn (default 0.01). */
   softness?: number;
-  /** Turn clockwise (default true). */
   clockwise?: boolean;
 }
-/**
- * A transition of your own: GLSL mixing the outgoing clip (`getFromColor(uv)`) and the incoming one
- * (`getToColor(uv)`) by `progress` (eased; 0 to 1 over the overlap). `glsl` is a function
- * `vec4 transition(vec2 uv) { … }` (the gl-transitions shape: their shaders paste in), or just its body, where
- * `p` is the progress, or a single expression. `ratio` is the frame's width over its height; the palette's
- * `C_<KEY>` constants are in scope, the engine's other GLSL helpers are not. Colours are linear and premultiplied.
- */
 export interface CustomTransition extends Eased {
   kind?: never;
   glsl: string;
-  /**
-   * Uniforms the source reads, by name: a number is a float, an array of 2 to 4 a vec. Declared for you unless the
-   * source declares them (then also as int, ivec, bool or bvec of that size); a declared uniform left out is 0.
-   */
   uniforms?: Record<string, TransitionUniform>;
 }
 
-/** How a clip comes in over the clip before it on its track. */
 export type Transition = PlainTransition | WipeTransition | PushTransition | DipTransition | IrisTransition | ClockTransition | CustomTransition;
 
 export const TRANSITION_KINDS: readonly TransitionKind[] = ['crossfade', 'wipe', 'slide', 'zoom', 'dip', 'iris', 'clock', 'whip', 'flash'];
 export const EASE_NAMES = Object.keys(ease) as EaseName[];
 const DIRS: Record<TransitionDirection, [number, number]> = { left: [-1, 0], right: [1, 0], up: [0, 1], down: [0, -1] };
-/** What the engine knows of each kind: its own keys, its shader mode, its default curve, and how it draws. */
 const KINDS: Record<TransitionKind, {
   keys: string[]; mode: number; ease: EaseName;
-  /** A mix of the clips by the progress, which an overshooting curve would extrapolate past them (so it is clamped). */
   fade?: boolean;
-  /** Reads the clips away from the pixel it lands on (the sampler cannot mask their tiles in place). */
   displaces?: boolean;
   softness?: number;
 }> = {
@@ -109,18 +66,14 @@ const KINDS: Record<TransitionKind, {
   flash: { keys: [], mode: 7, ease: 'linear', fade: true },
 };
 const CUSTOM_KEYS = ['glsl', 'uniforms'];
-// the names a custom pass declares itself (its prelude is only the palette, so a pasted shader's own PI or
-// helpers do not clash with the engine's)
 const WRAPPER_NAMES = ['fromTex', 'toTex', 'progress', 'ratio', 'p', 'uv', 'transition', 'getFromColor', 'getToColor', 'main', 'vUv', 'fragColor'];
 const PALETTE_GLSL = Object.entries(HEX).map(([k, v]) => `const vec3 ${glslName(k)} = vec3(${hexToLinear(v).map((x) => x.toFixed(5)).join(',')});`).join('\n');
 const RESERVED = new Set([...WRAPPER_NAMES, ...Object.keys(HEX).map(glslName)]);
-/** How many numbers a GLSL type takes (a uniform's value is a number for 1, an array for more), by type. */
 const SIZE: Record<string, number> = { float: 1, int: 1, uint: 1, bool: 1 };
 for (const n of [2, 3, 4]) for (const t of ['vec', 'ivec', 'uvec', 'bvec']) SIZE[`${t}${n}`] = n;
 const sizeOf = (v: TransitionUniform) => (typeof v === 'number' ? 1 : v.length);
 const floatType = (n: number) => (n === 1 ? 'float' : `vec${n}`);
 
-/** The uniforms a GLSL source declares itself, by name: their types (`uniform highp vec2 a, b;` declares two). */
 export function declaredUniforms(src: string): Map<string, string> {
   const out = new Map<string, string>();
   const code = src.replace(/\/\*[^]*?\*\//g, '').replace(/\/\/.*$/gm, '');
@@ -130,7 +83,6 @@ export function declaredUniforms(src: string): Map<string, string> {
 }
 const has = (o: object, k: string) => Object.prototype.hasOwnProperty.call(o, k);
 
-/** A clip's `transition` as a Transition, checked (a misspelt kind or key is an error, not a crossfade). */
 export function transitionOf(t: unknown, where: string): Transition {
   if (t === undefined) return { kind: 'crossfade' };
   const o = (typeof t === 'string' ? { kind: t } : t) as Record<string, unknown>;
@@ -169,20 +121,12 @@ export function transitionOf(t: unknown, where: string): Transition {
   return o as unknown as Transition;
 }
 
-/**
- * Clips whose `transition` is set but never runs: a transition plays over the overlap with the clip before it on
- * its track, so a clip that starts as (or after) that one ends, overlaps it by less than `frame` seconds, or is
- * first on its track, just cuts. One warning
- * per such clip, naming it.
- */
 export function idleTransitions(clips: readonly { id: string; start: number; end: number; track?: number; transition?: unknown }[], frame = 0): { clip: string; message: string }[] {
   const out: { clip: string; message: string }[] = [];
   for (const [i, e] of clips.entries()) {
     if (e.transition === undefined) continue;
     const track = e.track ?? 0;
-    // (the order the engine composites a track in: by start, clips that start together in timeline order)
     const before = clips.filter((o, j) => (o.track ?? 0) === track && (o.start < e.start || (o.start === e.start && j < i)));
-    // (an overlap shorter than a frame shows on no frame: a cut; with a little slack for 9 - 1/30 written as a start)
     if (before.some((o) => o.end > e.start && o.end - e.start >= frame - 1e-6)) continue;
     const kind = typeof e.transition === 'string' ? e.transition : (e.transition as { kind?: string }).kind;
     const prev = before.sort((a, b) => b.end - a.end)[0];
@@ -198,32 +142,24 @@ export function idleTransitions(clips: readonly { id: string; start: number; end
 
 const inOut = (x: number) => (x < 0.5 ? 4 * x * x * x : 1 - (-2 * x + 2) ** 3 / 2);
 
-/** The transition's easing curve: its `ease`, else its kind's default (linear for a custom transition). */
 export function transitionEase(t: Transition): (x: number) => number {
   return ease[t.ease ?? (t.kind === undefined ? 'linear' : KINDS[t.kind].ease)];
 }
 
-/** A flash's strength at eased progress e: it builds to the light colour at the cut (e = 0.5) and decays from it. */
 const flashAt = (e: number) => (1 - Math.min(1, Math.abs(2 * e - 1))) ** 2;
 
-/**
- * How much of each clip shows at overlap progress k (0..1): what `reel check` scales the alpha of their text by.
- */
 export function transitionWeights(t: Transition, k: number): [outgoing: number, incoming: number] {
   const e = clamp(transitionEase(t)(k));
   if (t.kind === 'dip') return [clamp(1 - 2 * e), clamp(2 * e - 1)];
   if (t.kind === 'flash') return e < 0.5 ? [1 - flashAt(e), 0] : [0, 1 - flashAt(e)];
-  // (an iris uncovers an area that grows with the square of its radius)
   const i = t.kind === 'iris' ? (t.close ? 1 - (1 - e) ** 2 : e * e) : e;
   return [1 - i, i];
 }
 
-/** Transitions that read their clips away from the pixel they land on (the sampler cannot mask those clips' tiles in place). */
 export function transitionDisplaces(t: Transition): boolean {
   return t.kind === undefined || !!KINDS[t.kind].displaces;
 }
 
-/** A custom transition's fragment source: the helpers it is promised, its uniforms and its glsl, wrapped. */
 export function customSource(t: CustomTransition): string {
   const src = t.glsl.trim(), own = declaredUniforms(src);
   const decls = Object.entries(t.uniforms ?? {}).filter(([name]) => !own.has(name)).map(([name, v]) => `uniform ${floatType(sizeOf(v))} ${name};`);
@@ -238,13 +174,11 @@ ${fn}
 void main() { fragColor = transition(vUv); }`;
 }
 
-/** Draws a transition of two clip textures into a target. */
 export class TransitionPass {
-  private pass = new FSPass(/* glsl */ `
+  private pass = new FSPass(`
     uniform sampler2D a; uniform sampler2D b; uniform float k, soft, aspect; uniform int mode; uniform bool rev;
     uniform vec2 dir, ctr; uniform vec3 col; uniform float colA;
     vec4 at(sampler2D t, vec2 uv) { return (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) ? vec4(0.0) : texture(t, uv); }
-    // the incoming clip shows where p (0..1 over the frame) is behind an edge at k, soft over soft
     float behind(float p) {
       float e = k * (1.0 + soft);
       return soft > 0.0 ? 1.0 - smoothstep(e - soft, e, p) : step(p, e);
@@ -254,16 +188,13 @@ export class TransitionPass {
       if (mode == 0) { fragColor = mix(texture(a, uv), texture(b, uv), k); return; }
       if (mode == 1 || mode == 5 || mode == 6) {
         float p;
-        // a wipe's edge travels along dir from the side dir points away from
         if (mode == 1) p = dot(uv - 0.5, dir) + 0.5;
         else {
           vec2 q = (uv - ctr) * vec2(aspect, 1.0);
           if (mode == 5) {
-            // an iris: the distance from the centre over the distance to the farthest corner
             p = length(q) / length(max(ctr, 1.0 - ctr) * vec2(aspect, 1.0));
             if (rev) p = 1.0 - p;
           } else {
-            // a clock: the angle from 12 o'clock, clockwise (uv's y is up), as a share of a turn
             p = atan(q.x, q.y) / 6.283185307;
             if (p < 0.0) p += 1.0;
             if (rev) p = 1.0 - p;
@@ -273,7 +204,6 @@ export class TransitionPass {
         return;
       }
       if (mode == 2) {
-        // both move along dir by k frames: the outgoing clip leaves, the incoming one arrives from behind it
         vec2 ub = uv + dir * (1.0 - k);
         bool inB = ub.x >= 0.0 && ub.y >= 0.0 && ub.x <= 1.0 && ub.y <= 1.0;
         fragColor = inB ? texture(b, ub) : at(a, uv - dir * k);
@@ -285,24 +215,17 @@ export class TransitionPass {
         return;
       }
       if (mode == 7) {
-        // a cut at the middle through the light colour overexposed (it burns out to white and blooms, even on a
-        // light theme whose light colour is the background), over what the clips cover (premultiplied)
         float w = 1.0 - min(1.0, abs(2.0 * k - 1.0)); w *= w;
         vec4 base = k < 0.5 ? texture(a, uv) : texture(b, uv);
         fragColor = vec4(mix(base.rgb, col * (4.0 * base.a), w), base.a);
         return;
       }
-      vec4 c = vec4(col * colA, colA); // (premultiplied: transparent on an upper track)
+      vec4 c = vec4(col * colA, colA);
       fragColor = k < 0.5 ? mix(texture(a, uv), c, k * 2.0) : mix(c, texture(b, uv), k * 2.0 - 1.0);
     }`, {
     a: { value: null }, b: { value: null }, k: { value: 0 }, soft: { value: 0 }, aspect: { value: W / H }, mode: { value: 0 }, rev: { value: false },
     dir: { value: new THREE.Vector2() }, ctr: { value: new THREE.Vector2(0.5, 0.5) }, col: { value: new THREE.Vector3() }, colA: { value: 1 },
   });
-  /**
-   * Custom transitions' passes, one per distinct source, and each clip's (its transition is one object) with the
-   * values of its uniforms: every uniform the source declares, 0 where the clip gives none (passes of one source
-   * share a GL program, so a uniform left unset would show another clip's value).
-   */
   private custom = new Map<string, FSPass>();
   private customOf = new WeakMap<CustomTransition, { pass: FSPass; values: [string, number | number[]][] }>();
   private scratch: THREE.WebGLRenderTarget | null = null;
@@ -325,15 +248,10 @@ export class TransitionPass {
       c = { pass, values: [...values] };
       this.customOf.set(t, c);
     }
-    // (plain arrays: three uploads them as they are to float, int and bool vectors alike)
     for (const [name, v] of c.values) (c.pass.u[name] ??= { value: v }).value = v;
     return c.pass;
   }
 
-  /**
-   * Compile a custom transition's shader now, by drawing it once off screen, so a source that does not compile
-   * fails when the video loads rather than when its clip first comes in.
-   */
   compile(renderer: THREE.WebGLRenderer, t: Transition) {
     if (t.kind !== undefined) return;
     this.scratch ??= new THREE.WebGLRenderTarget(1, 1);
@@ -342,10 +260,6 @@ export class TransitionPass {
     renderer.setRenderTarget(prev);
   }
 
-  /**
-   * Draw the transition from `a` (outgoing) to `b` (incoming) at overlap progress k into `out`. `upper`: the clips
-   * are on a track above 0 (a dip without a colour of its own goes through transparent).
-   */
   draw(renderer: THREE.WebGLRenderer, t: Transition, a: THREE.Texture, b: THREE.Texture, k: number, out: THREE.WebGLRenderTarget, upper = false) {
     const e = transitionEase(t)(k);
     if (t.kind === undefined) {
@@ -361,7 +275,6 @@ export class TransitionPass {
     u.b!.value = b;
     const kind = KINDS[t.kind], o = t as Partial<Omit<WipeTransition, 'kind'> & Omit<PushTransition, 'kind'> & Omit<IrisTransition, 'kind'> & Omit<ClockTransition, 'kind'> & Omit<DipTransition, 'kind'>>;
     u.mode!.value = kind.mode;
-    // (a mix past its ends extrapolates colours: an overshooting curve moves an edge or a push, not a fade)
     u.k!.value = kind.fade ? clamp(e) : e;
     u.soft!.value = o.softness ?? kind.softness ?? 0;
     (u.dir!.value as THREE.Vector2).set(...DIRS[o.direction ?? 'left']);

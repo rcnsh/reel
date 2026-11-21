@@ -1,4 +1,3 @@
-// moveFile: `reel golden update` moves stills out of the temp folder, which may be on another disk (EXDEV).
 import { afterAll, expect, test } from 'bun:test';
 import { existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';

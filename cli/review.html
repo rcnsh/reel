@@ -160,9 +160,7 @@ const $ = (id) => document.getElementById(id);
 const v = $('v'), overlay = $('overlay'), stage = $('stage'), tl = $('timeline');
 let S = null, notes = [], fps = 30, duration = 0, L = [1920, 1080];
 let selected = null, filter = 'all', lastNotesJson = '';
-// the note being written or edited: { id?, t, frame, rect, done }
 let draft = null, drag = null, controls = true;
-// the browser's controls cover the bottom of the frame: hidden while a note is written, and with h
 const setControls = () => { v.controls = controls && !draft; };
 
 const esc = (s) => String(s).replace(/[&<>"']/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#39;' }[c]));
@@ -170,7 +168,6 @@ const frameAt = (t) => Math.max(0, Math.floor(t * fps + 1e-4));
 const curFrame = () => frameAt(v.currentTime);
 const lastFrame = () => Math.max(0, Math.ceil(duration * fps) - 1);
 const fmt = (t) => t.toFixed(3) + ' s';
-// (half a frame in, so the decoder lands on the frame and not the one before)
 const seekFrame = (f) => { v.pause(); f = Math.min(lastFrame(), Math.max(0, f)); v.currentTime = (f + 0.5) / fps; update(); };
 const clipsAt = (t) => { const on = S.timeline.filter((c) => t >= c.start && t < c.end).sort((a, b) => a.track - b.track).map((c) => c.id); return on.length > 1 ? on.filter((c) => c !== 'overlay') : on; };
 
@@ -193,7 +190,6 @@ function setNotes(list) {
   renderList(); renderTimeline(); renderBoxes();
 }
 
-// ---- the timeline: one row per track (the top track first), note markers above, the playhead ----
 function renderTimeline() {
   const pct = (t) => `${(100 * Math.min(Math.max(t, 0), duration)) / duration}%`;
   const tracks = [...new Set(S.timeline.map((c) => c.track))].sort((a, b) => b - a);
@@ -219,7 +215,6 @@ tl.addEventListener('pointerdown', (e) => {
 tl.addEventListener('pointermove', (e) => { if (scrubbing) scrubTo(e); });
 tl.addEventListener('pointerup', () => { scrubbing = false; });
 
-// ---- the notes list ----
 function renderList() {
   const open = notes.filter((n) => n.status === 'open').length;
   $('count').textContent = `${notes.length} · ${open} open`;
@@ -251,7 +246,6 @@ function selectNote(id) {
 }
 for (const [id, f] of [['f-all', 'all'], ['f-open', 'open']]) $(id).addEventListener('click', () => { filter = f; $('f-all').setAttribute('aria-pressed', f === 'all'); $('f-open').setAttribute('aria-pressed', f === 'open'); renderList(); });
 
-// ---- boxes on the frame: the notes on this frame (or the selected one), and the one being drawn ----
 const toPct = (r) => `left:${(100 * r.x) / L[0]}%;top:${(100 * r.y) / L[1]}%;width:${(100 * r.w) / L[0]}%;height:${(100 * r.h) / L[1]}%`;
 function renderBoxes() {
   const f = curFrame();
@@ -270,7 +264,6 @@ overlay.addEventListener('pointermove', (e) => {
 });
 overlay.addEventListener('pointerup', () => { if (draft?.rect && (draft.rect.w < 4 || draft.rect.h < 4)) draft.rect = null; drag = null; renderBoxes(); composerRect(); $('c-text').focus(); });
 
-// ---- writing a note ----
 function composerRect() {
   const r = draft?.rect;
   $('c-rect').textContent = r ? `Area x ${Math.round(r.x)} y ${Math.round(r.y)}, ${Math.round(r.w)}×${Math.round(r.h)} px (drag again to redraw)` : 'Drag on the frame to mark an area (optional).';
@@ -315,7 +308,6 @@ v.addEventListener('pause', () => { $('play').textContent = 'Play'; });
 $('prev').onclick = () => seekFrame(curFrame() - 1);
 $('next').onclick = () => seekFrame(curFrame() + 1);
 
-// ---- the readout, kept up to date while playing ----
 function update() {
   const f = curFrame(), t = f / fps;
   $('time').textContent = fmt(t);
@@ -329,7 +321,6 @@ v.addEventListener('pause', update);
 v.addEventListener('loadedmetadata', () => { if (!duration && v.duration) { duration = v.duration; renderTimeline(); } update(); });
 (function tick() { if (!v.paused) update(); requestAnimationFrame(tick); })();
 
-// ---- keys: the page's own, ahead of the video element's ----
 window.addEventListener('keydown', (e) => {
   if (e.metaKey || e.ctrlKey || e.altKey) return;
   const typing = e.target.tagName === 'TEXTAREA' || e.target.tagName === 'INPUT' || e.target.tagName === 'SELECT';
@@ -354,7 +345,6 @@ window.addEventListener('keydown', (e) => {
   if (act) { e.preventDefault(); e.stopPropagation(); act(); }
 }, true);
 
-// ---- start: the state, then the notes every two seconds (an agent may change them meanwhile) ----
 (async () => {
   try {
     S = await (await fetch('/api/state')).json();

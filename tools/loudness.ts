@@ -1,16 +1,10 @@
-// EBU R128 loudness: reading ffmpeg's ebur128 and loudnorm measurements, and the gain that brings a mix to its
-// target. Pure, so it is unit-tested.
 
-/** A measurement: integrated loudness (LUFS), true peak (dBTP), loudness range (LU) and the threshold loudnorm reports. */
 export interface Loudness { integrated: number; truePeak: number; lra: number; threshold: number; offset: number }
 
-/** A loudness target: integrated LUFS, true-peak ceiling in dBTP, and the loudness range allowed (LU, default 11). */
 export interface LoudnessTarget { integrated: number; truePeak: number; lra?: number }
 
-/** The default for a finished video: -14 LUFS integrated, -1 dBTP (what streaming platforms play at). */
 export const STREAMING: LoudnessTarget = { integrated: -14, truePeak: -1, lra: 11 };
 
-/** The JSON block loudnorm prints with print_format=json (the last one in `stderr`). */
 export function parseLoudnorm(stderr: string): Loudness {
   const i = stderr.lastIndexOf('{'), j = stderr.lastIndexOf('}');
   if (i < 0 || j < i) throw new Error(`no loudness measurement in ffmpeg's output: ${stderr.slice(-400)}`);
@@ -19,13 +13,10 @@ export function parseLoudnorm(stderr: string): Loudness {
   return { integrated: n('input_i'), truePeak: n('input_tp'), lra: n('input_lra'), threshold: n('input_thresh'), offset: n('target_offset') };
 }
 
-/** A measurement by ffmpeg's ebur128 filter: integrated loudness (LUFS), true peak (dBTP), loudness range (LU). */
 export interface R128 { integrated: number; truePeak: number; lra: number }
 
-/** The filters that measure: ebur128 with true peak, printing its running values (full precision) to stdout. */
 export const EBUR128 = 'ebur128=peak=true:metadata=1:framelog=quiet,ametadata=mode=print:file=-';
 
-/** The last values in the output of EBUR128: the whole file's (silence: -Infinity). */
 export function parseEbur128(text: string): R128 {
   const last = (k: string) => {
     const i = text.lastIndexOf(`lavfi.r128.${k}=`);
@@ -35,31 +26,20 @@ export function parseEbur128(text: string): R128 {
   };
   const I = last('I'), tp = last('true_peak'), lra = last('LRA');
   if (Number.isNaN(I) || Number.isNaN(tp)) throw new Error(`no loudness measurement in ebur128's output: ${text.slice(-400)}`);
-  // (ebur128 reports -70 for a file with nothing above its gate, and the true peak as a linear amplitude)
   return { integrated: I <= -70 ? -Infinity : I, truePeak: tp > 0 ? 20 * Math.log10(tp) : -Infinity, lra: Number.isNaN(lra) ? 0 : lra };
 }
 
-/**
- * The gain in dB that brings a measured mix to the target where a linear gain can (its true peak stays under the
- * ceiling and its loudness range within the target's, the test loudnorm's linear mode makes), else null: then the
- * mix needs loudnorm's dynamic mode. A silent mix gets 0.
- */
 export function linearGain(t: LoudnessTarget, m: R128): number | null {
   if (!Number.isFinite(m.integrated)) return 0;
   const g = t.integrated - m.integrated;
   return m.truePeak + g <= t.truePeak && m.lra <= (t.lra ?? 11) ? g : null;
 }
 
-/**
- * The second loudnorm pass: the measured values make it a linear gain where the true-peak ceiling allows (no
- * pumping), falling back to its limiter where it does not. Resampled back to `sr` (loudnorm works at 192 kHz).
- */
 export function loudnormFilter(t: LoudnessTarget, m: Loudness, sr = 48000): string {
   const f = (x: number) => (Number.isFinite(x) ? x.toFixed(2) : '-70.00');
   return `loudnorm=I=${t.integrated}:TP=${t.truePeak}:LRA=${t.lra ?? 11}:measured_I=${f(m.integrated)}:measured_TP=${f(m.truePeak)}:measured_LRA=${f(m.lra)}:measured_thresh=${f(m.threshold)}:offset=${f(m.offset)}:linear=true,aresample=${sr}`;
 }
 
-/** A target from mix.json's `loudness` (a partial object over the default, or false for none), checked. */
 export function loudnessTarget(v: unknown): LoudnessTarget | null {
   if (v === false) return null;
   if (v === undefined || v === true) return STREAMING;

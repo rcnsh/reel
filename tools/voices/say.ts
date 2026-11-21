@@ -1,4 +1,3 @@
-// macOS `say`: an instant scratch voice with no download. Its word times come from the forced aligner.
 import path from 'node:path';
 import { run } from '../../cli/children';
 import type { VoiceSource } from './voice';

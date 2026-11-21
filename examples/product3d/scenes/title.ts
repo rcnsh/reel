@@ -1,4 +1,3 @@
-// The name, set in the left third over the 3D shot on the track below (cleared to transparent, so it shows through).
 import type * as THREE from 'three';
 import { Scene, type Frame, TitleCard, clearRT, W, H } from 'reel';
 

@@ -1,9 +1,7 @@
-// A line chart: the render minutes one minute of video takes, by how much of the frame moves.
 import type * as THREE from 'three';
 import { Scene, type Frame, LineChart, TextBlock, clearRT, LIN, W, H, ease, prog, split } from 'reel';
 import { BOTTOM, TOP } from './_script';
 
-// the chart and the note side by side across the content area, a gap between them
 const [chartBox, noteBox] = split({ x: W * 0.08, y: H * TOP, w: W * 0.86, h: H * (BOTTOM - TOP) }, 'h', [0.56, 0.26], W * 0.04);
 
 export default class Flat extends Scene {

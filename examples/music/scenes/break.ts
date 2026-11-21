@@ -1,5 +1,3 @@
-// The break: the drums drop out, which the stem meters show (the drums bar falls while bass, other and vocal go on).
-// The meters are an HTML layer brought up to date once per frame from the stems' envelopes.
 import type * as THREE from 'three';
 import { Scene, type Frame, HtmlLayer, clearRT, LIN } from 'reel';
 

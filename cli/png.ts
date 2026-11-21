@@ -1,9 +1,7 @@
-// PNG files and image comparison: `reel diff`, the golden-frame tests and the MCP server's diff tool.
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { PNG } from 'pngjs';
 
-/** An RGBA image, rows top-down. */
 export interface Img { width: number; height: number; data: Uint8Array }
 
 export function readPng(file: string): Img {
@@ -26,20 +24,13 @@ export function writePng(file: string, img: Img) {
 export interface DiffStats {
   width: number;
   height: number;
-  /** Pixels whose largest channel difference is over `tol` levels, and their share of all pixels. */
   changed: number;
   fraction: number;
-  /** Largest channel difference anywhere (0..255), and the mean of every pixel's largest channel difference. */
   max: number;
   mean: number;
-  /** The rectangle around the changed pixels, [x, y, w, h], or null when none changed. */
   box: [number, number, number, number] | null;
 }
 
-/**
- * Compare two images of one size (RGB; alpha is ignored). Returns the numbers and a picture of the difference:
- * `b` dimmed to grey, changed pixels in red (brighter for a bigger difference), the box around them outlined.
- */
 export function diffImages(a: Img, b: Img, tol = 0): { stats: DiffStats; image: Img } {
   if (a.width !== b.width || a.height !== b.height) throw new Error(`the images differ in size: ${a.width}x${a.height} and ${b.width}x${b.height}`);
   const { width: w, height: h } = a, n = w * h;
@@ -69,13 +60,11 @@ export function diffImages(a: Img, b: Img, tol = 0): { stats: DiffStats; image: 
   return { stats: { width: w, height: h, changed, fraction: changed / n, max, mean: +(sum / n).toFixed(4), box }, image: { width: w, height: h, data: out } };
 }
 
-/** One line for a person: how much changed and where. */
 export function describeDiff(s: DiffStats) {
   if (!s.changed) return `identical (${s.width}x${s.height})`;
   return `${s.changed} of ${s.width * s.height} px changed (${(s.fraction * 100).toFixed(3)}%), max ${s.max}, mean ${s.mean.toFixed(3)} levels, in ${s.box![2]}x${s.box![3]} at ${s.box![0]},${s.box![1]}`;
 }
 
-/** A copy at most `max` px on its long side (area-averaged; never enlarged). */
 export function downscale(img: Img, max: number): Img {
   const k = Math.max(img.width, img.height) / max;
   if (k <= 1) return img;

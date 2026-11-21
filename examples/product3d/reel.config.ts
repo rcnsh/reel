@@ -1,6 +1,3 @@
-// A 3D product shot: a perfume bottle (a glTF model with an animation, made by make_assets.ts) under studio light,
-// the camera orbiting it with a shallow depth of field, a size label in the scene on a plane, and a kit title over
-// it on an upper track. Silent; the length is the end of the last clip.
 import { defineVideo } from 'reel/config';
 
 export default defineVideo({

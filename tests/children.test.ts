@@ -1,18 +1,15 @@
-// cli/children.ts: a child cannot outlive the process that spawned it, however that process ends.
 import { afterAll, expect, test } from 'bun:test';
 import path from 'node:path';
 import { ENGINE, REEL, removeTempDirs, tempDir } from './helpers';
 
 afterAll(removeTempDirs);
 
-/** Pids of processes whose command line contains `s` (a temp folder unique to the test, so only the test's own). */
 const pids = (s: string) => Bun.spawnSync(['pgrep', '-f', s]).stdout.toString().split('\n').filter(Boolean).map(Number);
 async function until(ok: () => boolean, ms: number) {
   for (const end = Date.now() + ms; Date.now() < end; await Bun.sleep(50)) if (ok()) return true;
   return ok();
 }
 
-/** A bun process that spawns `cmd` with spawnChild, prints the child's pid, then waits for ever. */
 function parent(cmd: string[]) {
   const code = `const { spawnChild } = await import(${JSON.stringify(path.join(ENGINE, 'cli/children.ts'))}); console.log(spawnChild(${JSON.stringify(cmd)}).pid); setInterval(() => {}, 1000);`;
   const p = Bun.spawn(['bun', '-e', code], { stdout: 'pipe', stderr: 'inherit' });
@@ -20,12 +17,10 @@ function parent(cmd: string[]) {
   return { p, pid };
 }
 
-/** A process and everything under it. */
 const tree = (p: number): number[] => [p, ...Bun.spawnSync(['pgrep', '-P', String(p)]).stdout.toString().split('\n').filter(Boolean).flatMap((c) => tree(Number(c)))];
 const alive = (ps: number[]) => ps.filter((p) => { try { process.kill(p, 0); return true; } catch { return false; } });
 
 test('a child and everything under it go when the parent is killed outright, by SIGKILL after a grace if they ignore SIGTERM', async () => {
-  // (the shell ignores SIGTERM and has children of its own)
   const { p, pid } = parent(['sh', '-c', "trap '' TERM; sleep 60 & sleep 60; wait"]);
   try {
     const c = await pid;
@@ -34,7 +29,6 @@ test('a child and everything under it go when the parent is killed outright, by 
     p.kill('SIGKILL');
     await p.exited;
     const t0 = Date.now();
-    // (they ignore SIGTERM: gone only once the grace is over)
     expect(await until(() => alive(all).length === 0, 5000)).toBe(true);
     expect(Date.now() - t0).toBeGreaterThan(1000);
   } finally { p.kill('SIGKILL'); }
@@ -61,7 +55,6 @@ test('a parent whose children are done exits by itself (the watchdog keeps nothi
 
 test.skipIf(!Bun.which('ffmpeg'))('reel mix killed with SIGKILL mid-mix leaves no ffmpeg behind', async () => {
   const dir = tempDir('reel-mix-kill-');
-  // (a two-hour picture: its mix runs far longer than the test waits)
   const long = path.join(dir, 'long.mp4'), out = path.join(dir, 'out.mp4');
   expect(Bun.spawnSync(['ffmpeg', '-nostdin', '-loglevel', 'error', '-y', '-f', 'lavfi', '-i', 'color=black:s=16x16:r=1', '-t', '7200', '-c:v', 'libx264', '-preset', 'ultrafast', long]).exitCode).toBe(0);
   const p = Bun.spawn(['bun', REEL, 'mix', '--project', path.join(ENGINE, 'examples/demo'), long, out], { stdout: 'ignore', stderr: 'ignore' });

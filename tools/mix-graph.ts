@@ -1,43 +1,27 @@
-// The sound mix's ffmpeg inputs and filter graph (tools/mix.ts): pure, so it is unit-tested.
 import path from 'node:path';
 import type { SoundClip } from '../src/config';
 
-/**
- * A music bed: from the start of clip `from`, or `at` seconds on the timeline (default: the video's start), to the
- * start of clip `to` (default: the video's end), looped unless `loop` is false (then it stops at its file's end).
- */
 export interface Music { file: string; from?: string; at?: number; to?: string; loop?: boolean; db?: number; fadeIn?: number; fadeOut?: number }
 export interface CueSound { file: string; db?: number; minGap?: number }
-/** How the voice ducks the music (ffmpeg's sidechaincompress): threshold in dB, ratio, attack and release in ms. */
 export interface Duck { threshold?: number; ratio?: number; attack?: number; release?: number }
 export interface MixConfig {
   music?: Music[];
-  /** The music's ducking under the voice: false for none, or over the default { threshold: about -30.5 (0.03), ratio: 4, attack: 80, release: 600 }. */
   duck?: false | Duck;
   cues?: Record<string, CueSound>;
   entryCues?: Record<string, string[]>;
-  /** The finished mix's loudness: false for none, or over the default { integrated: -14, truePeak: -1, lra: 11 }. */
   loudness?: false | { integrated?: number; truePeak?: number; lra?: number };
-  /** The voice's level in dB (default 0). */
   voiceDb?: number;
 }
 
 export interface Events { duration: number; timeline: { id: string; start: number; end: number }[]; cues: { kind: string; t: number }[]; sounds?: SoundClip[] }
 
-/** The working sample rate and layout of the mix. */
 export const FMT = 'aformat=sample_fmts=fltp:sample_rates=48000:channel_layouts=stereo';
 const SR = 48000;
 
-/** A cue kind's sound laid at its times into `track`: `offsets` in samples from the video's start, `gain` linear. */
 export interface CueLay { kind: string; file: string; gain: number; offsets: number[]; track: string }
 
-/** The ffmpeg input arguments of a cue track (cueTrack writes it): raw 48 kHz stereo 32-bit float, lossless. */
 export const CUE_TRACK_INPUT = ['-f', 'f32le', '-ar', String(SR), '-ch_layout', 'stereo'];
 
-/**
- * Samples [start, start + frames) of a cue track: `src` (interleaved stereo) times `gain` added in at each offset (in
- * frames). The tracks are written a block at a time with this, so a long video's cues need no buffer of its length.
- */
 export function cueBlock(src: Float32Array, gain: number, offsets: number[], start: number, frames: number): Float32Array {
   const out = new Float32Array(frames * 2), n = src.length / 2;
   for (const o of offsets) {
@@ -51,7 +35,6 @@ export function cueBlock(src: Float32Array, gain: number, offsets: number[], sta
   return out;
 }
 
-/** The ducking filter's settings from mix.json's `duck`, checked (null: no ducking). */
 export function duckFilter(v: unknown): string | null {
   if (v === false) return null;
   if (v === undefined || v === true) return 'sidechaincompress=threshold=0.03:ratio=4:attack=80:release=600';
@@ -67,17 +50,6 @@ export function duckFilter(v: unknown): string | null {
   return `sidechaincompress=threshold=${th}:ratio=${o.ratio ?? 4}:attack=${o.attack ?? 80}:release=${o.release ?? 600}`;
 }
 
-/**
- * The inputs and filter graph that mix `cfg`'s music and cue sounds with the voice (`voice`: the narration track, or
- * null for a silent video) for a video of `dur` seconds starting at timeline time `from`. Input 0 is the video (its
- * picture is copied; its own sound, an encode of the same track, is not used), so `inputs` are the ffmpeg arguments
- * after it. The graph ends in [mixed], `dur` seconds of 48 kHz stereo before loudness normalisation. `sound(file)`
- * resolves a file named in mix.json or by a sound on the timeline; `length(file)` is a resolved file's length in
- * seconds (for music that does not loop and timeline sounds that play to the end of their file, and to start a
- * looped bed part-way through). Each cue kind is one input, a track of all its cues summed (`cues`: what to lay in
- * each, which the caller writes to its `track`, the path `cueTrack(kind)` gives, with cueBlock before running ffmpeg). `counts`: cues laid per
- * kind, and the timeline's sounds; `warnings`: cue kinds with no sound.
- */
 export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, voice: string | null, sound: (file: string) => string, length: (file: string) => number = () => Infinity, cueTrack: (kind: string) => string = (k) => `cues-${k}.f32`) {
   const T0 = from, T1 = from + dur;
   const warnings: string[] = [];
@@ -88,7 +60,6 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
   };
 
   const duck = duckFilter(cfg.duck);
-  // music segments in video time: [start, end, file, db, fade-in, fade-out, seconds into the file, looped]
   type Seg = [number, number, string, number, number, number, number, boolean];
   const segs: Seg[] = [];
   for (const m of cfg.music ?? []) {
@@ -101,16 +72,12 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     const s = Math.max(a, T0), e = Math.min(b, T1);
     const L = e - s;
     if (L <= 0.1) continue;
-    // (a render that starts after the bed came in hears it from where it is by then)
     const skip = loop && Number.isFinite(len) && len > 0 ? (s - a) % len : s - a;
-    // (a segment cut by the render's window fades at the cut, like the video's own ends)
     const fi = s === a ? m.fadeIn ?? (a === 0 ? 1.5 : 0.4) : 1.5;
     const fo = e === b ? m.fadeOut ?? (b === ev.duration ? 3.0 : 0.4) : 3.0;
-    // fades longer than half the segment would overlap (or start before it: ffmpeg refuses a negative st)
     segs.push([s - T0, e - T0, m.file, m.db ?? -17, Math.min(fi, L / 2), Math.min(fo, L / 2), skip, loop]);
   }
 
-  // cue times per kind, in video time
   const inWin = (t: number) => t >= T0 && t < T1 - 0.2;
   const cueTimes = new Map<string, number[]>();
   for (const c of ev.cues) (cueTimes.get(c.kind) ?? cueTimes.set(c.kind, []).get(c.kind)!).push(c.t);
@@ -121,7 +88,6 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
   let n = 1;
   const parts: string[] = [];
   if (voice) {
-    // (the track from the render's start, decoded exactly: it is lossless)
     inputs.push('-ss', T0.toFixed(6), '-t', dur.toFixed(6), '-i', voice);
     const v = n++;
     f.push(`[${v}:a]${FMT},asetnsamples=n=1024:p=0${cfg.voiceDb ? `,volume=${cfg.voiceDb}dB` : ''}${segs.length && duck ? ',asplit=2[voice][sc]' : '[voice]'}`);
@@ -140,7 +106,6 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
   });
   if (mus.length) {
     const m = mus.length > 1 ? `${mus.join('')}amix=inputs=${mus.length}:normalize=0:duration=longest` : `${mus[0]}anull`;
-    // the voice drives the music's ducking (sidechain)
     if (voice && duck) f.push(`${m}[mraw]`, `[mraw][sc]${duck}[music]`);
     else f.push(`${m}[music]`);
     parts.push('[music]');
@@ -156,7 +121,6 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     const v = times.filter(inWin).map((t) => t - T0);
     counts.push(`${v.length} ${kind}`);
     if (!v.length) continue;
-    // (all of a kind's cues are one input: a track that sums them, at whole milliseconds like the music's delays)
     const id = `c${tag++}`, ms = v.map((t) => Math.round(t * 1000));
     const track = cueTrack(kind);
     cues.push({ kind, file: sound(snd.file), gain: 10 ** ((snd.db ?? 0) / 20), offsets: ms.map((x) => (x * SR) / 1000), track });
@@ -165,8 +129,6 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     parts.push(`[${id}]`);
     n++;
   }
-  // sounds on the timeline (the config's `sounds`, a scene's sound()): each trimmed to the render's window, faded at
-  // its own ends, at its rate, delayed to its start
   let laid = 0;
   for (const s of ev.sounds ?? []) {
     const file = sound(s.file), speed = s.speed ?? 1;
@@ -186,8 +148,6 @@ export function buildMix(cfg: MixConfig, ev: Events, dur: number, from: number, 
     f.push(c); parts.push(`[s${laid}]`); n++; laid++;
   }
   if (ev.sounds?.length) counts.push(`${laid} sound${laid === 1 ? '' : 's'} on the timeline`);
-  // everything summed over silence of the video's length, which ends the mix: a pad waiting for the sum's end can
-  // wait forever (several cues of a kind are split copies of one sound, whose end may never reach a loudnorm)
   const len = dur.toFixed(6), silence = `anullsrc=r=48000:cl=stereo,atrim=0:${len}`, cut = `atrim=0:${len},asetpts=PTS-STARTPTS[mixed]`;
   if (!parts.length) f.push(`${silence}[mixed]`);
   else f.push(`${silence}[silence]`, `[silence]${parts.join('')}amix=inputs=${parts.length + 1}:normalize=0:duration=first,${cut}`);

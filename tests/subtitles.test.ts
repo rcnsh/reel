@@ -33,7 +33,6 @@ test('a window shifts cues to the render and drops the rest; SRT and VTT stamps'
 test('a run whose words cannot break into two lines of 42 is cut, and no cue has an empty line', () => {
   const cues = buildCues([{ words: words('The quick brown fox jumps over the lazy dog while the farmer watches from the porch and sips his coffee slowly', 0) }]);
   for (const c of cues) for (const l of c.lines) { expect(l.length).toBeLessThanOrEqual(42); expect(l.length).toBeGreaterThan(0); }
-  // one long CJK word breaks between characters; one long Latin word stays whole
   expect(breakLines('一二三四五六七八九十'.repeat(5))).toEqual(['一二三四五六七八九十'.repeat(2) + '一二三四五', '六七八九十' + '一二三四五六七八九十'.repeat(2)]);
   expect(breakLines('x'.repeat(50))).toEqual(['x'.repeat(50)]);
 });

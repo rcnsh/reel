@@ -1,5 +1,3 @@
-// The verse: a ring leaves the centre on every beat, swelling with the kick; the snare flashes the field and the
-// hats sparkle at its edge. Everything is read from f (the analysis at this time), so any frame renders alone.
 import type * as THREE from 'three';
 import { W, H, Scene, type Frame, FSPass } from 'reel';
 
@@ -9,7 +7,6 @@ export default class Verse extends Scene {
     void main() {
       vec2 p = (FRAG_PX - 0.5 * vec2(${W}.0, ${H}.0)) / ${Math.min(W, H)}.0;
       float r = length(p);
-      // rings: one per beat, radius growing with the beat's phase (and the ones before it, further out)
       float ring = 0.0;
       for (int k = 0; k < 4; k++) {
         float rad = (phase + float(k)) * 0.16;

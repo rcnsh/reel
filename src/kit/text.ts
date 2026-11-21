@@ -1,33 +1,22 @@
-// Text components: a block of text fitted to a box, a title card, a lower third.
 import { H, W } from '../engine/gl';
 import type { Frame } from '../engine/scene';
 import { cssColor, esc, HtmlComponent, safeBox, UNIT, val, type Anim, type Box, type ComponentOptions } from './common';
 
 export interface TextBlockOptions extends ComponentOptions {
-  /** The text (plain; or `html` for markup). Either may be a function of the frame. */
   text?: Anim<string>;
   html?: Anim<string>;
-  /** The largest size in px (default 7% of the short side) and the smallest it may shrink to (default 2.6%). */
   size?: number;
   minSize?: number;
-  /** Shrink the text until it fits the box (default true): within the box's height and at most `maxLines` lines. */
   fit?: boolean;
   maxLines?: number;
   align?: 'left' | 'center' | 'right';
   valign?: 'top' | 'middle' | 'bottom';
-  /** CSS font family (default Archivo), weight (default 700), line height (default 1.15). */
   font?: string;
   weight?: number;
   lineHeight?: number;
-  /** A palette key or CSS colour (default fg). */
   color?: string;
 }
 
-/**
- * A block of text in a box: wraps, aligns, and (by default) shrinks until it fits the box and `maxLines`, between
- * `size` and `minSize`. Text that cannot fit even at `minSize` overflows, and `reel check` says so.
- * Classes: `.tb` (the text).
- */
 export class TextBlock extends HtmlComponent {
   private fitted = '';
   private o: TextBlockOptions;
@@ -76,23 +65,16 @@ export function fitText(el: HTMLElement, box: Box, max: number, min: number, max
 }
 
 export interface TitleCardOptions extends ComponentOptions {
-  /** The title as plain text, or `html` for markup (`<em>` is drawn in the accent colour, `<br>` breaks the line). */
   title?: Anim<string>;
   html?: Anim<string>;
   subtitle?: Anim<string>;
-  /** A small line above the title (a chapter, a date). */
   kicker?: Anim<string>;
   align?: 'left' | 'center';
-  /** Title font (default Archivo 800), and the accent rule under it (default true). */
   font?: string;
   weight?: number;
   rule?: boolean;
 }
 
-/**
- * A title card: kicker, title (fitted to the box, at most three lines), subtitle and an accent rule, centred in the
- * safe area by default. Classes: `.kicker`, `.title`, `.rule`, `.subtitle`.
- */
 export class TitleCard extends HtmlComponent {
   private fitted = '';
   private o: TitleCardOptions;
@@ -123,7 +105,6 @@ export class TitleCard extends HtmlComponent {
     const key = `${title}|${l.$('.kicker').textContent}|${l.$('.subtitle').textContent}`;
     if (key === this.fitted) return;
     this.fitted = key;
-    // the title shrinks until the whole card fits the box
     const card = l.$('.card');
     const rest = card.getBoundingClientRect().height - t.getBoundingClientRect().height;
     fitText(t, { ...this.box, h: this.box.h - rest }, Math.round(UNIT * 0.12), Math.round(UNIT * 0.045), 3, 1.02);
@@ -132,15 +113,10 @@ export class TitleCard extends HtmlComponent {
 
 export interface LowerThirdOptions extends ComponentOptions {
   name: Anim<string>;
-  /** A second line: a role, a place, a source. */
   role?: Anim<string>;
   side?: 'left' | 'right';
 }
 
-/**
- * A lower third: a name and a role beside an accent bar, on a panel, in the lower left (or right) of the safe
- * area. Slides in from its side. Classes: `.lt`, `.name`, `.role`, `.bar`.
- */
 export class LowerThird extends HtmlComponent {
   private o: LowerThirdOptions;
   constructor(o: LowerThirdOptions) {

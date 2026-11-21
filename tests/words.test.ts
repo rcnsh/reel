@@ -57,7 +57,7 @@ test('word and line progress', () => {
   expect(Words.wordProgress(pen, 9)).toBe(1);
   const line = W.lines[1]!;
   expect(Words.lineCharProgress(line, 2)).toBe(0);
-  expect(Words.lineCharProgress(line, 3.25)).toBe(4); // 'The' and the space
+  expect(Words.lineCharProgress(line, 3.25)).toBe(4);
   expect(Words.lineCharProgress(line, 9)).toBe(line.text.length);
   const syl = { ...pen, syl: [[3.3, 3.4], [3.5, 3.6]] as [number, number][] };
   expect(Words.wordProgress(syl, 3.45)).toBe(0.5);

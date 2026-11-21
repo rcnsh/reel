@@ -1,5 +1,3 @@
-// The 3D kit's pure parts: camera rigs, the smooth path, jitter sequences, box projection, glTF animation sampled at
-// a time, and what check makes of 3D boxes.
 import { describe, expect, test } from 'bun:test';
 import * as THREE from 'three';
 import { GLTFExporter } from 'three/examples/jsm/exporters/GLTFExporter.js';
@@ -27,7 +25,6 @@ describe('camera rigs', () => {
     expect(near(rig(1).position, [3, 0.5, 0])).toBe(true);
     expect(rig(0.5).target).toEqual([1, 0, 0]);
     for (const t of [0, 0.3, 0.7, 1]) expect(Math.hypot(rig(t).position[0] - 1, rig(t).position[2])).toBeCloseTo(2, 9);
-    // a pure function of t: the same pose whatever was asked before
     expect(rig(0.37)).toEqual(orbit({ target: [1, 0, 0], radius: 2, height: 0.5, from: 0, to: 90, at: [0, 1], ease: 'linear' })(0.37));
   });
   test('dolly, crane and lookAt', () => {
@@ -46,12 +43,9 @@ describe('camera rigs', () => {
     const c = smoothPath(pts);
     expect(near(c.at(0), pts[0]!)).toBe(true);
     expect(near(c.at(1), pts[3]!, 1e-9)).toBe(true);
-    // each control point lies on the curve
     for (const p of pts) expect(Math.min(...Array.from({ length: 2001 }, (_, i) => dist(c.at(i / 2000), p)))).toBeLessThan(0.01);
-    // equal steps of s cover equal lengths
     const steps = Array.from({ length: 20 }, (_, i) => dist(c.at(i / 20), c.at((i + 1) / 20)));
     expect(Math.max(...steps) / Math.min(...steps)).toBeLessThan(1.05);
-    // a path rig looks ahead along the curve
     const r = path({ points: pts, at: [0, 1], ease: 'linear' });
     expect(r(0.5).position).toEqual(c.at(0.5));
     expect(dist(r(0.5).target, c.at(0.55))).toBeLessThan(1e-9);
@@ -78,7 +72,6 @@ describe('jitter', () => {
       expect(x >= -0.5 && x < 0.5 && y >= -0.5 && y < 0.5).toBe(true);
       for (const [u, v] of [lensSample(k), lightSample(k)]) expect(u * u + v * v).toBeLessThanOrEqual(1 + 1e-12);
     }
-    // the first 4, 12 and 36 sub-pixel offsets average near the pixel's centre
     for (const n of [4, 12, 36]) {
       const m = Array.from({ length: n }, (_, k) => subPixel(k)).reduce((a, b) => [a[0] + b[0] / n, a[1] + b[1] / n], [0, 0]);
       expect(Math.hypot(m[0], m[1])).toBeLessThan(0.6 / Math.sqrt(n));
@@ -95,7 +88,6 @@ describe('projectBox', () => {
     expect(p.behind).toBe(false);
     expect(p.x + p.w / 2).toBeCloseTo(960, 6);
     expect(p.y + p.h / 2).toBeCloseTo(540, 6);
-    // matches three's own projection of the near face's corner
     const q = new THREE.Vector3(0.5, 0.5, 0.5).project(cam);
     expect(p.x + p.w).toBeCloseTo(((q.x + 1) / 2) * 1920, 6);
   });
@@ -109,7 +101,6 @@ describe('projectBox', () => {
 });
 
 test('glTF animation is sampled at a time: the same pose in any order, after any other', async () => {
-  // a model with a transform clip and a morph target clip, through three's own exporter and loader
   (globalThis as { FileReader?: unknown }).FileReader ??= class { result: unknown; onloadend?: () => void; readAsArrayBuffer(b: Blob) { b.arrayBuffer().then((r) => { this.result = r; this.onloadend?.(); }); } };
   const geo = new THREE.BoxGeometry(1, 1, 1);
   geo.morphAttributes.position = [new THREE.Float32BufferAttribute(Array.from(geo.attributes.position!.array, (v) => v * 2), 3)];
@@ -130,10 +121,8 @@ test('glTF animation is sampled at a time: the same pose in any order, after any
   const first = new Map<number, number[]>();
   for (const t of order) { const v = at(t); if (first.has(t)) expect(v).toEqual(first.get(t)!); else first.set(t, v); }
   expect(at(0.5)).toEqual([0.5, 1, 0, 0.25]);
-  // looping: 3.1 s is 1.1 s into the 2 s clip
   expect(at(3.1)).toEqual(at(1.1));
   expect(() => new Animation(g.scene, g.animations, { play: ['nope'] })).toThrow("animation 'nope' is not in the model");
-  // played once, a clip holds its last pose after its end and starts again from any earlier time
   const once = new Animation(g.scene, g.animations, { loop: false });
   const y = (t: number) => { once.at(t); return model.position.y; };
   expect([y(0.5), y(5), y(0.5), y(1), y(9), y(0)]).toEqual([1, 0, 1, 2, 0, 0]);
@@ -180,7 +169,6 @@ describe('projectPoint', () => {
 });
 
 describe('Stage3D', () => {
-  // a renderer and a clip's ctx with only what the stage calls, recording each soft light's shadow at draw time
   const fakeStage = async () => {
     const { Stage3D } = await import('../src/three/stage');
     const drawn: { radius: number; position: THREE.Vector3 }[] = [];
@@ -220,13 +208,10 @@ describe('Stage3D', () => {
       stage.render(out);
       for (let k = 0; k < 4; k++) { SUB_FRAME.index = k; stage.render(out); }
     } finally { SUB_FRAME.index = -1; }
-    // one sample: the light stays put and the blur alone softens it
     expect(drawn[0]!.radius).toBe(9);
     expect(drawn[0]!.position.toArray()).toEqual([-1, 3, 2]);
-    // sub-frames: the light moves and its blur is a texel
     for (const d of drawn.slice(1)) expect(d.radius).toBe(1);
     expect(new Set(drawn.slice(1).map((d) => d.position.toArray().join())).size).toBe(4);
-    // and both are back as placed afterwards
     expect(light.shadow.radius).toBe(9);
     expect(light.position.toArray()).toEqual([-1, 3, 2]);
   });

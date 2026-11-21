@@ -1,4 +1,3 @@
-// Entry: preview player (default) or export mode (?export=1, driven by cli/reel.ts).
 import { Engine, type AdaptiveSampling, type Pixels } from './engine/engine';
 import { W, H, PW, PH, SCALE, FPS, ALPHA } from './engine/gl';
 import { BITS } from './engine/format';
@@ -8,13 +7,10 @@ import config from '@project/reel.config';
 
 const params = new URLSearchParams(location.search);
 const EXPORT = params.has('export');
-const ONLY = params.get('only'); // comma-separated scene ids to load (faster stills)
+const ONLY = params.get('only');
 const FROM = params.get('t') ? parseFloat(params.get('t')!) : null;
 
 const canvas = document.getElementById('c') as HTMLCanvasElement;
-// physical size: the logical frame times ?scale=, laid out at the logical size (HTML layers inside the canvas
-// rasterise at its backing size over its layout size, so that ratio must be the scale exactly: the preview
-// fits the canvas to the window with a transform, which leaves its layout size alone)
 canvas.width = PW;
 canvas.height = PH;
 canvas.style.width = W + 'px';
@@ -38,16 +34,10 @@ async function boot() {
   else setupPlayer();
 }
 
-// ------------------------------------------------------------------ export API
-/** The last frame stream() rendered (a range starting right after it needs no warm-up). */
 let lastStreamed = -2;
 const senders = new Map<string, Promise<Sender>>();
 interface Sender { send(fill: (buf: Uint8Array) => Promise<unknown>): Promise<void> }
 
-/**
- * A WebSocket written from a worker thread: send() fills a pooled frame buffer, transfers it to the worker
- * (no copy) and returns once the buffer is on its way, waiting first while `inflight` frames are unacknowledged.
- */
 function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
   let s = senders.get(url);
   if (s) return s;
@@ -62,7 +52,7 @@ function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
           ws.onclose = () => postMessage({ error: 'websocket closed' });
           ws.onmessage = (ev) => postMessage({ acked: +ev.data || 0 });
         } else {
-          ws.send(m.buf); // (copies the frame: the buffer can go straight back)
+          ws.send(m.buf);
           postMessage({ free: m.buf }, [m.buf]);
         }
       };`;
@@ -82,7 +72,6 @@ function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
     async function send(fill: (buf: Uint8Array) => Promise<unknown>) {
       while (!failed && sent - acked >= inflight) await wait();
       if (failed) throw new Error(failed);
-      // two buffers: one being filled while the other is with the worker (it comes straight back)
       if (!free.length && pool < 2) { free.push(new ArrayBuffer(bytes)); pool++; }
       while (!free.length) await wait();
       const buf = free.pop()!;
@@ -96,21 +85,14 @@ function sender(url: string, inflight: number, bytes: number): Promise<Sender> {
   return s;
 }
 
-/** A canvas as a PNG, base64 (the native toBase64: Chrome 140+, and reel refuses anything before 157). */
 async function pngOf(cv: OffscreenCanvas) {
   const b = new Uint8Array(await (await cv.convertToBlob({ type: 'image/png' })).arrayBuffer());
   return b.toBase64();
 }
-/** Output size for a w x h image whose long side may be at most `max` px (never enlarged). */
 function fit(w: number, h: number, max?: number) {
   const k = max && Math.max(w, h) > max ? max / Math.max(w, h) : 1;
   return [Math.max(1, Math.round(w * k)), Math.max(1, Math.round(h * k))] as const;
 }
-/**
- * A copy of `src` (x, y, w, h of it) at most `max` px on its long side, smoothed. A large reduction goes in halvings
- * (each a 2x2 average) before the last step: one drawImage samples a few source pixels per output pixel on a GPU
- * canvas, so thin lines and text vanish or alias in a small copy, and differently on every backend.
- */
 function scaled(src: OffscreenCanvas | HTMLCanvasElement, x: number, y: number, w: number, h: number, max?: number) {
   const [ow, oh] = fit(w, h, max);
   let cur: OffscreenCanvas | HTMLCanvasElement = src, cx = x, cy = y, cw = w, ch = h;
@@ -134,54 +116,31 @@ function setupExport() {
   window.__reel = {
     engine,
     duration: engine.duration,
-    /** The sound the export muxes (a path in the project), or null for a silent video. */
     track: engine.audio.track,
-    /** Scene and shader errors: the page's load errors and the render errors since beginRequest(). */
     get errors() { return engine.errors; },
-    /** Timeline problems that are not errors (a transition that never plays), by clip. */
     get warnings() { return engine.warnings; },
-    /**
-     * Start a request on a warm page: render errors are reported again from here (once per clip). Returns false
-     * when the page can no longer render (its GL context was lost: the GPU process crashed or was reset).
-     */
     beginRequest() { engine.clearRenderErrors(); return !contextLost; },
     get contextLost() { return contextLost; },
-    /** Output size in px (the logical frame times scale) and frame rate; stream() sends frames of width*height*3 bytes (rgb24) unless asked for other pixels. */
     scale: SCALE,
     width: PW,
     height: PH,
-    /** The logical frame size scenes lay out in. */
     W, H,
     fps: FPS,
-    /** A transparent render (?alpha=1) and the output's bits per channel (?bits=). */
     alpha: ALPHA,
     bits: BITS,
     theme: THEME.name,
-    /** The render's props (the page's over the config's defaults). */
     props: engine.props,
-    /** A loaded scene keeps simulation state: its frames must be rendered in order, by one renderer. */
     stateful,
     timeline: TIMELINE.map(({ id, start, end, track, check, freeze }) => {
-      // (a frozen clip is still on purpose: `reel check` does not report it as frozen)
       const ex = check?.exempt;
       const exempt = ex === true ? ex : freeze !== undefined ? [...new Set([...(ex ?? []), 'frozen' as const])] : ex;
       return { id, start, end, track: track ?? 0, ...(exempt ? { exempt } : {}) };
     }),
-    /** The theme's palette, #rrggbb per key. */
     palette: THEME.palette,
-    /** Ids of the clips on screen at t, lowest track first. */
     clipsAt,
-    /** Sound cues scenes recorded with cue() in their init, sorted by time. */
     get cues(): { kind: string; t: number }[] { return [...((globalThis as any).__reelCues ?? [])].sort((a, b) => a.t - b.t); },
-    /** Sounds on the timeline: the config's `sounds` and those scenes placed with sound(), by start time. */
     get sounds() { return engine.sounds(); },
-    /** Render a single frame at t (seeks as needed). Returns the sub-frames used. */
     still(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) { return engine.renderFrame(t, 1 / FPS, true, samples, shutter); },
-    /**
-     * For `reel check`: render t collecting what the scenes report drawing, then measure the frame (its
-     * brightness grid) and every text box against the pixels behind it. Returns the boxes, the stats and the
-     * scene errors so far.
-     */
     async inspect(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
       await engine.prepare(t, 1 / FPS, samples, shutter);
       engine.collectBoxes = true;
@@ -190,24 +149,16 @@ function setupExport() {
       const boxes = engine.lastBoxes.map((b) => ({ ...b, ...(b.kind === 'text' && b.color && /^#[0-9A-F]{6}$/i.test(b.color) && (b.alpha ?? 1) >= 0.05 ? { m: measureText(px, b, hexRgb(b.color)) } : {}) }));
       return { boxes, stats: frameStats(px), clips: clipsAt(t), errors: engine.errors, textDraws: engine.lastTextDraws, clocks: engine.lastClocks, stepped: [...engine.lastStepped] };
     },
-    /**
-     * For `reel check`'s second renders: render t by a seek (whatever was rendered before) and return the frame's
-     * stats, the scene errors so far and whether a scene failed in this render (even one that had failed before).
-     */
     async recheck(t: number, samples: number | AdaptiveSampling = 1, shutter = 0.5) {
       engine.forgetTime();
       const failures = engine.failures;
       await engine.renderFrame(t, 1 / FPS, true, samples, shutter);
       return { stats: frameStats({ data: await engine.readPixelsAsync(), pw: PW, ph: PH, scale: SCALE }), errors: engine.errors, failed: engine.failures > failures };
     },
-    /**
-     * The last rendered frame as a PNG (base64): the export's pixels at full resolution, or `crop` (x, y, w, h in
-     * logical px) of them, at most `maxSize` px on the long side, with `marks` (logical rectangles) outlined.
-     */
     async png(o: { maxSize?: number; crop?: [number, number, number, number]; marks?: [number, number, number, number][] } = {}) {
       const px = await engine.readPixelsAsync(), row = PW * 4;
       const img = new ImageData(PW, PH);
-      for (let y = 0; y < PH; y++) img.data.set(px.subarray((PH - 1 - y) * row, (PH - y) * row), y * row); // bottom-up -> top-down
+      for (let y = 0; y < PH; y++) img.data.set(px.subarray((PH - 1 - y) * row, (PH - y) * row), y * row);
       const full = new OffscreenCanvas(PW, PH);
       full.getContext('2d')!.putImageData(img, 0, 0);
       let [x, y, w, h] = o.crop ?? [0, 0, W, H];
@@ -226,10 +177,6 @@ function setupExport() {
       }
       return pngOf(out);
     },
-    /**
-     * Frames at `times` in a grid of `cols` columns, each `cell` px on its long side and labelled with its time
-     * and the clips on screen; the whole image at most `maxSize` px on its long side. PNG, base64.
-     */
     async grid(o: { times: number[]; cols: number; cell: number; samples?: number | AdaptiveSampling; shutter?: number; maxSize?: number; gap?: number }) {
       const [cw, ch] = fit(W, H, o.cell);
       const cols = Math.max(1, Math.min(o.cols, o.times.length)), rows = Math.ceil(o.times.length / cols);
@@ -257,18 +204,10 @@ function setupExport() {
       const out = o.maxSize && Math.max(cv.width, cv.height) > o.maxSize ? scaled(cv, 0, 0, cv.width, cv.height, o.maxSize) : cv;
       return { png: await pngOf(out), width: out.width, height: out.height, cells };
     },
-    /** The last grid again, at most `maxSize` px on its long side (a preview without rendering it twice). */
     async lastGridPng(maxSize: number) {
       if (!lastGrid) throw new Error('no grid rendered yet');
       return pngOf(scaled(lastGrid, 0, 0, lastGrid.width, lastGrid.height, maxSize));
     },
-    /**
-     * The draft tier: render [from, to) at the frame rate (one sample) and encode it here with WebCodecs, H.264 from
-     * the canvas (hardware where the browser has it, else its software encoder), sending the Annex B stream over a
-     * WebSocket in order, one message per encoded frame. The receiver acknowledges with the running count of
-     * messages taken; at most `inflight` are unacknowledged. Returns the frames encoded and the encoder used, or
-     * `{ unsupported }` when this browser can encode neither way (the CLI then pipes raw frames instead).
-     */
     async encode(opts: { from: number; to: number; ws: string; bitrate: number; inflight?: number }) {
       const VE = (window as any).VideoEncoder, VF = (window as any).VideoFrame;
       if (!VE) return { unsupported: 'no WebCodecs' };
@@ -307,29 +246,14 @@ function setupExport() {
       if (failed && failed !== 'websocket closed') throw new Error(failed);
       return { frames: n1 - n0, encoder: (cfg.hardwareAcceleration as string).replace('prefer-', '') };
     },
-    /**
-     * Render [from, to) at the frame rate and stream raw rgb24 frames (bottom-up) over a WebSocket, in order.
-     * Returns when all frames were handed to the socket, with a histogram of sub-frames per frame. The
-     * receiver acknowledges each frame it has taken (a text message with its running count) and at most
-     * `inflight` frames are unacknowledged: backpressure from the encoder, so a slow encode (4K) cannot
-     * pile frames up in memory. Pipelined: frame n's readback is collected while n+1 renders, and the
-     * socket is written from a worker thread. Calls with the same `ws` reuse its connection, so a
-     * renderer can be handed several ranges. In a project with a stateful scene, a range that does not go on where
-     * the last one ended starts with a warm-up frame; a stateless frame is the same however it is reached, so its
-     * ranges start straight away.
-     * `pixels` picks the readback (rgb8 by default; see Pixels).
-     */
     async stream(opts: { from: number; to: number; ws: string; samples?: number | AdaptiveSampling; shutter?: number; inflight?: number; pixels?: Pixels }) {
       const mode = opts.pixels ?? 'rgb8';
       const snd = await sender(opts.ws, opts.inflight ?? 4, Engine.bytes(mode));
       const dt = 1 / FPS;
       const n0 = Math.round(opts.from * FPS), n1 = Math.round(opts.to * FPS);
       const S = opts.samples ?? 1, SH = opts.shutter ?? 0.5;
-      // warm-up: render one frame before the range so the first frame is sequential for stateful scenes (it gets
-      // the frame step as dt, not a seek's 0). Stateless scenes depend on t only: no warm-up. (Adaptive sampling
-      // only runs stateless scenes: one sample is enough for the warm-up.)
       if (stateful && n0 > 0 && lastStreamed !== n0 - 1) await engine.renderFrame((n0 - 1) * dt, dt, false, typeof S === 'number' ? S : 1, SH);
-      const used: Record<number, number> = {}; // sub-frames per frame -> frames
+      const used: Record<number, number> = {};
       let pending = -1;
       for (let n = n0; n < n1; n++) {
         const k = await engine.renderFrame(n * dt, dt, false, S, SH);
@@ -346,7 +270,6 @@ function setupExport() {
   window.__reel.ready = true;
 }
 
-// ------------------------------------------------------------------ preview player
 function setupPlayer() {
   const audio = new Audio(engine.audio.track ?? undefined);
   audio.preload = 'auto';
@@ -377,7 +300,6 @@ function setupPlayer() {
   const seek = (x: number) => { t = Math.max(0, Math.min(engine.duration - 0.001, x)); audio.currentTime = t; };
   seek(t);
 
-  // (with no narration file the clock still runs: play() rejects and the performance.now() smoothing carries it)
   const toggle = () => { playing = !playing; if (playing) { audio.currentTime = t; audio.play().catch(() => {}); } else audio.pause(); };
   canvas.onclick = toggle;
   scrub.oninput = () => seek(parseFloat(scrub.value));
@@ -396,18 +318,15 @@ function setupPlayer() {
     if (ev.key === '[') { const es = TIMELINE.filter((x) => x.start < t - 0.3); const e = es[es.length - 1]; if (e) seek(e.start); }
   });
 
-  // fit the frame to the window (a transform: the canvas keeps its logical layout size)
   const wrap = document.getElementById('wrap')!;
   const fitView = () => { canvas.style.transform = `scale(${Math.min(wrap.clientWidth / W, wrap.clientHeight / H)})`; };
   new ResizeObserver(fitView).observe(wrap);
   fitView();
 
   let frames = 0, fpsT = performance.now(), fps = 0;
-  // (the next frame is asked for once this one is drawn: a frame's prepare may wait for a paint)
   const tick = async () => {
     try {
       if (playing) {
-        // smooth the coarse audio clock with performance.now()
         const now = performance.now();
         if (audio.currentTime !== lastAudioT) { lastAudioT = audio.currentTime; lastPerf = now; }
         t = lastAudioT + (audio.paused ? 0 : (now - lastPerf) / 1000);
@@ -426,7 +345,6 @@ function setupPlayer() {
   };
   requestAnimationFrame(tick);
 
-  // Vite HMR: re-instantiate scenes whose module changed
   if (import.meta.hot) {
     (import.meta.hot as unknown as { on(ev: string, cb: (payload: any) => void): void }).on('vite:afterUpdate', (payload) => {
       for (const u of payload.updates ?? []) {

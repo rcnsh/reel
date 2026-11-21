@@ -2,7 +2,6 @@ import { describe, expect, test } from 'bun:test';
 import { checkTimes, contrastRatio, findingsOf, frameStats, measureText, recheckOrder, relLum, sameFrame, type CheckOpts, type Pixels, type Sample } from '../src/check';
 import { fromProject, type ReportedBox } from '../src/engine/report';
 
-/** A W x H frame (scale 1) filled with `bg`, with `draw` painting rectangles; rows bottom-up like the readback. */
 function frame(W: number, H: number, bg: number[], draw: [number, number, number, number, number[]][] = []): Pixels {
   const data = new Uint8Array(W * H * 4);
   for (let y = 0; y < H; y++) for (let x = 0; x < W; x++) {
@@ -35,7 +34,6 @@ describe('frames', () => {
 });
 
 describe('measureText', () => {
-  // dark "text" strokes inside a box on a light background
   const strokes: [number, number, number, number, number[]][] = [[22, 22, 4, 16, [20, 20, 20]], [30, 22, 4, 16, [20, 20, 20]], [38, 22, 4, 16, [20, 20, 20]]];
   test('reads text and background from the pixels', () => {
     const m = measureText(frame(100, 60, [235, 235, 235], strokes), { x: 20, y: 20, w: 24, h: 20, size: 20 }, [20, 20, 20])!;
@@ -123,7 +121,6 @@ describe('findingsOf', () => {
     const f = findingsOf([sample(1, [box({ m })])], opts);
     expect(f[0]).toMatchObject({ kind: 'contrast', severity: 'error', value: 1.2 });
     expect(f[0]!.message).toContain("rgba('fg')");
-    // fading text and tiny boxes are not measured
     expect(findingsOf([sample(1, [box({ m, alpha: 0.5 })])], opts)).toHaveLength(0);
     expect(findingsOf([sample(1, [box({ m, w: 4 })])], opts)).toHaveLength(0);
   });
@@ -150,10 +147,7 @@ describe('findingsOf', () => {
     expect(f[0]).toMatchObject({ kind: 'nondeterministic', severity: 'error', clip: 'a', value: 60 });
     expect(f[0]!.message).toContain("'a' Math.random() was called");
     expect(findingsOf([twice(b)], { ...opts, clips: [{ ...opts.clips[0]!, exempt: ['nondeterministic'] }] })).toHaveLength(0);
-    // one exempt clip on screen: the frame cannot be judged
     expect(findingsOf([{ ...twice(b), clips: ['a', 'b'] }], { ...opts, clips: [...opts.clips, { id: 'b', start: 0, end: 10, track: 1, exempt: ['nondeterministic'] }] })).toHaveLength(0);
-    // a clip that keeps state reaches a time differently stepping on from the frame before than by a seek: a frame
-    // where one stepped is not compared
     expect(findingsOf([{ ...twice(b), stepped: ['a'] }], opts)).toHaveLength(0);
   });
   test("a few cells a few levels off (the browser's text raster after other DOM changes) is not nondeterministic", () => {
@@ -161,7 +155,7 @@ describe('findingsOf', () => {
     const off = (cells: number, by: number) => ({ ...stats, sig: sig.map((v, i) => (i < cells ? v + by : v)) });
     const kinds = (again: typeof stats) => findingsOf([{ ...sample(1), stats, again }], opts).map((f) => f.kind).filter((k) => k !== 'blank');
     expect(kinds(off(2, 5))).toEqual([]);
-    expect(kinds(off(9, 2))).toEqual([]); // (text across a frame, rasterised a sub-pixel differently)
+    expect(kinds(off(9, 2))).toEqual([]);
     expect(kinds(off(1, 13))).toEqual(['nondeterministic']);
     expect(kinds(off(10, 2))).toEqual(['nondeterministic']);
   });
@@ -188,10 +182,8 @@ describe('findingsOf', () => {
     expect(recheckOrder(one(1))).toEqual([0]);
     expect(recheckOrder(one(5), 12)).toEqual([3, 2, 1, 0, 4]);
     expect(recheckOrder(one(100), 4)).toEqual([66, 33, 0, 99]);
-    // a short clip between the spread samples gets its own
     const clips = Array.from({ length: 100 }, (_, i) => (i >= 40 && i < 44 ? ['short'] : ['a']));
     expect(recheckOrder(clips, 4)).toContain(42);
-    // samples that cannot be judged are never picked
     expect(recheckOrder([['a'], null, ['a'], null], 12)).toEqual([2, 0]);
     expect(recheckOrder([null, null])).toEqual([]);
   });
@@ -206,11 +198,9 @@ describe('findingsOf', () => {
   test('--only: a frozen run ends at a stretch no loaded clip covers, and unloaded clips are not named', () => {
     const still = { sig: [10, 60], cols: 2, rows: 1, spread: 50 };
     const o = { ...opts, clips: [{ id: 'a', start: 0, end: 2, track: 0 }, { id: 'x', start: 2, end: 8, track: 0 }, { id: 'b', start: 8, end: 10, track: 0 }], only: ['a', 'b'] };
-    // a and b sampled, x (not loaded) skipped: a's last frame and b's first look alike
     const ss: Sample[] = [0, 1, 1.9, 8, 9, 9.9].map((t) => ({ t, clips: t < 2 ? ['a'] : ['b'], boxes: [], stats: still, errors: [] }));
     expect(findingsOf(ss, o)).toEqual([]);
     expect(findingsOf(ss, { ...o, only: undefined }).map((x) => x.kind)).toEqual(['frozen']);
-    // a clip starting over another loaded one does not end the run
     const cap = { ...opts, clips: [{ id: 'a', start: 0, end: 8, track: 0 }, { id: 'cap', start: 2, end: 8, track: 1 }], only: ['a', 'cap'] };
     const held: Sample[] = [0, 1, 2, 3, 4, 5, 6].map((t) => ({ t, clips: t < 2 ? ['a'] : ['a', 'cap'], boxes: [], stats: still, errors: [] }));
     expect(findingsOf(held, cap).map((x) => [x.kind, x.t, x.until])).toEqual([['frozen', 0, 6]]);

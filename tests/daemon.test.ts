@@ -1,5 +1,3 @@
-// The warm renderer's lanes: a long check runs in one, stills in the other, so a still does not wait for the check,
-// and a still rendered beside it (on a second page) has the same pixels as one rendered alone.
 import { afterAll, expect, test } from 'bun:test';
 import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -14,8 +12,6 @@ import { hasChrome, reel, scratchCopy } from './helpers';
 const demo = scratchCopy('demo');
 afterAll(async () => { await reel(['daemon', 'stop', '--project', demo.dir]); demo.cleanup(); });
 
-// A check long enough to outlast a still on a second page: a frame every 0.01 s on a GPU; under SwiftShader, where
-// a checked frame takes about a second, one every 0.1 s over the first 3 s
 const LONG_CHECK = glBackend() === 'swiftshader' ? { step: 0.1, to: 3 } : { step: 0.01 };
 
 const req = (op: Op, args: Record<string, unknown>): Req => ({ op, project: projectDir(demo.dir), page: pageOf({}), samples: samplesOf({}), shutter: 0.5, args });
@@ -28,11 +24,9 @@ test('sweeps go in the long lane, everything else in the quick one', () => {
 
 test.skipIf(!hasChrome)('a still does not queue behind a long check, and renders the same pixels beside it', async () => {
   const out = (n: string) => path.join(demo.dir, 'out', n);
-  // (warm: the server, Chrome and a page)
   expect((await call(req('still', { times: [2.5], out: out('alone.png') }))).ok).toBe(true);
   let checkDone = 0;
   const check = call(req('check', LONG_CHECK)).then((r) => { checkDone = Date.now(); return r; });
-  // (the check has the page: the still needs a second one)
   await Bun.sleep(400);
   const still = await call(req('still', { times: [2.5], out: out('beside.png') }));
   const stillDone = Date.now();
@@ -57,7 +51,6 @@ test.skipIf(!hasChrome)("a config change during a check: the still gets a new de
     expect(still.ok).toBe(true);
     expect(checkDone).toBe(0);
     expect((await check).ok).toBe(true);
-    // (the still saw the new theme)
     expect(diffImages(readPng(out('print.png')), readPng(out('neutral.png'))).stats.fraction).toBeGreaterThan(0.5);
   } finally { writeFileSync(cfg, was); }
 }, 180_000);

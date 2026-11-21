@@ -1,6 +1,3 @@
-// The bottle on a studio set: the model and its 'open' animation from assets/bottle.glb, studio lighting with the
-// project's own HDR environment for reflections, a shadow-catching ground, an orbiting camera with an 85 mm lens at
-// f/2.8 focused on the bottle, and a label on a plane standing beside it.
 import * as THREE from 'three';
 import { Scene, type Frame, Stage3D, HtmlPlane, Animation, loadGLTF, orbit, fovOf } from 'reel';
 
@@ -15,8 +12,6 @@ export default class Bottle extends Scene {
     label: 'size label',
   });
   anim!: Animation;
-  // a slow orbit from the front left round to the right, rising a little, always on the bottle's shoulder
-  // (the camera aims a little left of the bottle, so it stands right of the frame's centre, clear of the title)
   rig = orbit({ target: [-0.07, 0.1, 0], radius: [1.3, 1.15], height: [0.14, 0.2], from: -38, to: 30, at: [0, 6], ease: 'inOutQuad', fstop: 2.8 });
 
   override async init() {
@@ -26,17 +21,14 @@ export default class Bottle extends Scene {
     await this.stage.studio({ target: [0, 0.07, 0], radius: 0.12, softness: 0.6 });
     await this.stage.environment('assets/studio.hdr', 0.9);
     this.stage.ground({ opacity: 0.4 });
-    // a card standing on the ground right of the bottle, level with it, so the orbit never swings it across the bottle
     this.label.position.set(0.125, 0.015, 0.0);
     this.label.rotation.y = -0.15;
     this.stage.scene.add(this.label);
   }
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
-    // (in focus: the front of the bottle and the label beside it)
     const pose = this.rig(f.lt);
     this.stage.camera({ ...pose, focus: Math.hypot(pose.position[0], pose.position[1] - 0.06, pose.position[2]) - 0.05 });
-    // the cap lifts off 3.4 s in
     this.anim.at(f.lt - 3.4);
     this.stage.render(out);
   }

@@ -1,7 +1,3 @@
-// Loading 3D assets from the project folder: glTF/GLB models (with Draco, meshopt and KTX2 compression), HDR
-// environment maps (.hdr, .exr) prefiltered for image-based lighting, and textures in the right colour space. Call
-// these in a scene's init() and await them: everything is loaded before the first frame, and a file that is
-// missing or does not parse throws, which makes it the clip's scene error (reported by `reel check`).
 import * as THREE from 'three';
 import { GLTFLoader, type GLTF } from 'three/examples/jsm/loaders/GLTFLoader.js';
 import { DRACOLoader } from 'three/examples/jsm/loaders/DRACOLoader.js';
@@ -13,10 +9,8 @@ import { RoomEnvironment } from 'three/examples/jsm/environments/RoomEnvironment
 
 export type { GLTF };
 
-/** Where the engine's copy of three.js keeps the decoders it loads at run time (served by the dev server). */
 const LIBS = '/node_modules/three/examples/jsm/libs';
 
-/** Throw a clear error for a project file that is not there (the dev server answers 404 for a missing media file). */
 export async function requireFile(src: string, what: string) {
   let r: Response;
   try { r = await fetch(src, { method: 'HEAD', cache: 'no-store' }); } catch (e) { throw new Error(`${what} '${src}' did not load: ${(e as Error).message}`); }
@@ -32,11 +26,6 @@ function gltf(renderer: THREE.WebGLRenderer) {
   return gltfLoader;
 }
 
-/**
- * A glTF or GLB model (`assets/bottle.glb`): its scene (`.scene`), animations (`.animations`, see Animation) and
- * cameras. Draco- and meshopt-compressed geometry and KTX2 textures are decoded; colour textures come in as sRGB and
- * data textures (normal, roughness, metalness) as linear, as glTF specifies. Meshes cast and receive shadows.
- */
 export async function loadGLTF(renderer: THREE.WebGLRenderer, src: string): Promise<GLTF> {
   await requireFile(src, '3D model');
   let g: GLTF;
@@ -45,11 +34,6 @@ export async function loadGLTF(renderer: THREE.WebGLRenderer, src: string): Prom
   return g;
 }
 
-/**
- * A texture from an image in the project. `color: true` (the default) for pictures shown as colour (base colour,
- * emissive: sRGB, decoded to linear when sampled), false for data (normal, roughness, masks: linear as stored).
- * Mipmapped, anisotropic, repeat wrapping off unless `repeat` is set.
- */
 export async function loadTexture(src: string, o: { color?: boolean; repeat?: [number, number]; flipY?: boolean } = {}): Promise<THREE.Texture> {
   await requireFile(src, 'texture');
   let t: THREE.Texture;
@@ -61,7 +45,6 @@ export async function loadTexture(src: string, o: { color?: boolean; repeat?: [n
   return t;
 }
 
-/** An equirectangular HDR image (.hdr or .exr), as a linear float texture (not prefiltered: see environment()). */
 export async function loadHDR(src: string): Promise<THREE.DataTexture> {
   await requireFile(src, 'environment map');
   const loader = /\.exr$/i.test(src) ? new EXRLoader() : new HDRLoader();

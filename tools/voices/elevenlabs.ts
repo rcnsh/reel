@@ -1,5 +1,3 @@
-// ElevenLabs, a hosted voice: opt-in through ELEVENLABS_API_KEY. Its with-timestamps endpoint returns the time of
-// every character, which become word times. Only the passage's text (and its neighbours' as context) is sent.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fetchRetry } from '../http';
@@ -10,7 +8,6 @@ export const DEFAULT_MODEL = 'eleven_multilingual_v2';
 
 export interface CharAlignment { characters: string[]; character_start_times_seconds: number[]; character_end_times_seconds: number[] }
 
-/** Words from per-character times: runs of non-space characters, each from its first character's start to its last's end. */
 export function charsToWords(a: CharAlignment): { w: string; start: number; end: number }[] {
   const out: { w: string; start: number; end: number }[] = [];
   let cur: { w: string; start: number; end: number } | null = null;
@@ -23,7 +20,6 @@ export function charsToWords(a: CharAlignment): { w: string; start: number; end:
   return out;
 }
 
-/** The request for a passage (URL and body), separate so tests can check it. */
 export function request(voiceId: string, r: SynthRequest): { url: string; body: Record<string, unknown> } {
   const body: Record<string, unknown> = { text: r.text, model_id: r.model ?? DEFAULT_MODEL };
   if (r.speed !== 1) body.voice_settings = { speed: Math.min(1.2, Math.max(0.7, r.speed)) };

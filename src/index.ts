@@ -1,4 +1,3 @@
-// What scenes import: `import { Scene, FSPass, W, H, ease } from 'reel'`.
 export * from './engine/scene';
 export * from './engine/gl';
 export * from './engine/util';

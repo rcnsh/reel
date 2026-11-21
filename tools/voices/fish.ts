@@ -1,5 +1,3 @@
-// Fish Audio, a hosted voice: opt-in through FISH_API_KEY. It returns audio only, so the forced aligner times the
-// words. Only the passage's text is sent.
 import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fetchRetry } from '../http';
@@ -8,7 +6,6 @@ import type { SynthRequest, VoiceSource } from './voice';
 export const API = 'https://api.fish.audio/v1/tts';
 export const DEFAULT_MODEL = 's2.1-pro';
 
-/** The request for a passage (headers beyond auth, and body), separate so tests can check it. */
 export function request(referenceId: string, r: SynthRequest): { headers: Record<string, string>; body: Record<string, unknown> } {
   return {
     headers: { model: r.model ?? DEFAULT_MODEL, 'content-type': 'application/json' },

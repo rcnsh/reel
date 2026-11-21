@@ -1,5 +1,3 @@
-// The component kit: text, kinetic text, captions, titles, images, video, Lottie, charts, tables, timers, code, drawn-on lines and arrows, audio visualisers, and layout helpers, coloured by the theme, reported to
-// `reel check`, and pure functions of time.
 export { HtmlComponent, motionAt, progressOf, lineWidth, safeBox, windowOf, SAFE, UNIT, val, cssColor, esc, type Anim, type At, type Box, type ComponentOptions, type Motion, type ProgressOptions, type Span } from './common';
 export { inset, split, grid, align, center, type Inset, type Align } from './layout';
 export { TextBlock, TitleCard, LowerThird, fitText, type TextBlockOptions, type TitleCardOptions, type LowerThirdOptions } from './text';

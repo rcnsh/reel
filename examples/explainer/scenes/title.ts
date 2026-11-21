@@ -1,4 +1,3 @@
-// The opening card.
 import type * as THREE from 'three';
 import { Scene, type Frame, TitleCard, clearRT, LIN, W, H } from 'reel';
 import { BOTTOM, TOP } from './_script';

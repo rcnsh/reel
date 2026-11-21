@@ -1,18 +1,9 @@
-// Matching a script's words to timed tokens (from a transcriber, an aligner or a voice) and refining their edges. Pure,
-// so it is unit-tested.
 
-/** A word as compared: lower case, letters and digits only. */
 export const normWord = (s: string) => s.toLowerCase().replace(/[^\p{L}\p{N}]/gu, '');
 
 export interface ScriptWord { w: string; line: number; s?: number; e?: number }
 export interface HeardWord { w: string; s: number; e: number }
 
-/**
- * Give each script word the time of the heard word it matches (edit-distance alignment on normalised tokens: a
- * script word not heard costs 1, an extra heard word 0.5, a substitution 1.2), then share the time between
- * matched neighbours among the unmatched words by length (`start` and `end` bound a run at either end).
- * Fills in `s` and `e` of every word; returns which were matched.
- */
 export function alignWords(sw: ScriptWord[], heard: HeardWord[], start: number, end: number): boolean[] {
   const A = sw.map((x) => normWord(x.w)), B = heard.map((x) => normWord(x.w));
   const n = A.length, m = B.length;
@@ -22,8 +13,8 @@ export function alignWords(sw: ScriptWord[], heard: HeardWord[], start: number, 
   for (let j = 1; j <= m; j++) { cost[at(0, j)] = j * 0.5; back[at(0, j)] = 2; }
   for (let i = 1; i <= n; i++) for (let j = 1; j <= m; j++) {
     const sub = cost[at(i - 1, j - 1)]! + (A[i - 1] === B[j - 1] ? 0 : 1.2);
-    const del = cost[at(i - 1, j)]! + 1; // script word not heard
-    const ins = cost[at(i, j - 1)]! + 0.5; // extra word heard (a retake, a filler)
+    const del = cost[at(i - 1, j)]! + 1;
+    const ins = cost[at(i, j - 1)]! + 0.5;
     const best = Math.min(sub, del, ins);
     cost[at(i, j)] = best;
     back[at(i, j)] = best === sub ? 0 : best === del ? 1 : 2;
@@ -37,7 +28,6 @@ export function alignWords(sw: ScriptWord[], heard: HeardWord[], start: number, 
     } else if (i > 0 && (j === 0 || b === 1)) i--;
     else j--;
   }
-  // unmatched words: share the time between the matched neighbours, by length
   for (let i = 0; i < n;) {
     if (matched[i]) { i++; continue; }
     let k = i;
@@ -55,25 +45,12 @@ export function alignWords(sw: ScriptWord[], heard: HeardWord[], start: number, 
   return matched;
 }
 
-/**
- * Script words timed from tokens timed by a voice or an aligner (their own spelling: "3.5" may come back as "35",
- * punctuation dropped): each script word takes the time of the token it matches, and words with no match share
- * the time between their matched neighbours (`start` and `end` bound the passage).
- */
 export function timeScript(script: { w: string }[], tokens: { w: string; start: number; end: number }[], start: number, end: number): { w: string; start: number; end: number }[] {
   const sw: ScriptWord[] = script.map((x) => ({ w: x.w, line: 0 }));
   alignWords(sw, tokens.map((t) => ({ w: t.w, s: t.start, e: t.end })), start, end);
   return sw.map((x) => ({ w: x.w, start: x.s!, end: Math.max(x.e!, x.s!) }));
 }
 
-/**
- * Word edges moved onto the pauses in the audio. `db`: levels of 10 ms frames (audio-io's levels); a pause is a
- * run of at least `min` frames 40 dB under the loudest. A start that falls in a pause or up to 80 ms after it
- * moves to the pause's end (where the sound begins); an end up to 80 ms before a pause or inside it moves to the
- * pause's start (the end of the audio is a pause too). Words stay in order and never overlap. Inside continuous
- * speech nothing moves. Aligners place words on a coarse grid (80 ms for
- * Qwen3), so this halves their error at phrase edges, where cuts and reveals land.
- */
 export function snapToPauses(words: { w: string; start: number; end: number }[], db: Float32Array, min = 4) {
   let peak = -120;
   for (const v of db) peak = Math.max(peak, v);
@@ -85,7 +62,6 @@ export function snapToPauses(words: { w: string; start: number; end: number }[],
     if (j - i >= min || j === db.length) runs.push([i, j]);
     i = j;
   }
-  // (the end of the audio counts as a pause)
   runs.push([db.length, Infinity]);
   const out = words.map((w) => {
     const si = Math.round(w.start * 100), ei = Math.round(w.end * 100);
@@ -96,7 +72,6 @@ export function snapToPauses(words: { w: string; start: number; end: number }[],
     if (re) end = re[0] / 100;
     return { w: w.w, start, end: Math.max(end, start + 0.02) };
   });
-  // (edges stay in order: a word ends by the time the next begins)
   for (let i = 0; i + 1 < out.length; i++) {
     out[i + 1]!.start = Math.max(out[i + 1]!.start, out[i]!.start);
     out[i]!.end = Math.min(out[i]!.end, out[i + 1]!.start);
@@ -105,13 +80,6 @@ export function snapToPauses(words: { w: string; start: number; end: number }[],
   return out;
 }
 
-/**
- * Lines whose aligned times hold few of their words in what a transcriber heard there: a forced aligner places
- * every script word somewhere, so a take that skips, repeats or rewords a line shifts words onto the wrong speech
- * without failing. `words` are the script words with the aligner's times (`line` groups them), `heard` a
- * transcription of the same audio. A line is reported when under `min` of its words are heard within `pad` s of its
- * span (lines of fewer than two words are not judged).
- */
 export function unheardLines(words: { w: string; line: number; start: number; end: number }[], heard: HeardWord[], min = 0.5, pad = 0.4): { line: number; text: string; share: number; start: number; end: number }[] {
   const out: { line: number; text: string; share: number; start: number; end: number }[] = [];
   for (const line of [...new Set(words.map((w) => w.line))]) {

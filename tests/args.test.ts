@@ -10,7 +10,7 @@ test('parses a command strictly', () => {
   expect(p).toMatchObject({ mode: 'still', values: { t: '1,2', only: 'a', json: true } });
   expect(() => parseCommand(['still', '--bogus'])).toThrow(UsageError);
   expect(() => parseCommand(['still', '--t'])).toThrow(UsageError);
-  expect(() => parseCommand(['still', '--n', '3'])).toThrow("Unknown option '--n'"); // a flag of another command
+  expect(() => parseCommand(['still', '--n', '3'])).toThrow("Unknown option '--n'");
   expect(() => parseCommand(['frobnicate'])).toThrow("unknown command 'frobnicate'");
   expect(() => parseCommand(['still', 'extra'])).toThrow(UsageError);
   expect(parseCommand(['diff', 'a.png', 'b.png']).positionals).toEqual(['a.png', 'b.png']);
@@ -64,7 +64,6 @@ test('a scale that does not pack is refused with a frame size that would', () =>
   expect(() => checkScale(1080, 1350, 0.5)).toThrow(UsageError);
   expect(() => checkScale(1080, 1350, 0.5)).toThrow('a 1080x1350 frame would be 540x675');
   expect(() => checkScale(1076, 1078, 0.5)).toThrow('1072x1076 (--size 1072x1076) renders at --scale 0.5');
-  // the size it names does fit
   expect(scaleFits(1072, 1076, 0.5)).toBe(true);
 });
 

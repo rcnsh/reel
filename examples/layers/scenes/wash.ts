@@ -1,4 +1,3 @@
-// A slow vertical wash between two palette colours (the clip's `from` and `to` params).
 import type * as THREE from 'three';
 import { Scene, type Frame, FSPass, LIN, type PaletteKey } from 'reel';
 

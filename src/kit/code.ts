@@ -1,5 +1,3 @@
-// A code block: syntax highlighted by highlight.js in the theme's colours, sized to its box, with lines revealed
-// and highlighted over time.
 import hljs from 'highlight.js/lib/core';
 import bash from 'highlight.js/lib/languages/bash';
 import cpp from 'highlight.js/lib/languages/cpp';
@@ -21,7 +19,6 @@ import { esc, HtmlComponent, safeBox, UNIT, val, type Anim, type ComponentOption
 
 const LANGS = { bash, cpp, css, diff, glsl, go, javascript, json, python, rust, sql, typescript, xml, yaml };
 for (const [name, def] of Object.entries(LANGS)) if (!hljs.getLanguage(name)) hljs.registerLanguage(name, def);
-/** The languages a CodeBlock highlights (and their usual aliases: ts, js, py, sh, html, c, rs, yml). */
 export const CODE_LANGUAGES = Object.keys(LANGS);
 
 export interface CodeBlockOptions extends ComponentOptions {
@@ -30,21 +27,14 @@ export interface CodeBlockOptions extends ComponentOptions {
   lang?: string;
   /** The largest font size in px (default 3.4% of the short side); it shrinks so the longest line and every line fit. */
   size?: number;
-  /** Line numbers (default false). */
   lineNumbers?: boolean;
-  /** Lines (1-based) to highlight, the rest dimmed: a list, or a function of the frame. */
   highlight?: Anim<number[]>;
-  /** How many lines are shown, 0 to the line count (default all): a number, or a function of the frame. */
   reveal?: Anim<number>;
   /** A title bar (a file name), and the panel behind the code (default true). */
   title?: string;
   panel?: boolean;
 }
 
-/**
- * Highlighted HTML split into lines: each line a string of balanced spans, a span open across a line break
- * closed at its end and reopened on the next.
- */
 export function splitHighlighted(html: string): string[] {
   const out: string[] = [], open: string[] = [];
   let cur = '';
@@ -59,12 +49,6 @@ export function splitHighlighted(html: string): string[] {
   return out;
 }
 
-/**
- * A block of code on a panel, highlighted in the theme's colours (keywords in the accent, strings between the
- * accent and fg, comments dimmed). The font shrinks until the code fits the box, in a monospace advance of 0.6 em (IBM Plex
- * Mono), so no line wraps. Classes: `.code`, `.ln` (a line), `.no` (its number), `.on` (a highlighted line),
- * `.hljs-*` (tokens).
- */
 export class CodeBlock extends HtmlComponent {
   private o: CodeBlockOptions;
   readonly lines: string[];

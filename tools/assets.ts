@@ -1,7 +1,3 @@
-// `reel assets`: the generated assets a project declares in assets.json. With a provider's key in the environment
-// it makes the missing ones (and those whose prompt changed), fitted to their size and format and recorded in
-// data/generated-assets.json; without one it lists what each needs, so a person can make the file elsewhere and
-// drop it in. A file reel assets did not make is never replaced.
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
@@ -53,7 +49,6 @@ export async function runAssets(root: string, o: { list?: boolean; force?: boole
   return rows;
 }
 
-/** A generated file at the asset's size (images: cover-cropped) and in its output's format. */
 async function fit(raw: string, a: AssetEntry, out: string) {
   mkdirSync(path.dirname(out), { recursive: true });
   if (a.kind === 'image') {

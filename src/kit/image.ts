@@ -1,5 +1,3 @@
-// An image in a box, drawn in GL from the source file: cover or contain, rounded corners, and a Ken Burns pan and
-// zoom that is a pure function of time (evaluated per sub-frame, so it is smooth and motion blurred).
 import * as THREE from 'three';
 import { FSPass, H, SCALE } from '../engine/gl';
 import { assetPlaceholder, declaredAsset } from '../engine/assets';
@@ -10,32 +8,22 @@ import type { Frame } from '../engine/scene';
 import { clamp, ease } from '../engine/util';
 import { motionAt, safeBox, windowOf, type Box, type ComponentOptions, type Motion } from './common';
 
-/** A framing of the image: zoom (1 = fitted) and a pan from -1 to 1 across the room the zoom leaves. */
 export interface Framing { zoom?: number; x?: number; y?: number }
 
 export interface ImageBoxOptions extends Omit<ComponentOptions, 'css'> {
-  /**
-   * The image, a path in the project (`assets/photo.jpg`). Loaded before the first frame; one that does not load is
-   * an error, unless assets.json declares it: then a labelled placeholder of its declared size stands in.
-   */
   src: string;
-  /** 'cover' (default) fills the box and crops; 'contain' shows all of it. */
   fit?: 'cover' | 'contain';
-  /** Corner radius in px (default 0). */
   radius?: number;
-  /** A pan and zoom over the component's window: from one framing to another (true: a slow push in). */
   kenBurns?: boolean | { from?: Framing; to?: Framing };
-  /** Alt text: the image's name in `reel check` findings. */
   alt?: string;
 }
 
 let pass: FSPass | null = null;
 function picturePass() {
-  pass ??= new FSPass(/* glsl */ `
+  pass ??= new FSPass(`
     uniform sampler2D tex, tex2; uniform vec4 box; uniform vec2 extent, centre; uniform float radius, opacity, frameH, mixw;
     uniform int alphaMode;
     float encode(float x) { return x <= 0.0031308 ? x * 12.92 : 1.055 * pow(x, 1.0 / 2.4) - 0.055; }
-    // a texel of the picture; stacked alpha: colour in the top (1) or left (2) half, its matte in the other
     vec4 pick(sampler2D t, vec2 uv) {
       if (alphaMode == 0) return texture(t, uv);
       vec2 c = alphaMode == 1 ? vec2(uv.x, uv.y * 0.5) : vec2(uv.x * 0.5, uv.y);
@@ -46,9 +34,9 @@ function picturePass() {
       vec2 p = vec2(FRAG_PX.x, frameH - FRAG_PX.y), q = (p - box.xy) / box.zw;
       vec2 d = abs(p - box.xy - box.zw * 0.5) - (box.zw * 0.5 - radius);
       float sd = length(max(d, 0.0)) + min(max(d.x, d.y), 0.0) - radius;
-      float m = clamp(0.5 - sd * PX_SCALE, 0.0, 1.0);   // the box with rounded corners, antialiased over a physical px
+      float m = clamp(0.5 - sd * PX_SCALE, 0.0, 1.0);
       if (m <= 0.0) discard;
-      vec2 uv = centre + (q - 0.5) * extent;             // the image's uv, row 0 at the top
+      vec2 uv = centre + (q - 0.5) * extent;
       if (uv.x < 0.0 || uv.y < 0.0 || uv.x > 1.0 || uv.y > 1.0) discard;
       vec4 c = pick(tex, uv);
       if (mixw > 0.0) c = mix(c, pick(tex2, uv), mixw);
@@ -62,7 +50,6 @@ function picturePass() {
   return pass;
 }
 
-/** What drawPicture draws: a picture of `size` (its own px) fitted to `box`, at a framing, through a motion. */
 export interface Picture {
   tex: THREE.Texture;
   /** A second picture mixed in by `mix` (a video's next frame). */
@@ -86,7 +73,6 @@ export function drawPicture(renderer: THREE.WebGLRenderer, out: THREE.WebGLRende
   const m = motionAt(motion, f.lt, w0, w1);
   if (!m) return;
   const b = pic.box, [iw, ih] = pic.size, fr = pic.framing;
-  // the share of the image across the box: cover crops one axis, contain leaves room on one (then zoom crops)
   const s = pic.fit === 'contain' ? Math.min(b.w / iw, b.h / ih) : Math.max(b.w / iw, b.h / ih);
   const ex = b.w / (iw * s) / fr.zoom, ey = b.h / (ih * s) / fr.zoom;
   const cx = 0.5 + fr.x * Math.max(0, (1 - ex) / 2), cy = 0.5 + fr.y * Math.max(0, (1 - ey) / 2);
@@ -102,7 +88,6 @@ export function drawPicture(renderer: THREE.WebGLRenderer, out: THREE.WebGLRende
   p.u.opacity!.value = m.opacity * opacity;
   p.render(renderer, out);
   if (reporting()) {
-    // (contain: the image's own rectangle inside the box)
     const vw = Math.min(b.w, iw * s * fr.zoom), vh = Math.min(b.h, ih * s * fr.zoom);
     report({ kind: 'image', x: x + (b.w - vw) / 2, y: y + (b.h - vh) / 2, w: vw, h: vh, alpha: m.opacity * opacity, label: pic.label });
   }
@@ -136,7 +121,6 @@ export function svgSize(text: string): [number, number] {
   return w > 0 && h > 0 ? [w, h] : [300, 150];
 }
 
-/** Linear floats as half-float bits for a HalfFloatType texture. */
 function halfFloats(f: Float32Array): Uint16Array {
   const F16 = (globalThis as { Float16Array?: new (a: Float32Array) => { buffer: ArrayBuffer } }).Float16Array;
   if (F16) return new Uint16Array(new F16(f).buffer);
@@ -145,18 +129,12 @@ function halfFloats(f: Float32Array): Uint16Array {
   return o;
 }
 
-/**
- * An image fitted to a box. Make it in a scene's field; it loads before the first frame. Draw it with
- * `image.draw(renderer, out, f)`.
- */
 export class ImageBox {
   readonly box: Box;
-  /** `at` in clip seconds (undefined: the whole clip). */
   private at: [number, number] | undefined;
   private o: ImageBoxOptions;
   private tex: THREE.Texture | null = null;
   private size: [number, number] = [1, 1];
-  /** The asset id when this is a placeholder for a missing generated asset. */
   missing: string | null = null;
 
   constructor(o: ImageBoxOptions) {
@@ -184,12 +162,6 @@ export class ImageBox {
     this.size = [w, h];
   }
 
-  /**
-   * Decode the file in the colours it was made in: through an ImageBitmap, which converts an image with a colour
-   * profile (Display P3, Adobe RGB) to sRGB (an <img> uploaded to GL keeps its numbers and shows them as sRGB); a
-   * 16-bit PNG by reel's own decoder into a half-float texture (the browser keeps 8 bits); an SVG rasterised at the
-   * size it is shown, times the output scale and the furthest zoom.
-   */
   private async load() {
     const res = await fetch(this.o.src);
     if (!res.ok) throw new Error(`${res.status} ${res.statusText}`);
@@ -216,7 +188,6 @@ export class ImageBox {
     const img = new Image();
     const url = URL.createObjectURL(new Blob([text], { type: 'image/svg+xml' }));
     try { img.src = url; await img.decode(); } finally { URL.revokeObjectURL(url); }
-    // the image's size on screen at its furthest zoom, in physical px
     const b = this.box, kb = this.o.kenBurns, zoom = Math.max(1, ...(kb === true ? [1.12] : kb ? [kb.from?.zoom ?? 1, kb.to?.zoom ?? 1] : [1]));
     const s = (this.o.fit === 'contain' ? Math.min(b.w / iw, b.h / ih) : Math.max(b.w / iw, b.h / ih)) * zoom * SCALE;
     const k = Math.min(s, 8192 / Math.max(iw, ih));

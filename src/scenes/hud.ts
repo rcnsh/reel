@@ -1,8 +1,3 @@
-// The HUD: crop marks in the corners and a caption bottom right, drawn over the tracks below. An ordinary scene
-// for an upper track: a theme places it over the whole video (its `overlay`), and a project places it as clips
-// of its own, `{ id: 'fig1', scene: () => import('reel/scenes/hud'), start, end, track: 2, params: { caption: { fig: 'FIG. 1', text: '…' } } }`.
-// Params: HudParams (src/themes.ts). Colours come from the theme: the dark colour on a light picture, the
-// light colour on a dark one.
 import type * as THREE from 'three';
 import { Scene, type Frame } from '../engine/scene';
 import { Layer2D, W, H, clearRT } from '../engine/gl';
@@ -16,7 +11,6 @@ const q = (x: number) => Math.round(x * 1000) / 1000;
 
 export default class Hud extends Scene {
   layer = new Layer2D();
-  /** What the layer holds: it is drawn again only when that changes (the scene runs once per sub-frame). */
   private drawn = '';
 
   render(f: Frame, out: THREE.WebGLRenderTarget) {
@@ -24,15 +18,12 @@ export default class Hud extends Scene {
     const p = this.ctx.params as HudParams;
     clearRT(renderer, out, [0, 0, 0], 0);
     const fly = p.fly ?? 0.8;
-    // (quantised, and the layer drawn from the quantised values: what it holds depends on t alone)
     const marks = !p.marks ? 0 : fly <= 0 ? 1 : q(clamp(Math.min(f.t - f.start, f.end - f.t) / fly));
     const cap = p.caption;
     const capA = cap ? q(Math.min(smoothstep(f.start, f.start + 0.5, f.t), 1 - smoothstep(f.end - 0.6, f.end, f.t))) : 0;
-    // reveal the letters left to right
     const chars = cap ? Math.floor(cap.text.length * prog(f.t, f.start, f.start + 0.8)) : 0;
     if (marks <= 0 && capA <= 0) return;
     const key = `${marks}|${capA}|${chars}`;
-    // (the caption sits in the margin by design, and its figure label is small on purpose)
     if (reporting() && cap && capA > 0) this.reportCaption(cap, capA, chars);
     if (key !== this.drawn) {
       this.drawn = key;
@@ -45,7 +36,6 @@ export default class Hud extends Scene {
     comp.draw(renderer, this.layer.texture, out);
   }
 
-  /** Corner marks; as `k` drops they fly out along the diagonals and past the edges. */
   private cropMarks(c: CanvasRenderingContext2D, k: number, light: boolean) {
     const e = ease.inOutCubic(clamp(k));
     c.save();
@@ -83,7 +73,6 @@ export default class Hud extends Scene {
     c.textBaseline = 'alphabetic';
     c.font = font(F.serif(400, true), 26);
     c.fillStyle = light ? rgba(TONE.dark, 0.9) : rgba(TONE.light, 0.85);
-    // a soft halo keeps the caption legible over a busy picture (none on a light one: it reads as a pale patch)
     c.shadowColor = rgba(TONE.dark, 0.85);
     c.shadowBlur = light ? 0 : 10;
     const full = c.measureText(cap.text).width;

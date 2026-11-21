@@ -33,7 +33,7 @@ import wave
 import numpy as np
 
 SR = 16000
-WINDOW = float(os.environ.get("WINDOW", 60))  # (measured on a 220 s take: 60 s windows hold, 150 s ones drift by seconds)
+WINDOW = float(os.environ.get("WINDOW", 60))
 LANGUAGE = os.environ.get("LANGUAGE", "English")
 
 
@@ -45,14 +45,10 @@ def load(path):
 
 
 def align(fa, audio, text):
-    # (the aligner keeps one token per word that has a letter or a digit)
     words = [w for w in text.split() if any(c.isalnum() for c in w)]
     dur = len(audio) / SR
     if dur <= WINDOW:
         return [{"w": x.text, "start": x.start_time, "end": x.end_time} for x in fa.align(audio, " ".join(words), LANGUAGE)]
-    # long audio: overlapping windows. Each starts half a second before the last CONTEXT words placed (aligned
-    # again as context, not kept), is given about as many new words as its length holds at the take's average
-    # rate (OVER times that), and keeps those ending more than EDGE seconds before its end
     CONTEXT, EDGE, OVER = 5, 8.0, 1.3
     out, t0, i = [], 0.0, 0
     rate = len(words) / dur

@@ -1,5 +1,3 @@
-// Narration: the script parser, the timing files, settings and cache keys, word refinement, the assembly of the
-// track, and the hosted voices' requests and responses (against fixtures: no request leaves the machine).
 import { afterAll, describe, expect, test } from 'bun:test';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -73,13 +71,12 @@ describe('words', () => {
   });
 
   test('edges move onto pauses; continuous speech is left alone; words never overlap', () => {
-    // 1 s of 10 ms frames: sound 0-0.3, pause 0.3-0.5, sound 0.5-0.9, a short dip at 0.7 (a stop consonant), quiet after
     const db = new Float32Array(100).map((_, i) => (i < 30 || (i >= 50 && i < 90 && i !== 70) ? -10 : -80));
     const out = snapToPauses([{ w: 'a', start: 0, end: 0.24 }, { w: 'b', start: 0.42, end: 0.7 }, { w: 'c', start: 0.7, end: 0.95 }], db);
-    expect(out[0]!.end).toBe(0.3); // moved to where the pause begins
-    expect(out[1]!.start).toBe(0.5); // a start in the pause moves to where sound begins
-    expect(out[1]!.end).toBe(0.7); // the 10 ms dip is not a pause
-    expect(out[2]!.end).toBe(0.9); // the end of a word before the trailing silence
+    expect(out[0]!.end).toBe(0.3);
+    expect(out[1]!.start).toBe(0.5);
+    expect(out[1]!.end).toBe(0.7);
+    expect(out[2]!.end).toBe(0.9);
     const o2 = snapToPauses([{ w: 'x', start: 0.1, end: 0.6 }, { w: 'y', start: 0.5, end: 0.8 }], db);
     expect(o2[0]!.end).toBeLessThanOrEqual(o2[1]!.start);
   });
@@ -100,7 +97,7 @@ describe('assembly', () => {
   test('a part that already has more silence than asked gets none added', () => {
     const a = assemble([part(1, 0.8, 0.9)], { lead: 0.2, hold: 1, tail: 0 });
     expect(a.words[0]![0]!.start).toBeCloseTo(0.8, 4);
-    expect(a.pcm[0]).toBe(0); // faded in where the part starts
+    expect(a.pcm[0]).toBe(0);
   });
 });
 
@@ -160,12 +157,11 @@ describe('voices', () => {
     let sp: Speech | undefined;
     await fish.create('ref1', { env: { FISH_API_KEY: 'fk' }, fetch: f }).synth([{ text: 'Hello.', speed: 1 }], tempDir('reel-fish-'), async (_, x) => { sp = x; });
     expect(auth).toBe('Bearer fk');
-    expect(sp!.words).toBeUndefined(); // timed by the forced aligner
+    expect(sp!.words).toBeUndefined();
   });
 });
 
 describe('hosted requests retry', () => {
-  /** A fetch answering from a list of answers (each makes a Response or throws; the last repeats), counting its calls. */
   const scripted = (answers: (() => Response)[]) => {
     let n = 0;
     const f = (async () => answers[Math.min(n++, answers.length - 1)]!()) as unknown as typeof fetch;
@@ -217,7 +213,6 @@ describe('hosted requests retry', () => {
 });
 
 describe('narrate: the plate cache with a hosted voice', () => {
-  // A fake ElevenLabs: each word of the text becomes a 0.25 s tone, 0.1 s apart, with its characters' times.
   const voiced: string[] = [];
   let failOn = -1, throttleOnce = false;
   const speech = (text: string) => {

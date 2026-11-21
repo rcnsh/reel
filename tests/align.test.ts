@@ -25,7 +25,7 @@ test('a filler heard and a word misheard: neighbours keep their times, the mishe
   const m = alignWords(sw, [{ w: 'one', s: 1, e: 1.2 }, { w: 'um', s: 1.3, e: 1.4 }, { w: 'too', s: 1.5, e: 1.8 }, { w: 'three', s: 2, e: 2.3 }], 0.6, 5);
   expect(m).toEqual([true, false, true]);
   expect(sw[1]!.s).toBe(1.2);
-  expect(sw[1]!.e).toBeCloseTo(1.2 + 0.8 * 0.92, 9); // the whole gap to 'three', 8% left as a pause
+  expect(sw[1]!.e).toBeCloseTo(1.2 + 0.8 * 0.92, 9);
   expect(sw[2]!.s).toBe(2);
 });
 
@@ -33,12 +33,11 @@ test('nothing heard: the words share the span by length', () => {
   const sw = script('a bbbb');
   alignWords(sw, [], 1, 2);
   expect(sw[0]!.s).toBe(1);
-  expect(sw[1]!.s).toBeCloseTo(1 + 2.5 / 8, 9); // lengths + 1.5: 2.5 and 5.5
+  expect(sw[1]!.s).toBeCloseTo(1 + 2.5 / 8, 9);
   expect(sw[1]!.e).toBeCloseTo(sw[1]!.s! + (5.5 / 8) * 0.92, 9);
 });
 
 test('unheardLines finds a line the aligner placed on other speech (a skipped line)', () => {
-  // the take says line 0, then line 2 twice; the aligner put line 1 on the first reading of line 2
   const at = (text: string, line: number, t0: number) => text.split(' ').map((w, i) => ({ w, line, start: t0 + i * 0.3, end: t0 + i * 0.3 + 0.25 }));
   const words = [...at('The river runs north', 0, 0), ...at('It carries snow down', 1, 2), ...at('Farmers wait for floods', 2, 4)];
   const heard = [...at('the river runs north', 0, 0), ...at('farmers wait for floods', 0, 2), ...at('farmers wait for floods', 0, 4)].map((x) => ({ w: x.w, s: x.start, e: x.end }));
@@ -49,7 +48,6 @@ test('unheardLines finds a line the aligner placed on other speech (a skipped li
 
 test('splitPlates cuts a take at the quietest point between plates and re-times each part from its start', () => {
   const plates = parseScript('# a\nOne two.\n# b\nThree.');
-  // 3 s: speech 0.2-0.8 and 1.8-2.4, quiet noise between, true silence only at 1.25-1.35
   const pcm = new Float32Array(3 * SR).map((_, n) => {
     const t = n / SR;
     if ((t >= 0.2 && t < 0.8) || (t >= 1.8 && t < 2.4)) return 0.5 * Math.sin(n / 10);
@@ -67,9 +65,6 @@ test('splitPlates cuts a take at the quietest point between plates and re-times 
   expect(b!.words[0]!.end).toBeCloseTo(2.4 - cut, 9);
 });
 
-// forced_align.py's long-audio windows, against a fake aligner that knows where every word truly is (the samples
-// hold their own time, so it can tell which part of the take it was given): each word comes back once, in order, at
-// its true time. Needs uv (numpy, no model); skipped without it.
 const uv = Bun.which('uv');
 test.skipIf(!uv)('forced_align windows a long take: every word once, in order, at its time', async () => {
   const py = `

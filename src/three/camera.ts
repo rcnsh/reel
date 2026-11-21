@@ -1,6 +1,3 @@
-// Camera rigs: where a camera is and what it looks at, as pure functions of time. A rig is `(t) => CameraPose`;
-// call it with the clip's time (`f.lt`) in render(), which runs per motion-blur sub-frame, so a moving camera blurs
-// correctly. Nothing here holds state or reads a clock. Pure (no three.js), so it is unit-tested.
 import { clamp, ease as easings, lerp } from '../engine/util';
 
 export type Vec3 = [number, number, number];
@@ -13,10 +10,8 @@ export type Vec3 = [number, number, number];
  */
 export interface CameraPose { position: Vec3; target: Vec3; fov?: number; roll?: number; focus?: number; fstop?: number; aperture?: number }
 
-/** A camera rig: the pose at time t (seconds, usually the clip's `f.lt`). */
 export type Rig = (t: number) => CameraPose;
 
-/** An easing: one of `ease`'s names or a function of 0..1. */
 export type Easing = keyof typeof easings | ((x: number) => number);
 
 /** The progress 0..1 of t through `at` ([from, to] seconds; default [0, 1]), eased (default inOutCubic). */
@@ -35,10 +30,6 @@ const DEG = Math.PI / 180;
 interface Common { at?: [number, number]; ease?: Easing; fov?: number; focus?: number; fstop?: number; aperture?: number; roll?: number }
 const lens = (o: Common) => ({ ...(o.fov !== undefined ? { fov: o.fov } : {}), ...(o.roll !== undefined ? { roll: o.roll } : {}), ...(o.focus !== undefined ? { focus: o.focus } : {}), ...(o.fstop !== undefined ? { fstop: o.fstop } : {}), ...(o.aperture !== undefined ? { aperture: o.aperture } : {}) });
 
-/**
- * Circle the target: from angle `from` to `to` (degrees about the vertical axis, 0 looking down -z from +z) at
- * `radius`, `height` above the target (a number, or [from, to] to rise or fall as it goes), over `at`.
- */
 export function orbit(o: Common & { target?: Vec3; radius: number | [number, number]; height?: number | [number, number]; from?: number; to?: number }): Rig {
   const target = o.target ?? [0, 0, 0];
   return (t) => {
@@ -58,7 +49,6 @@ export function dolly(o: Common & { from: Vec3; to: Vec3; target?: Vec3 }): Rig 
   };
 }
 
-/** Rise (or sink) from `base` by `rise` units, looking at `target`, which can itself rise by `targetRise`. */
 export function crane(o: Common & { base: Vec3; rise: number; target: Vec3; targetRise?: number }): Rig {
   return (t) => {
     const k = progress(t, o.at, o.ease ?? 'inOutCubic');
@@ -86,7 +76,6 @@ export function lookAt(rig: Rig, keys: [number, Vec3][], e: Easing = 'inOutCubic
   };
 }
 
-/** A point on a centripetal Catmull–Rom segment p1→p2 (p0, p3 its neighbours) at u in 0..1: no cusps, no overshoot loops. */
 function catmull(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, u: number): Vec3 {
   const kt = (a: Vec3, b: Vec3) => Math.max(1e-6, Math.sqrt(len(sub(b, a))));
   const t0 = 0, t1 = t0 + kt(p0, p1), t2 = t1 + kt(p1, p2), t3 = t2 + kt(p2, p3);
@@ -104,7 +93,6 @@ function catmull(p0: Vec3, p1: Vec3, p2: Vec3, p3: Vec3, u: number): Vec3 {
 export function smoothPath(points: Vec3[], closed = false) {
   if (points.length < 2) throw new Error('smoothPath: give at least two points');
   const n = points.length, P = (i: number) => (closed ? points[((i % n) + n) % n]! : points[clamp(i, 0, n - 1)]!);
-  // ends of an open path: a phantom point mirrored past each end keeps the curve straight there
   const ext = (i: number): Vec3 => {
     if (closed || (i >= 0 && i < n)) return P(i);
     return i < 0 ? sub(scale(points[0]!, 2), points[1]!) : sub(scale(points[n - 1]!, 2), points[n - 2]!);
@@ -125,7 +113,6 @@ export function smoothPath(points: Vec3[], closed = false) {
       let lo = 0, hi = table.length - 1;
       while (hi - lo > 1) { const m = (lo + hi) >> 1; if (table[m]!.s <= d) lo = m; else hi = m; }
       const a = table[lo]!, b = table[hi]!, k = b.s > a.s ? (d - a.s) / (b.s - a.s) : 0;
-      // (between two table entries of one segment, u is interpolated; across a segment boundary b starts at u=1/STEPS)
       const ua = a.seg === b.seg ? a.u : 0;
       return point(b.seg, lerp(ua, b.u, k));
     },
@@ -149,11 +136,6 @@ export function path(o: Common & { points: Vec3[]; target?: Vec3; lookAhead?: nu
   };
 }
 
-/**
- * Keyframed shots: at each key's time the camera is at that pose; between keys its position follows a smooth
- * curve through the keys' positions, its target, field of view and focus move with the same eased progress.
- * Before the first key and after the last it holds.
- */
 export function shots(keys: ({ t: number } & CameraPose)[], e: Easing = 'inOutCubic'): Rig {
   const ks = [...keys].sort((a, b) => a.t - b.t);
   if (!ks.length) throw new Error('shots: give at least one key');
@@ -173,9 +155,7 @@ export function shots(keys: ({ t: number } & CameraPose)[], e: Easing = 'inOutCu
   };
 }
 
-/** Vertical field of view (degrees) of a lens of `mm` focal length on a sensor `sensor` mm tall (default 24: full frame). */
 export const fovOf = (mm: number, sensor = 24) => (2 * Math.atan(sensor / (2 * mm))) / DEG;
-/** Focal length (mm) of a vertical field of view in degrees on a sensor `sensor` mm tall (default 24). */
 export const focalOf = (fov: number, sensor = 24) => sensor / (2 * Math.tan((fov * DEG) / 2));
 /** The lens radius in world units (metres) of a lens of `mm` focal length at f-number `fstop`. */
 export const apertureOf = (mm: number, fstop: number, unitsPerMetre = 1) => (mm / fstop / 2 / 1000) * unitsPerMetre;

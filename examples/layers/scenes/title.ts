@@ -1,5 +1,3 @@
-// A title on an upper track: the target is cleared to transparent, so the track below shows through. The card
-// is the kit's TitleCard, laid out from the frame, rising in as it fades.
 import type * as THREE from 'three';
 import { Scene, type Frame, TitleCard, clearRT } from 'reel';
 

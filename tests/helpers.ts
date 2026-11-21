@@ -1,4 +1,3 @@
-// Shared by the tests: whether a Chrome is there to render with, and scratch copies of the examples.
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { PNG } from 'pngjs';
 import { tmpdir } from 'node:os';
@@ -8,13 +7,10 @@ import { hasChrome as findChrome } from '../cli/chrome';
 export const ENGINE = path.resolve(import.meta.dir, '..');
 export const REEL = path.join(ENGINE, 'cli/reel.ts');
 
-/** A Chrome the renders can use: $CHROME_PATH, else the pinned build (`reel chrome install`). Tests that render skip without one. */
 export const hasChrome = findChrome();
 
-/** Whether uv is there to run the Python tools (a narrated `reel init` voices its script with Kokoro). Tests that need it skip without it, as CI does. */
 export const hasUv = !!Bun.which('uv');
 
-/** A copy of an example in a fresh temp folder (its renders and warm renderer stay out of the repo). */
 export function scratchCopy(example: string) {
   const dir = mkdtempSync(path.join(tmpdir(), `reel-test-${example}-`));
   cpSync(path.join(ENGINE, 'examples', example), dir, { recursive: true, filter: (f) => !f.includes(`${path.sep}out`) });
@@ -22,7 +18,6 @@ export function scratchCopy(example: string) {
 }
 
 const scratch: string[] = [];
-/** A fresh temp folder; a test file that makes them calls `afterAll(removeTempDirs)`. */
 export function tempDir(prefix: string) {
   const d = mkdtempSync(path.join(tmpdir(), prefix));
   scratch.push(d);
@@ -30,14 +25,12 @@ export function tempDir(prefix: string) {
 }
 export function removeTempDirs() { for (const d of scratch.splice(0)) rmSync(d, { recursive: true, force: true }); }
 
-/** Run the CLI; returns its exit code, stdout and stderr. */
 export async function reel(args: string[], cwd = ENGINE, env: Record<string, string> = {}) {
   const p = Bun.spawn(['bun', REEL, ...args], { cwd, stdout: 'pipe', stderr: 'pipe', env: { ...process.env, ...env } });
   const [out, err, code] = await Promise.all([new Response(p.stdout).text(), new Response(p.stderr).text(), p.exited]);
   return { code, out, err, json: () => JSON.parse(out) };
 }
 
-/** A project written from `files` (path → contents) into a fresh temp folder. */
 export function fixture(name: string, files: Record<string, string>) {
   const dir = mkdtempSync(path.join(tmpdir(), `reel-test-${name}-`));
   for (const [f, text] of Object.entries(files)) {
@@ -47,7 +40,6 @@ export function fixture(name: string, files: Record<string, string>) {
   return { dir, cleanup: () => rmSync(dir, { recursive: true, force: true }) };
 }
 
-/** A one-clip project whose Canvas2D line runs off both sides of the frame (check's offFrame error). */
 export const OFF_FRAME = {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export default defineVideo({ size: [1280, 720], fps: 30, theme: 'print', timeline: () => [{ id: 'wide', scene: () => import('./scenes/wide'), start: 0, end: 1 }] });
@@ -69,10 +61,6 @@ export default class Wide extends Scene {
 `,
 };
 
-/**
- * A one-clip project driven by props: the clip runs `seconds` long and fills the frame with `color`, both defaults
- * of the config's `props` that `--props` replaces (`note` is read by nothing: room for large props).
- */
 export const PROPS = {
   'reel.config.ts': `import { defineVideo } from 'reel/config';
 export interface Props { color: string; seconds: number; note: string }
@@ -93,7 +81,6 @@ export default class Swatch extends Scene {
 `,
 };
 
-/** The mean colour of a PNG's middle quarter, 0-255 per channel. */
 export function middleColor(file: string): [number, number, number] {
   const png = PNG.sync.read(readFileSync(file));
   const sum = [0, 0, 0];

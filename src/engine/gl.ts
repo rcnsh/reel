@@ -1,48 +1,25 @@
-// GL plumbing on top of three.js: HDR render targets, fullscreen shader passes,
-// a texture compositor and Canvas2D layers uploaded as textures.
 import * as THREE from 'three';
 import { GLSL_COMMON } from './glsl/common';
 import { W, H, FPS, SCALE, ALPHA } from './format';
 import { LIN } from './palette';
 
 export { W, H, FPS, SCALE, ALPHA };
-/** Physical (output) size: the logical frame times SCALE (1920x1080 at `?scale=2` → 3840x2160). */
 export const PW = W * SCALE;
 export const PH = H * SCALE;
 
-/**
- * Supersampling shared across motion-blur sub-frames. Shaders that supersample internally with the
- * 4 rotated-grid taps (`rgss(k)`) take only tap `ssTap` when it is >= 0: the engine cycles the taps
- * over a frame's sub-frames (always a multiple of 4 of them), which averages to the same image for a
- * quarter of the shading cost. -1 (preview, single-sample stills): take all four.
- * Usage: `uniforms: { ssTap: SS_TAP }` and `${SS_TAP_GLSL}` in the shader, then
- * `for (int k = ssK0(); k < ssK1(); k++) col += shade(px + rgss(k)); col *= ssWeight();`
- */
 export const SS_TAP: THREE.IUniform<number> = { value: -1 };
-/** GLSL: the ssTap uniform, and loop bounds and weight for the taps this sub-frame takes. */
 export const SS_TAP_GLSL = /* glsl */ `
 uniform int ssTap;
 int ssK0() { return ssTap < 0 ? 0 : ssTap; }
 int ssK1() { return ssTap < 0 ? 4 : ssTap + 1; }
 float ssWeight() { return ssTap < 0 ? 0.25 : 1.0; }`;
 
-/**
- * The motion-blur sub-frame being drawn: its index in the frame's sampling order (0, 1, 2 …), or -1 in a render of
- * one sample (previews, stills, check). Jitter that should average out across a frame's sub-frames (sub-pixel
- * anti-aliasing, a lens aperture, an area light) is indexed by it with a low-discrepancy sequence, so every
- * prefix of the sub-frames, which is what adaptive sampling stops at, is evenly spread. It says nothing about time:
- * a sub-frame's time is `f.t`.
- */
 export const SUB_FRAME = { index: -1 };
 
 const RT_SCALE = new WeakMap<THREE.WebGLRenderTarget, number>();
 /** Physical px per logical px of a render target made by makeRT (1 for other targets; SCALE for the canvas). */
 export function rtScale(rt: THREE.WebGLRenderTarget | null) { return rt ? RT_SCALE.get(rt) ?? 1 : SCALE; }
 
-/**
- * HDR render target. `w`,`h` are LOGICAL px: the target is allocated at w*SCALE x h*SCALE
- * (pass `pxScale: 1` for data-sized targets whose resolution must not follow the output scale).
- */
 export function makeRT(w = W, h = H, opts: Partial<THREE.RenderTargetOptions> & { pxScale?: number } = {}) {
   const { pxScale = SCALE, ...o } = opts;
   const rt = new THREE.WebGLRenderTarget(Math.max(1, Math.round(w * pxScale)), Math.max(1, Math.round(h * pxScale)), {
@@ -73,11 +50,6 @@ function fullscreenGeometry() {
   return fsGeom;
 }
 
-/**
- * A fullscreen fragment-shader pass. Write `frag` as the body of a GLSL ES 3.0 shader that
- * declares its own uniforms and `void main()` writing `fragColor`. `vUv` (0..1) is provided,
- * and GLSL_COMMON (noise, hashes, sdf, palette, hatch helpers) is prepended.
- */
 export class FSPass {
   mat: THREE.RawShaderMaterial;
   mesh: THREE.Mesh;
@@ -109,7 +81,6 @@ export class FSPass {
 
 export type BlendMode = 'normal' | 'add' | 'screen' | 'multiply' | 'max' | 'replace';
 
-/** Draws a texture over a target with a blend mode, opacity, tint and optional UV transform. */
 export class Compositor {
   private passes = new Map<BlendMode, FSPass>();
   private frag = /* glsl */ `
@@ -139,10 +110,6 @@ export class Compositor {
     }
     return p;
   }
-  /**
-   * uvScale >1 zooms out (texture appears smaller), offset shifts in UV units.
-   * For 'multiply' the texture should be a white-background image (premult off).
-   */
   draw(renderer: THREE.WebGLRenderer, tex: THREE.Texture, target: THREE.WebGLRenderTarget | null, o: { mode?: BlendMode; opacity?: number; tint?: [number, number, number]; scale?: [number, number]; offset?: [number, number]; premult?: boolean } = {}) {
     const p = this.get(o.mode ?? 'normal');
     p.u.tex!.value = tex;
@@ -154,12 +121,6 @@ export class Compositor {
   }
 }
 
-/**
- * Make a 2D context draw in logical px on a backing store `s` times larger: a base transform of
- * `s`, and setTransform/resetTransform/getTransform, shadowBlur/shadowOffsetX/Y and `filter` px
- * lengths (which ignore the CTM) patched to work in logical px. Text, lineWidth, letterSpacing and
- * dashes follow the CTM by themselves. getImageData/putImageData still work in backing-store px.
- */
 export function scaleContext2D(c: CanvasRenderingContext2D, s: number) {
   if (s === 1) return c;
   const proto = CanvasRenderingContext2D.prototype;
@@ -186,28 +147,14 @@ export function scaleContext2D(c: CanvasRenderingContext2D, s: number) {
   return c;
 }
 
-/**
- * A frame-sized (logical px) Canvas2D surface uploaded as an sRGB texture (decoded to linear when sampled).
- * Draw in CSS pixels with origin top-left. Call `upload()` after drawing each frame.
- * The backing canvas is SCALE times larger (`canvas.width` = w*SCALE); the context is pre-scaled
- * (see scaleContext2D), so drawing code works in logical px at every output scale.
- */
 let cpuCanvases = false;
-/** Set by the engine from its GL renderer, before any scene is made: whether 2D canvases stay on the CPU. */
 export function setCpuCanvases(on: boolean) { cpuCanvases = on; }
-/**
- * The 2D context of a canvas that is drawn again and uploaded as a texture every frame. Under a software GL
- * (SwiftShader) the canvas is kept on the CPU: a GPU-backed one there hands texImage2D the picture it had before
- * its latest drawing, so a frame showed what the page rendered before it, and a frame rendered out of order
- * (`reel check`, adaptive sampling) came out different.
- */
 export function context2D(canvas: HTMLCanvasElement) { return canvas.getContext('2d', cpuCanvases ? { willReadFrequently: true } : undefined)!; }
 
 export class Layer2D {
   canvas: HTMLCanvasElement;
   ctx: CanvasRenderingContext2D;
   texture: THREE.CanvasTexture;
-  /** `scale`: backing px per drawing px (default SCALE; pass 1 for a deliberately low-res layer, e.g. a soft glow). */
   constructor(public w = W, public h = H, scale = SCALE) {
     this.canvas = document.createElement('canvas');
     this.canvas.width = Math.round(w * scale);
@@ -232,10 +179,6 @@ export class Layer2D {
   upload() { this.texture.needsUpdate = true; return this.texture; }
 }
 
-/**
- * Clear a render target to a linear colour. In a transparent render (ALPHA) an opaque clear to the theme's `bg` is
- * a clear to transparent: the background is what a transparent video leaves out.
- */
 export function clearRT(renderer: THREE.WebGLRenderer, rt: THREE.WebGLRenderTarget | null, rgb: [number, number, number] = [0, 0, 0], a = 1) {
   if (ALPHA && a === 1 && isBg(rgb)) { rgb = [0, 0, 0]; a = 0; }
   const prev = renderer.getClearColor(new THREE.Color()).clone();
@@ -246,7 +189,6 @@ export function clearRT(renderer: THREE.WebGLRenderer, rt: THREE.WebGLRenderTarg
   renderer.setClearColor(prev, prevA);
 }
 
-/** Whether a linear colour is the theme's background (what a transparent render leaves out). */
 export function isBg(rgb: ArrayLike<number>) {
   const bg = LIN.bg;
   return Math.abs(rgb[0]! - bg[0]) < 1e-6 && Math.abs(rgb[1]! - bg[1]) < 1e-6 && Math.abs(rgb[2]! - bg[2]) < 1e-6;

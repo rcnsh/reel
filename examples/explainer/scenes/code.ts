@@ -1,4 +1,3 @@
-// A scene's source, revealed line by line, then its render method highlighted.
 import type * as THREE from 'three';
 import { Scene, type Frame, CodeBlock, clearRT, LIN, W, H } from 'reel';
 import { BOTTOM, TOP } from './_script';
